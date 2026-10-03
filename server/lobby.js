@@ -61,10 +61,10 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout, checkFreePicks } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
-import { getData as defaultGetData, getChess, lookup } from './data.js';
+import { getData as defaultGetData, getChess, getBond, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
 // TEMPORARY debug room (2026-10-03): env-gated, remove with server/debugRoom.js (see its header).
-import { debugRoomSpec } from './debugRoom.js';
+import { debugRoomSpec, debugBondChess } from './debugRoom.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -346,34 +346,54 @@ export class Lobby {
 
   /**
    * TEMPORARY debug room (2026-10-03, user verification of the 自选干员 battle fix; see server/debugRoom.js): create
-   * (or reuse) a room with a FIXED code whose matches hand every human the debug chess at round 1. Coop mode so the
-   * player can join it by code from the lobby. Nothing here runs unless `SP_DEBUG_ROOM` is set.
-   * @returns {{ ok: true, code: string, mode: string, difficulty: string, grants: string[], reused: boolean } | { error: string }}
+   * (or reuse) a room with a FIXED code whose matches hand every human the debug chess at round 1 and start their
+   * first prep with the requested 调度中心 level / bond layers. Coop mode so the player can join it by code from the
+   * lobby. `spec.bondMembers` is resolved here into real chess ids (data/chess.json `bonds`) and appended to
+   * `debugGrants`, so those pieces take the one existing round-1 grant path. Nothing here runs unless
+   * `SP_DEBUG_ROOM` is set.
+   * @returns {{ ok: true, code: string, mode: string, difficulty: string, grants: string[], reused: boolean,
+   *             shopLevel: number|null, bondLayers: Record<string, number> } | { error: string }}
    */
   createDebugRoom(spec = debugRoomSpec()) {
     if (!spec) return fail(ERR.ROOM_NOT_FOUND, 'debug room disabled (set SP_DEBUG_ROOM)');
     const code = String(spec.code || '').trim().toUpperCase();
     if (code.length !== ROOM_CODE_LEN) return fail(ERR.BAD_MSG, `debug room code must be ${ROOM_CODE_LEN} letters`);
-    const grants = Array.isArray(spec.grants) ? spec.grants.filter(Boolean) : [];
     const data = this.safeData();
+    const bondLayers = {};
+    for (const [bondId, n] of Object.entries(spec.bondLayers || {})) {
+      if (!getBond(bondId, data)) return fail(ERR.BAD_TARGET, `unknown bond ${bondId}`);
+      bondLayers[bondId] = n;
+    }
+    const grants = Array.isArray(spec.grants) ? spec.grants.filter(Boolean) : [];
+    // SP_DEBUG_BOND_MEMBERS: the season chess that make a bond active (a bond needs distinct members — hand counts
+    // for 奇迹 / 远见 / 投资人, bondsMeta countMode BOARD_AND_DECK)
+    for (const [bondId, n] of Object.entries(spec.bondMembers || {})) {
+      if (!getBond(bondId, data)) return fail(ERR.BAD_TARGET, `unknown bond ${bondId}`);
+      const ids = debugBondChess(data, bondId, n);
+      if (ids.length < n) return fail(ERR.BAD_TARGET, `only ${ids.length} chess carry ${bondId}, need ${n}`);
+      for (const id of ids) if (!grants.includes(id)) grants.push(id);
+    }
     for (const id of grants) {
       if (!getChess(id, data)) return fail(ERR.BAD_TARGET, `unknown chess ${id}`);
     }
+    const setup = { shopLevel: spec.shopLevel ?? null, bondLayers, noBans: !!spec.noBans };
     const existing = this.rooms.get(code);
     if (existing) {
       existing.debugGrants = grants.slice();
-      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}`);
-      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true };
+      existing.debugSetup = setup;
+      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}; setup ${JSON.stringify(setup)}`);
+      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans };
     }
     if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
     const mode = 'coop';
     const difficulty = spec.difficulty || 'NORMAL';
     const room = new Room(code, mode, difficulty, this.now());
     room.debugGrants = grants.slice();
+    room.debugSetup = setup;
     this.rooms.set(code, room);
-    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}`);
+    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}; setup ${JSON.stringify(setup)}`);
     this.broadcastState(room);
-    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false };
+    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans };
   }
 
   join(session, { code }) {
@@ -566,8 +586,10 @@ export class Lobby {
         seed,
         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
         matchNo: room.matchCount + 1,
-        // TEMPORARY debug room (server/debugRoom.js): round-1 hand-out for the room created by /debug/room
+        // TEMPORARY debug room (server/debugRoom.js): round-1 hand-out for the room created by /debug/room …
         debugGrants: Array.isArray(room.debugGrants) && room.debugGrants.length ? room.debugGrants.slice() : null,
+        // … plus the 调度中心 level / bond layers its match starts with (applied before the players' startRound)
+        debugSetup: room.debugSetup && typeof room.debugSetup === 'object' ? room.debugSetup : null,
         data: this.safeData(),
         log: this.log,
         now: this.now,
