@@ -1,0 +1,3922 @@
+{
+ "source": "server/sim/content/genericTalents.js (the talent half of the generic kit) — measured by a real makeBattle battle per record, the audit method of D:\\projects\\_scratch\\sp-audit",
+ "checkedAt": "2026-10-04",
+ "how": {
+  "choke_point": "server/sim/content/generic.js genericKit() used to return talents: [] and Battle.js installs u.kit.talents only, so a kit-less record (76 of the 93 自选干员 records, plus 火陈 / 望 whose kits author a skill but no talent) fought without any declared talent, and the module talentChanges the resolved def already carries were dead with them.",
+  "blackboard": "def.talents[i].bb of the COMPOSED record (def.raw): shared/loadoutRecord.js composeTalents folds a module's talentChanges into the base talents by talentIndex, so the module numbers are already in the bb the translator reads.",
+  "install": "each expressed talent becomes a Kit talent hook { install(battle, unit) } (docs/SIM.md §7.2); nothing is guessed — a talent whose blackboard or wording the rules do not cover is reported here and left uninstalled.",
+  "drops": "status: installed (fully) | partial (the listed `drops` are NOT expressed) | unexpressed (nothing is) | installed-by-kit (the record's hand-authored wrapper kit installs it itself)",
+  "rules": {
+   "selfStat": "unconditional self stat keys → a persistent stat buff (atk/def/max_hp/attack_speed/base_attack_time/magic_resistance/block_cnt/taunt_level/damage_resistance/damage_scale/heal_scale/sp_recovery_per_sec/hp_recovery_per_sec(_by_max_hp_ratio)/magic_resist_penetrate_fixed/def_penetrate_fixed/def_penetrate_ratio/magic_resist_penetrate_ratio/move_speed; `prob` when the text says 闪避)",
+   "selfStatHpBelow": "\"生命值低于 X% 时…\" + the namespaced `ns[tag].<statKey>` extra → base stats always, the extra while hpRatio < X",
+   "selfStatIdle": "\"未进行攻击 / 没有主动攻击 N 秒\" + `delay` → toggleBuff on idle time",
+   "selfStatUnblocked": "\"未阻挡敌人时\" → toggleBuff while nothing is blocked",
+   "selfStatBlocking": "\"阻挡时 / 阻挡敌人时\" → toggleBuff while blocking",
+   "auraProfession": "\"所有(友方)【X】(职业)干员…\" → an aura over the owner's allies of that profession",
+   "auraRange": "\"攻击范围内的友方(军)…\" → an aura over the allies inside the owner's own range",
+   "attackProc": "\"攻击时…概率攻击力提升至 M%\" (`atk_scale`, optional `prob`) → a mutable hit multiplier",
+   "attackProcRider": "the same + `def`/`defdown_duration` → also a def-down buff on the target",
+   "attackAddHit": "\"攻击额外造成攻击力 M% 的 X 伤害\" → an extra damage instance of its own",
+   "attackVsLowHp": "\"攻击生命(值)低于 X% 的敌人时攻击力提升至 M%\" → a hit multiplier under the target-HP condition",
+   "blockedEnemyDebuff": "\"自身阻挡的敌人攻击速度-N\" → a repeating aspd debuff on the blocked enemies",
+   "deployStun": "deployment flash: plain `stun` + \"部署后立即对攻击范围内…晕眩 N 秒\"",
+   "deploySp": "\"部署后立即获得 N 点技力\" (`sp`)",
+   "deploySpRandom": "`sp_min`/`sp_max` → a random SP gift on deployment (max exclusive: 7~15 of {7, 16})",
+   "deployCost": "`runtime_cost` → `base.cost` (docs in the rule: the sim's initial deployment pays no DP, so the discount reaches the engine as a cheaper redeploy)",
+   "intervalSp": "`interval` + `sp` (\"每 N 秒回复…技力\") → a repeating SP gift",
+   "onHurtSp": "\"受到攻击时，有 N% 几率回复 M 点技力\"",
+   "nearbyKillSp": "\"周围四格内有敌人倒下时获得 N 点技力\"",
+   "fieldTimer": "\"在战场停留 N 秒后…\" + stat keys → a one-shot stat buff after N seconds on the field"
+  }
+ },
+ "summary": {
+  "picks": {
+   "records": 93,
+   "declared": 180,
+   "installed": 51,
+   "byStatus": {
+    "unexpressed": 139,
+    "partial": 12,
+    "installed": 23,
+    "installed-by-kit": 6
+   },
+   "generic_kit_records": {
+    "records": 76,
+    "declared": 152,
+    "installed": 27,
+    "records_with_installs": 21
+   },
+   "note": "火陈 chess_free_char_1050_chen3 and 望 chess_free_char_2027_wang have hand-authored kits (kits/freePicks.js) that author a skill but no talent: the translator does not run for them (their kit wins), so their 4 declared talents are still uninstalled — that file is owned by another agent."
+  },
+  "season": {
+   "note": "no season record uses the generic kit except the 8 unused DIY templates (no talents, stats null, filtered out of every pool), so the season is untouched by construction."
+  },
+  "unexpressible_classes": {
+   "no kit-DSL form": "the sim has no mod / hook for this mechanic (summon counts, roster & deploy-cost rules, damage-form or element riders, status talents, threshold stacks, per-skill \"技能期间\" talents, …)"
+  }
+ },
+ "records": [
+  {
+   "chessId": "chess_free_char_003_kalts",
+   "name": "凯尔希",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "Mon3tr",
+     "keys": [
+      "cnt",
+      "def",
+      "attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1,
+      "def": 0,
+      "attack_speed": 0
+     },
+     "desc": "可以使用并治疗Mon3tr，拥有25秒再部署时间，优先治疗自身和Mon3tr；Mon3tr不在凯尔希攻击范围内时防御力降至0",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "不毁重构",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "Mon3tr在生命值首次低于50%和被击倒后（不包括撤退）使周围8格内所有敌人晕眩3.5秒并对其造成1500点真实伤害",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_010_chen",
+   "name": "陈",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "呵斥",
+    "持刀格斗术"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "呵斥",
+     "keys": [
+      "interval",
+      "sp"
+     ],
+     "status": "partial",
+     "rule": "intervalSp",
+     "drops": [
+      "只回“攻击/受击技力”的类型限制（SkillRuntime.gainSp 不分类型）"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "持刀格斗术",
+     "keys": [
+      "atk",
+      "def",
+      "prob"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_017_huang",
+   "name": "煌",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "紧急除颤",
+     "keys": [
+      "hp_ratio",
+      "huang_t_1[heal].hp_ratio",
+      "huang_t_1[lock].min_hp_ratio",
+      "huang_t_1[lock].duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.25,
+      "huang_t_1[heal].hp_ratio": 0.5,
+      "huang_t_1[lock].min_hp_ratio": 0.5,
+      "huang_t_1[lock].duration": 6
+     },
+     "desc": "在生命值低于25%时，仅一次回复50%的生命值并在6秒内使生命值不低于50%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "严酷训练",
+     "keys": [
+      "one_minus_status_resistance",
+      "interval",
+      "huang_t_2[e_002_atk].atk",
+      "huang_t_2[e_002_atk_speed].attack_speed",
+      "huang_t_2.interval",
+      "huang_t_2.one_minus_status_resistance",
+      "huang_t_2[e_002_atk].interval",
+      "huang_t_2[e_002_atk_speed].interval"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "one_minus_status_resistance": -0.5,
+      "interval": 15,
+      "huang_t_2[e_002_atk].atk": 0.06,
+      "huang_t_2[e_002_atk_speed].attack_speed": 12,
+      "huang_t_2.interval": 15,
+      "huang_t_2.one_minus_status_resistance": -0.5,
+      "huang_t_2[e_002_atk].interval": 30,
+      "huang_t_2[e_002_atk_speed].interval": 45
+     },
+     "desc": "在战场停留15秒后获得抵抗，30秒后攻击力+6%，45秒后攻速+12",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_112_siege",
+   "name": "推进之王",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "万兽之王",
+    "粉碎"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "万兽之王",
+     "keys": [
+      "atk",
+      "def"
+     ],
+     "status": "partial",
+     "rule": "auraProfession",
+     "drops": [
+      "自身额外 +8%（同一天赋的双档写法，未拆分）"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "粉碎",
+     "keys": [
+      "sp"
+     ],
+     "status": "installed",
+     "rule": "nearbyKillSp"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_113_cqbw",
+   "name": "W",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "设伏"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "设伏",
+     "keys": [
+      "interval",
+      "prob",
+      "taunt_level"
+     ],
+     "status": "installed",
+     "rule": "fieldTimer"
+    },
+    {
+     "index": 1,
+     "name": "落井下石",
+     "keys": [
+      "damage_scale",
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_scale": 1.24,
+      "sp": 1
+     },
+     "desc": "攻击范围内的敌人在被晕眩时受到的物理伤害+24%，击倒敌人时获得1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_134_ifrit",
+   "name": "伊芙利特",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "莱茵回路"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "精神融解",
+     "keys": [
+      "magic_resistance"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "magic_resistance": -0.4
+     },
+     "desc": "攻击范围内的敌军法术抗性-40%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "莱茵回路",
+     "keys": [
+      "sp",
+      "interval",
+      "ifrit_e_002[dice_sp].prob",
+      "ifrit_e_002[dice_sp].interval",
+      "ifrit_e_002[dice_sp].sp"
+     ],
+     "status": "partial",
+     "rule": "intervalSp",
+     "drops": [
+      "黑板书 `ifrit_e_002[dice_sp].prob`（本规则未表达）",
+      "黑板书 `ifrit_e_002[dice_sp].interval`（本规则未表达）",
+      "黑板书 `ifrit_e_002[dice_sp].sp`（本规则未表达）"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_147_shining",
+   "name": "闪灵",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "黑恶魔的庇护",
+    "法典"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "黑恶魔的庇护",
+     "keys": [
+      "def",
+      "def_lowland"
+     ],
+     "status": "partial",
+     "rule": "auraRange",
+     "drops": [
+      "`def_lowland` 40（地面单位额外加成：按地形类型分档，未表达）"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "法典",
+     "keys": [
+      "attack_speed"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_179_cgbird",
+   "name": "夜莺",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "白恶魔的庇护"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "白恶魔的庇护",
+     "keys": [
+      "magic_resistance",
+      "heal_scale"
+     ],
+     "status": "installed",
+     "rule": "auraRange"
+    },
+    {
+     "index": 1,
+     "name": "转瞬即逝的幻影",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 2
+     },
+     "desc": "可以使用幻影。幻影无法攻击和阻挡敌人，拥有75法术抗性，30%的物理闪避，并且更容易吸引敌人的攻击，同时每秒流失3%的最大生命",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_180_amgoat",
+   "name": "艾雅法拉",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "炎息",
+    "乱火"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "炎息",
+     "keys": [
+      "atk"
+     ],
+     "status": "partial",
+     "rule": "auraProfession",
+     "drops": [
+      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "乱火",
+     "keys": [
+      "sp_min",
+      "sp_max"
+     ],
+     "status": "installed",
+     "rule": "deploySpRandom"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_188_helage",
+   "name": "赫拉格",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "运筹帷幄"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "月盈星亏",
+     "keys": [
+      "min_attack_speed",
+      "min_hp_ratio",
+      "hp_ratio",
+      "damage_resistance"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "min_attack_speed": 130,
+      "min_hp_ratio": 0.5,
+      "hp_ratio": 0.5,
+      "damage_resistance": 0.25
+     },
+     "desc": "在场时，自身获得最高+130攻击速度的坚忍（损失50%生命值时达到最大加成）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "运筹帷幄",
+     "keys": [
+      "hp_recovery_per_sec"
+     ],
+     "status": "installed",
+     "rule": "selfStatUnblocked"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_197_poca",
+   "name": "早露",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "深入骨髓",
+     "keys": [
+      "value",
+      "def_penetrate",
+      "atk_scale",
+      "extra_atk_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "value": 3,
+      "def_penetrate": 0.6,
+      "atk_scale": 1.15,
+      "extra_atk_scale": 0.6
+     },
+     "desc": "攻击重量较重（重量等级大于等于3）的敌人时，无视其防御力的60%，并额外造成60%攻击力的物理伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "学生楷模",
+     "keys": [
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.08
+     },
+     "desc": "编入队伍时，所有【乌萨斯学生自治团】干员攻击力+8%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_225_haak",
+   "name": "阿",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "药剂扩散"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "混合药物射击",
+     "keys": [
+      "hp_ratio",
+      "atk_scale",
+      "sluggish",
+      "stun",
+      "prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.2,
+      "atk_scale": 1.65,
+      "sluggish": 1.6,
+      "stun": 1.2,
+      "prob": 0.3
+     },
+     "desc": "每次攻击时会随机触发下列效果之一：回复自身生命20%；当次攻击力提升至165%；目标停顿1.6秒；目标晕眩1.2秒；有30%概率同时触发以上所有效果",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "药剂扩散",
+     "keys": [
+      "heal_scale"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_248_mgllan",
+   "name": "麦哲伦",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "支援无人机·龙腾",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 5
+     },
+     "desc": "可以使用5个不阻挡敌人的无人机（最多同时部署3个），功能随技能选择而改变",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "光学折射配件",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "无人机在部署后的26秒内处于隐匿状态（不会成为敌方远程单位的攻击目标），若麦哲伦在其周围四格则享受相同效果",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_250_phatom",
+   "name": "傀影",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "镜中虚影",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1
+     },
+     "desc": "可以使用一个属性更强的虚影，虚影拥有和自己一样的技能，拥有独立的再部署时间",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "虚影精通",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "虚影的再部署时间-16秒",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_293_thorns",
+   "name": "棘刺",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "故土潮声"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "神经腐蚀",
+     "keys": [
+      "damage[normal]",
+      "damage[ranged]",
+      "duration",
+      "max_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage[normal]": 135,
+      "damage[ranged]": 270,
+      "duration": 3,
+      "max_cnt": 4
+     },
+     "desc": "攻击使目标中毒，在3秒内每秒受到135点法术伤害，可叠加4次（对会远程攻击的目标伤害加倍）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "故土潮声",
+     "keys": [
+      "delay",
+      "hp_recovery_per_sec_by_max_hp_ratio"
+     ],
+     "status": "installed",
+     "rule": "selfStatIdle"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_300_phenxi",
+   "name": "菲亚梅塔",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "陈述苦难",
+     "keys": [
+      "interval",
+      "hp_ratio",
+      "phenxi_t_1[peak_1].peak_performance.atk",
+      "phenxi_t_1[peak_1].peak_performance.hp_ratio",
+      "phenxi_t_1[peak_2].peak_performance.atk",
+      "phenxi_t_1[peak_2].peak_performance.hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "interval": 0.1,
+      "hp_ratio": 0.005,
+      "phenxi_t_1[peak_1].peak_performance.atk": 0.25,
+      "phenxi_t_1[peak_1].peak_performance.hp_ratio": 0.5,
+      "phenxi_t_1[peak_2].peak_performance.atk": 0.5,
+      "phenxi_t_1[peak_2].peak_performance.hp_ratio": 0.8
+     },
+     "desc": "自身生命会不断流失（该效果不会使生命降至0）；生命值高于50%时获得+25%攻击力的精力充沛；高于80%效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "宣告终局",
+     "keys": [
+      "attack_speed",
+      "phenxi_e_t_2[in_skill].attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack_speed": 30,
+      "phenxi_e_t_2[in_skill].attack_speed": 10
+     },
+     "desc": "技能持续期间外，攻击速度+30，技能期间攻击速度+10",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_322_lmlee",
+   "name": "老鲤",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "和气生财",
+     "keys": [
+      "lmlee_t_1[enemy].attack_speed",
+      "lmlee_t_1[self].attack_speed",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "lmlee_t_1[enemy].attack_speed": -14,
+      "lmlee_t_1[self].attack_speed": 14,
+      "cnt": 1
+     },
+     "desc": "老鲤阻挡目标时，使其攻击速度-14，且自身攻击速度+14；当周围八格内仅存在一个敌人时效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "有备无患",
+     "keys": [
+      "extra_cost",
+      "stun"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "extra_cost": -4,
+      "stun": 4
+     },
+     "desc": "特性消耗费用时，若费用足够则改为消耗4费用，抵消自身受到的下一次晕眩/冻结，并使攻击来源晕眩4秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_340_shwaz",
+   "name": "黑",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "破甲箭头",
+    "交叉火力"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "破甲箭头",
+     "keys": [
+      "atk_scale",
+      "def",
+      "prob",
+      "defdown_duration"
+     ],
+     "status": "installed",
+     "rule": "attackProcRider"
+    },
+    {
+     "index": 1,
+     "name": "交叉火力",
+     "keys": [
+      "atk"
+     ],
+     "status": "partial",
+     "rule": "auraProfession",
+     "drops": [
+      "“另外至少一名狙击干员”的编队条件按场上同类干员 ≥1 评估（携带 ≠ 部署）",
+      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_362_saga",
+   "name": "嵯峨",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "劝善",
+     "keys": [
+      "move_speed",
+      "sp",
+      "interval"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "move_speed": -0.8,
+      "sp": 2,
+      "interval": 10
+     },
+     "desc": "造成致命伤害时使敌人保留1点生命并使其重伤（击杀者技力+2）；嵯峨不攻击重伤单位",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "清明",
+     "keys": [
+      "hp_ratio",
+      "hp_recovery_per_sec_by_max_hp_ratio",
+      "prob",
+      "duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.4,
+      "hp_recovery_per_sec_by_max_hp_ratio": 0.065,
+      "prob": 0.7,
+      "duration": 18
+     },
+     "desc": "生命值低于40%时，仅一次获得70%物理闪避和每秒回复6%的最大生命，持续18秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_377_gdglow",
+   "name": "澄闪",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "精准导流"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "信标的愤怒",
+     "keys": [
+      "attack@prob",
+      "attack@atk_scale_2",
+      "attack@max_stack_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@prob": 0.015,
+      "attack@atk_scale_2": 3.6,
+      "attack@max_stack_cnt": 40
+     },
+     "desc": "技能开启后浮游单元攻击时有10%概率自爆（回到干员身边）对小范围敌人造成澄闪360%攻击力的法术伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "精准导流",
+     "keys": [
+      "magic_resist_penetrate_fixed"
+     ],
+     "status": "partial",
+     "rule": "selfStat",
+     "drops": [
+      "“与浮游单元”的共享部分（召唤物自身的属性/穿透不由此处授予）"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_400_weedy",
+   "name": "温蒂",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "工程蓄水炮",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1
+     },
+     "desc": "可以使用一个持续20秒的蓄水炮，能攻击单个敌人并将其小力度地推开",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "蓄水炮强化",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "蓄水炮普通攻击和技能的推力增加一级，且在温蒂周围4格内时令其每2秒获得1点技力，攻击力额外+20%",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_416_zumama",
+   "name": "森蚺",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "愈战愈勇"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "勇冠三军",
+     "keys": [
+      "hp_ratio",
+      "damage_resistance",
+      "atk_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.5,
+      "damage_resistance": 0.2,
+      "atk_scale": 1.15
+     },
+     "desc": "生命值高于一半时，攻击造成115%伤害；生命值不高于一半时，获得20%的庇护",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "愈战愈勇",
+     "keys": [
+      "sp_recovery_per_sec"
+     ],
+     "status": "installed",
+     "rule": "selfStatBlocking"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_450_necras",
+   "name": "死芒",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "回光黯淡"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "复燃",
+     "keys": [
+      "max_token_cnt",
+      "max_hp",
+      "atk",
+      "block_cnt",
+      "def",
+      "atk_duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_token_cnt": 3,
+      "max_hp": 1,
+      "atk": 0.25,
+      "block_cnt": 1,
+      "def": 0.4,
+      "atk_duration": 10
+     },
+     "desc": "自身和召唤物攻击范围内敌人被击倒时在10秒内自身攻击力+25%，并在攻击范围内生成一个悲叹的仆役，最多召唤3个，若无法再次召唤则使一个悲叹的仆役升级（提升阻挡数与更多的生命、攻击和防御）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "回光黯淡",
+     "keys": [
+      "hp_ratio",
+      "damage_scale"
+     ],
+     "status": "partial",
+     "rule": "attackVsLowHp",
+     "drops": [
+      "“自身和召唤物…”的召唤物一半（召唤物的伤害不由主人的 kit 挂钩）"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_456_ash",
+   "name": "灰烬",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "辅助装备",
+    "突击手"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "辅助装备",
+     "keys": [
+      "stun"
+     ],
+     "status": "installed",
+     "rule": "deployStun"
+    },
+    {
+     "index": 1,
+     "name": "突击手",
+     "keys": [
+      "runtime_cost",
+      "sp"
+     ],
+     "status": "partial",
+     "rule": "hand:ash:assault",
+     "drops": [
+      "部署费用是备战/重新部署侧的量：sim 的初始部署不付 DP，这里只降低 `base.cost`（= 以后重新部署时少付 DP；先例 kits/tier6.js 开源节流）"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_479_sleach",
+   "name": "琴柳",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "不退之旗",
+     "keys": [
+      "sleach_t_1[ally].attack_speed",
+      "sleach_t_1[enemy].attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sleach_t_1[ally].attack_speed": 13,
+      "sleach_t_1[enemy].attack_speed": -13
+     },
+     "desc": "部署时自身持有军旗；军旗周围8格的干员攻击速度+13，敌人的攻击速度-13",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "精神感召",
+     "keys": [
+      "value"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "value": -2
+     },
+     "desc": "部署后，下一名部署的干员费用-2",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_485_pallas",
+   "name": "帕拉斯",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "英雄的诞生",
+     "keys": [
+      "peak_performance.hp_ratio",
+      "peak_performance.atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "peak_performance.hp_ratio": 0.5,
+      "peak_performance.atk": 0.3
+     },
+     "desc": "在场时，所有【米诺斯】干员生命值高于50%时获得+30%攻击力的精力充沛",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "女神的振奋",
+     "keys": [
+      "value"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "value": 40
+     },
+     "desc": "每攻击一名敌人时为自身与身前一格的我方干员恢复40点生命值",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_608_acpion",
+   "name": "郁金香",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "无垠之心",
+     "keys": [
+      "sp_recovery_per_sec",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sp_recovery_per_sec": 1,
+      "cnt": 2
+     },
+     "desc": "部署后第2次开启技能之前，技力自然回复速度+1/秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "浪潮之心",
+     "keys": [
+      "cost",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cost": 1,
+      "atk": 0.1
+     },
+     "desc": "攻击力+10%，击杀敌人时额外获得1点部署费用",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_609_acguad",
+   "name": "Sharp",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "隐匿刀刃",
+     "keys": [
+      "atk",
+      "prob"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    },
+    {
+     "index": 1,
+     "name": "寸步不退",
+     "keys": [
+      "interval",
+      "attack_speed"
+     ],
+     "status": "installed",
+     "rule": "fieldTimer"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_610_acfend",
+   "name": "Mechanist",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "精研材料",
+     "keys": [
+      "acfend_t_1[extra].def",
+      "def",
+      "hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "acfend_t_1[extra].def": 0.2,
+      "def": 0.1,
+      "hp_ratio": 0.5
+     },
+     "desc": "防御力+10%，生命值低于50%时防御力额外+20%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "反馈装甲",
+     "keys": [
+      "attack_speed"
+     ],
+     "status": "installed",
+     "rule": "blockedEnemyDebuff"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_611_acnipe",
+   "name": "Stormeye",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "风坠",
+     "keys": [
+      "atk_scale",
+      "prob"
+     ],
+     "status": "installed",
+     "rule": "attackProc"
+    },
+    {
+     "index": 1,
+     "name": "风雨欲来",
+     "keys": [
+      "delay",
+      "sp_recovery_per_sec"
+     ],
+     "status": "installed",
+     "rule": "selfStatIdle"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_612_accast",
+   "name": "Pith",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "“见我所见”",
+     "keys": [
+      "magic_resist_penetrate_fixed"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    },
+    {
+     "index": 1,
+     "name": "“授我所授”",
+     "keys": [
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.2
+     },
+     "desc": "自身及相邻四格的【术师】干员攻击力+20%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_613_acmedc",
+   "name": "Touch",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "攫升",
+     "keys": [
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sp": 3
+     },
+     "desc": "治疗目标时使其获得3点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "超脱",
+     "keys": [
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sp": 8
+     },
+     "desc": "攻击范围内的友方干员被击倒时获得8点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_614_acsupo",
+   "name": "Raidian",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "同调",
+     "keys": [
+      "attack_speed",
+      "acsupo_t_1[ally].attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack_speed": 20,
+      "acsupo_t_1[ally].attack_speed": 12
+     },
+     "desc": "攻击速度+20，相邻的干员攻击速度+12",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "诱引",
+     "keys": [
+      "damage_hitrate_physical",
+      "damage_hitrate_magical"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_hitrate_physical": -0.1,
+      "damage_hitrate_magical": -0.1
+     },
+     "desc": "攻击范围内敌人的物理和法术命中率降低10%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_615_acspec",
+   "name": "Misery",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "二象命末",
+     "keys": [
+      "attack@prob",
+      "attack@normal_prob",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@prob": 0.15,
+      "attack@normal_prob": 0.85,
+      "atk": 0.05
+     },
+     "desc": "攻击力+5%，攻击时有15%概率造成二连击",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "四维分离",
+     "keys": [
+      "atk",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.1,
+      "cnt": 1
+     },
+     "desc": "周围四格内仅存在一名敌人时，攻击力+10%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_617_sharp2",
+   "name": "领主·Sharp",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 2,
+   "installedBy": [
+    "(kit)",
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "无声之锋",
+     "keys": [
+      "atk",
+      "prob"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    },
+    {
+     "index": 1,
+     "name": "陷阵勇气",
+     "keys": [
+      "cnt",
+      "attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 2,
+      "attack_speed": 12
+     },
+     "desc": "攻击范围内存在2名及以上敌人时，攻击速度+12",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1013_chen2",
+   "name": "假日威龙陈",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "节约风气",
+     "keys": [
+      "spareshot_chen.prob",
+      "prob",
+      "e_spareshot_chen.prob",
+      "chen2_t_002[spareshot][other].prob",
+      "chen2_t_002[spareshot][sniper].prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "spareshot_chen.prob": 0.2,
+      "prob": 0.1,
+      "e_spareshot_chen.prob": 0.25,
+      "chen2_t_002[spareshot][other].prob": 0.12,
+      "chen2_t_002[spareshot][sniper].prob": 0.2
+     },
+     "desc": "在场时自身弹药类技能攻击时25%概率不消耗对应弹药，其他【狙击】干员的弹药类技能改为20%概率不消耗，其他远程干员的弹药类技能改为12%概率不消耗（同类效果取最高）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "假日余韵",
+     "keys": [
+      "chen2_t_2[common].attack_speed",
+      "chen2_t_2[map].attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "chen2_t_2[common].attack_speed": 8,
+      "chen2_t_2[map].attack_speed": 4
+     },
+     "desc": "攻击速度+8，当场地中存在水地形时改为攻击速度+12",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1015_aglna2",
+   "name": "予愿安洁莉娜",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "飘浮大地之上",
+     "keys": [
+      "atk_scale_hi",
+      "atk_scale_lo",
+      "mass_level"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale_hi": 0.35,
+      "atk_scale_lo": 0.25,
+      "mass_level": 3
+     },
+     "desc": "予愿安洁莉娜攻击额外造成相当于攻击力25%的法术伤害，攻击重量较轻（小于等于3）的敌人时则额外造成相当于攻击力35%的法术伤害；处于起飞状态时使攻击范围内的敌人失重",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "天穹间的舞步",
+     "keys": [
+      "atk",
+      "hp_recovery_per_sec_by_max_hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.13,
+      "hp_recovery_per_sec_by_max_hp_ratio": 0.08
+     },
+     "desc": "在场时，所有处于起飞状态的友方干员攻击力+13%且阻挡时每秒回复8%的最大生命值",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1029_yato2",
+   "name": "麒麟R夜刀",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "双雷剑麒麟"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "双雷剑麒麟",
+     "keys": [
+      "attack@atk_scale_1"
+     ],
+     "status": "installed",
+     "rule": "attackAddHit"
+    },
+    {
+     "index": 1,
+     "name": "鬼人强化状态",
+     "keys": [
+      "atk",
+      "duration",
+      "yato2_e_002[atk].atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.15,
+      "duration": 10,
+      "yato2_e_002[atk].atk": 0.05
+     },
+     "desc": "技能期间及技能结束后的10秒内攻击力+15%，技能期间攻击力额外+5%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1031_slent2",
+   "name": "淬羽赫默",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "无声砥柱",
+     "keys": [
+      "damage_resistance_base",
+      "resistance_scale",
+      "hp_ratio",
+      "min_hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_resistance_base": 0.1,
+      "resistance_scale": 0.02,
+      "hp_ratio": 0.01,
+      "min_hp_ratio": 0.3
+     },
+     "desc": "使攻击范围内的友军获得10%的庇护，友军的生命越低该效果越强（低于30%生命时获得最大24%的庇护）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "丰润羽翼",
+     "keys": [
+      "hp_ratio",
+      "atk_to_hp_recovery_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.5,
+      "atk_to_hp_recovery_ratio": 0.07
+     },
+     "desc": "攻击范围内友军的最大生命值+10%且生命低于50%时每秒恢复相当于淬羽赫默攻击力7%的生命，【莱茵生命】干员的效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1034_jesca2",
+   "name": "涤火杰西卡",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "灵活应变",
+     "keys": [
+      "cnt",
+      "def"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1,
+      "def": 0.15
+     },
+     "desc": "可以使用一个持续60秒属性进一步增强的机动盾牌，机动盾牌只能放置于涤火杰西卡四周，机动盾牌部署后，涤火杰西卡立刻转向盾牌且自身与身后的单位防御力+15%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "蓄能释放",
+     "keys": [
+      "sp",
+      "prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sp": 1,
+      "prob": 0.5
+     },
+     "desc": "机动盾牌受到伤害时，有50%的概率使涤火杰西卡获得1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1035_wisdel",
+   "name": "维什戴尔",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "好礼",
+     "keys": [
+      "attack@main_atk_scale",
+      "attack@prob",
+      "attack@bomb_atk_scale",
+      "attack@stun",
+      "attack@range_radius"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@main_atk_scale": 1.25,
+      "attack@prob": 0.15,
+      "attack@bomb_atk_scale": 1.75,
+      "attack@stun": 1,
+      "attack@range_radius": 1.1
+     },
+     "desc": "攻击时对主目标的攻击力提升至125%并为其附着残影，残影受到维什戴尔的余震影响时有15%概率爆炸，对周围所有敌人造成175%攻击力的物理伤害并使其晕眩1秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "死魂灵的余息",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "部署后立刻在攻击范围内召唤一个魂灵之影，在魂灵之影周围时获得迷彩",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1042_phatm2",
+   "name": "酒神",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "形为心役",
+     "keys": [
+      "attack@ep_damage_ratio",
+      "ep_damage_ratio",
+      "range_radius"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@ep_damage_ratio": 0.3,
+      "ep_damage_ratio": 0.2,
+      "range_radius": 1.3
+     },
+     "desc": "攻击附带相当于攻击力30%的神经损伤，并对目标周围其他敌人造成一次相当于攻击力20%的神经损伤",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "堕梦",
+     "keys": [
+      "attack_speed",
+      "value"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack_speed": -20,
+      "value": 90
+     },
+     "desc": "在场时，全场处于神经损伤爆发期间的敌人攻击速度-20；攻击范围内的敌人普通攻击时受到90点神经损伤",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1043_leizi2",
+   "name": "司霆惊蛰",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "明断",
+     "keys": [
+      "interval",
+      "atk_scale_t",
+      "atk_scale[skill_up]",
+      "times"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "interval": 1,
+      "atk_scale_t": 1,
+      "atk_scale[skill_up]": 1.13,
+      "times": 1
+     },
+     "desc": "攻击范围内每个地块每秒有10%的概率落雷对所有敌人造成相当于攻击力100%的法术伤害。未开启技能时起飞；技能期间攻击时攻击力提升至113%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "追责",
+     "keys": [
+      "atk_scale_t2",
+      "not_combat"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale_t2": 1,
+      "not_combat": 2
+     },
+     "desc": "开启技能时，使攻击范围内所有地面地块落雷，对所有敌人造成相当于攻击力100%的法术伤害和2秒战栗",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1044_hsgma2",
+   "name": "斩业星熊",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "业火",
+     "keys": [
+      "max_minus_hp_ratio",
+      "hsgma2_t_1[heal].interval",
+      "hsgma2_t_1[heal].hp_recovery_per_sec_by_max_hp_ratio",
+      "interval"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_minus_hp_ratio": 2,
+      "hsgma2_t_1[heal].interval": 5,
+      "hsgma2_t_1[heal].hp_recovery_per_sec_by_max_hp_ratio": 0.05,
+      "interval": 0.03
+     },
+     "desc": "生命降至0时进入“我执”：期间不成为其他角色的治疗目标，受到的伤害会继续积累，积累至生命上限的200%时被击倒，5秒内未受到伤害时，每秒回复5%生命，生命大于0时退出“我执”",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "鬼之架势",
+     "keys": [
+      "max_hp_ratio",
+      "min_hp_ratio",
+      "min_atk",
+      "max_atk",
+      "min_magic_resistance",
+      "max_magic_resistance",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_hp_ratio": 1,
+      "min_hp_ratio": 0.5,
+      "min_atk": 0.35,
+      "max_atk": 0,
+      "min_magic_resistance": 50,
+      "max_magic_resistance": 0,
+      "atk": 0.15
+     },
+     "desc": "在场时，自身获得最高+50法术抗性和35%攻击力的坚忍（损失50%生命值时达到最大加成）。达到最大加成时，攻击力额外+15％",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1048_orchd2",
+   "name": "焰狐龙梓兰",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "强击瓶专家",
+     "keys": [
+      "power_attack_count",
+      "power_attack_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "power_attack_count": 50,
+      "power_attack_scale": 1.15
+     },
+     "desc": "部署后首次开启技能时，接下来50次攻击的攻击力提升至115%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "翔虫机动",
+     "keys": [
+      "atk_duration",
+      "atk",
+      "ignore_build_type_target",
+      "ignore_build_type_target_dir",
+      "not_add_respawn_cost_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_duration": 30,
+      "atk": 0.2,
+      "ignore_build_type_target": 1,
+      "ignore_build_type_target_dir": 0,
+      "not_add_respawn_cost_cnt": 1
+     },
+     "desc": "再部署时间-18秒且不提高部署费用；部署至上次部署位置周围更大范围时，30秒内攻击力+20%并且可以部署在近战位",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1050_chen3",
+   "name": "赤刃明霄陈",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "形意洞照",
+     "keys": [
+      "atk",
+      "attack_speed"
+     ],
+     "status": "installed",
+     "rule": "selfStat"
+    },
+    {
+     "index": 1,
+     "name": "寒暑觉知",
+     "keys": [
+      "stack_time",
+      "heal_atk_scale_min",
+      "heal_atk_scale_max"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "stack_time": 6,
+      "heal_atk_scale_min": 50,
+      "heal_atk_scale_max": 201
+     },
+     "desc": "未受到伤害时，每6秒随机治疗自身一定（攻击力的50%~200%）生命值，并闪避下次物理与法术攻击",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1051_headb2",
+   "name": "怒潮凛冬",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "汹涌怒火",
+     "keys": [
+      "damage_scale",
+      "attack@splash_atk_scale",
+      "attack@sluggish"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_scale": 1.4,
+      "attack@splash_atk_scale": 0.24,
+      "attack@sluggish": 0.5
+     },
+     "desc": "特性溅射造成的物理伤害提升40%，且溅射到的每个高台对周围四格所有地面敌人造成相当于攻击力24%的物理伤害和0.5秒停顿",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "万众巨潮",
+     "keys": [
+      "atk",
+      "def",
+      "scale_bonus"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.14,
+      "def": 0.14,
+      "scale_bonus": 2
+     },
+     "desc": "技能期间所有场上干员攻击力和防御力+14%，【乌萨斯学生自治团】干员获得加成效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1052_kalts2",
+   "name": "凯尔希·思衡托",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "遗尘守望",
+     "keys": [
+      "max_hp",
+      "def",
+      "block_cnt",
+      "block_radius_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_hp": 0.25,
+      "def": 0.25,
+      "block_cnt": 1,
+      "block_radius_scale": 0.23
+     },
+     "desc": "生命上限和防御力+25%，阻挡数+1，阻挡范围扩大，部署后生命修复单元升空，自身起飞",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "医者丰碑",
+     "keys": [
+      "buff_duration",
+      "hp_recovery_per_sec",
+      "rhodes_bonus",
+      "attack@buff_duration",
+      "attack@hp_recovery_per_sec",
+      "attack@rhodes_bonus"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "buff_duration": 30,
+      "hp_recovery_per_sec": 50,
+      "rhodes_bonus": 2,
+      "attack@buff_duration": 30,
+      "attack@hp_recovery_per_sec": 50,
+      "attack@rhodes_bonus": 2
+     },
+     "desc": "其他友方干员进入自身攻击范围时立刻获得1层护盾并额外获得一次每秒回复50点生命值的增益治疗，持续30秒（不可叠加），增益治疗对【罗德岛】干员的效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_1502_crosly",
+   "name": "弑君者",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "吞咽苦厄",
+     "keys": [
+      "damage_hitrate_physical",
+      "damage_hitrate_magical"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_hitrate_physical": -0.25,
+      "damage_hitrate_magical": -0.25
+     },
+     "desc": "技能持续期间在自身周围产生烟雾，使其中的地面敌人物理与法术命中率-25%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "弑君者威名",
+     "keys": [
+      "damage_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_scale": 1.2
+     },
+     "desc": "对未伤害过自身的地面敌人造成的物理伤害提升20%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2012_typhon",
+   "name": "提丰",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "锐如兽牙",
+     "keys": [
+      "max_stack_cnt",
+      "def_penetrate",
+      "duration",
+      "atk_scale",
+      "value"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_stack_cnt": 5,
+      "def_penetrate": 0.12,
+      "duration": 10,
+      "atk_scale": 1.15,
+      "value": 3
+     },
+     "desc": "连续攻击时逐渐无视敌人的防御力，最高无视其防御力的60%（每次攻击提升12%的无视防御比例），10秒内未攻击则失去加成",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "重如沼泥",
+     "keys": [
+      "atk_scale",
+      "sluggish"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 1.6,
+      "sluggish": 3
+     },
+     "desc": "技能期间对每个敌人首次造成伤害时，攻击力提升至160%并使目标停顿3秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2013_cerber",
+   "name": "刻俄柏",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "剥壳",
+     "keys": [
+      "atk_scale",
+      "basic_atk_scale",
+      "max_atk_scale",
+      "delta_atk_scale",
+      "target_uid"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 0.5,
+      "basic_atk_scale": 0.5,
+      "max_atk_scale": 0.75,
+      "delta_atk_scale": 0.05,
+      "target_uid": 0
+     },
+     "desc": "攻击时对目标额外造成相当于其防御力50%的法术伤害，连续攻击同一目标时该比例逐次提升，最多提升至75%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "独行长路",
+     "keys": [
+      "atk",
+      "attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.08,
+      "attack_speed": 8
+     },
+     "desc": "当周围四格内没有其他友方单位时，攻击力+8%，攻击速度+8",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2014_nian",
+   "name": "年",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "积甲成山"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "积甲成山",
+     "keys": [
+      "max_hp"
+     ],
+     "status": "partial",
+     "rule": "auraProfession",
+     "drops": [
+      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "干明可鉴",
+     "keys": [
+      "times",
+      "atk",
+      "def",
+      "sp",
+      "max_stack_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "times": 3,
+      "atk": 0.07,
+      "def": 0.07,
+      "sp": 3,
+      "max_stack_cnt": 3
+     },
+     "desc": "部署后立即获得3层护盾，每层护盾破裂时，攻击力+7%，防御力+7%且获得3点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2023_ling",
+   "name": "令",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "挑灯问梦",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 5
+     },
+     "desc": "可以使用5个属性更强的召唤物（最多同时部署4个），功能随技能选择而改变",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "随付笺咏醉屠苏",
+     "keys": [
+      "max_stack_cnt",
+      "sp",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_stack_cnt": 5,
+      "sp": 3,
+      "atk": 0.03
+     },
+     "desc": "召唤物被击倒/吸收/回收时令额外获得3点技力、攻击力+3%（攻击力加成最多叠加5层）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2024_chyue",
+   "name": "重岳",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "止戈",
+     "keys": [
+      "prob",
+      "damage_scale",
+      "up_duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.23,
+      "damage_scale": 1.65,
+      "up_duration": 2.5
+     },
+     "desc": "对目标普通攻击时，有23%的概率使重岳2.5秒内对其造成的伤害提升65%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "万象为宾",
+     "keys": [
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "sp": 4
+     },
+     "desc": "若重岳释放一次技能击倒不少于一个敌人，则回复4点技力，未击倒敌人时变为回复1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2025_shu",
+   "name": "黍",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "百谷长青",
+     "keys": [
+      "hp_recovery_per_sec",
+      "damage_resistance"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_recovery_per_sec": 80,
+      "damage_resistance": 0.15
+     },
+     "desc": "治疗干员时对其与周围四格地块进行播种施加如下效果：每秒恢复80生命、获得15%庇护，部署时立即给所处地块播种该效果",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "天有四时",
+     "keys": [
+      "max_hp",
+      "attack_speed",
+      "atk",
+      "interval",
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_hp": 0.12,
+      "attack_speed": 12,
+      "atk": 0.12,
+      "interval": 4,
+      "sp": 1
+     },
+     "desc": "场上有三名不同职业干员时所有干员生命上限+12%、三名相同职业干员时所有干员攻击速度+12，编队中有四名【岁】干员时所有干员攻击力+12%且4秒获得1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_2027_wang",
+   "name": "望",
+   "kit": "hand-authored",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "铸子",
+     "keys": [
+      "cnt",
+      "max_cnt",
+      "interval",
+      "attack@max_spawn_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 6,
+      "max_cnt": 0,
+      "interval": 0,
+      "attack@max_spawn_cnt": 9
+     },
+     "desc": "可以使用6枚棋子（最多拥有7枚），棋子相连时相互激活，敌人进入激活的棋子所在地块时触发其效果；手动部署棋子时，望在相邻位置额外部署一枚棋子（最多9枚，可以且优先部署在有敌人的不可部署地块）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "料敌机先",
+     "keys": [
+      "attack@per_atk_scale",
+      "attack@per_magic_resist_penetrate_fixed",
+      "attack@max_trigger_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@per_atk_scale": 0.13,
+      "attack@per_magic_resist_penetrate_fixed": 12,
+      "attack@max_trigger_cnt": 3
+     },
+     "desc": "棋子激活时所在的连续直线上每有一枚棋子，直线上所有棋子造成伤害提升13%并无视敌人12点法术抗性（最多叠加3次）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4009_irene",
+   "name": "艾丽妮",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "审判之火",
+     "keys": [
+      "prob",
+      "def_penetrate"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.5,
+      "def_penetrate": 0.5
+     },
+     "desc": "对敌人造成物理伤害时有50%概率无视其50%防御力，对空中单位概率提升至100%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "净化之剑",
+     "keys": [
+      "attack_speed",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack_speed": 18,
+      "atk": 0.05
+     },
+     "desc": "攻击速度+18，攻击力+5%，场上有【海怪】敌人时效果翻倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4011_lessng",
+   "name": "止颂",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "苦痛专注"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "苦痛专注",
+     "keys": [
+      "damage_resistance"
+     ],
+     "status": "partial",
+     "rule": "selfStatBlocking",
+     "drops": [
+      "“来自非自身阻挡的敌人”这一来源限制（无按来源区分的减伤通道）"
+     ]
+    },
+    {
+     "index": 1,
+     "name": "痛楚砺刃",
+     "keys": [
+      "atk",
+      "add_atk_duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.2,
+      "add_atk_duration": 15
+     },
+     "desc": "受到伤害后，攻击力+20%，持续15秒（不可叠加）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4027_heyak",
+   "name": "霍尔海雅",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "传承终焉",
+     "keys": [
+      "atk_scale",
+      "silence"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 1.35,
+      "silence": 5
+     },
+     "desc": "攻击空中目标时攻击力提升至135%，并使其特殊能力失效5秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "曾有羽翼",
+     "keys": [
+      "hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.8
+     },
+     "desc": "攻击范围内所有生命值高于80%的敌人失重",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4037_demetr",
+   "name": "贝洛内",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "家族手段",
+     "keys": [
+      "attack@def",
+      "attack@limited_stack_cnt",
+      "attack@s2_limited_stack_cnt",
+      "attack@def_dec_duration",
+      "min_hp_ratio",
+      "max_hp_ratio",
+      "min_add_on_scale",
+      "max_add_on_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@def": -0.08,
+      "attack@limited_stack_cnt": 5,
+      "attack@s2_limited_stack_cnt": 8,
+      "attack@def_dec_duration": 10,
+      "min_hp_ratio": 1,
+      "max_hp_ratio": 0.2,
+      "min_add_on_scale": 0,
+      "max_add_on_scale": 0.42
+     },
+     "desc": "攻击使目标在10秒内防御力降低8%（最多叠加5次），并且目标剩余生命值比例越低自身对其造成的伤害越高，在剩余20%以下生命值时伤害提高到最高142%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "街头直觉",
+     "keys": [
+      "trig_cnt",
+      "init_prob",
+      "dec_prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "trig_cnt": 20,
+      "init_prob": 0.8,
+      "dec_prob": 0.02
+     },
+     "desc": "获得40%的物理和法术闪避，部署后提高到80%并在20秒内逐渐衰减",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4046_ebnhlz",
+   "name": "黑键",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "强弱法",
+     "keys": [
+      "atk_scale",
+      "times_2"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 1.43,
+      "times_2": 1
+     },
+     "desc": "储存的攻击能量造成的伤害提升至143%，可额外储存1份只用于攻击精英或领袖敌人的攻击能量",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "倚音",
+     "keys": [
+      "atk_scale",
+      "cnt",
+      "range_radius"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 0.15,
+      "cnt": 0,
+      "range_radius": 1.1
+     },
+     "desc": "若攻击目标周围没有其他敌人，攻击对其额外造成相当于攻击力15%的法术伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4048_doroth",
+   "name": "多萝西",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "共振装置",
+     "keys": [
+      "cnt",
+      "attack@max_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 8,
+      "attack@max_cnt": 2
+     },
+     "desc": "可以使用8个共振装置（最多拥有10个），踩上去的第一个敌人会触发其效果，部署后立刻在攻击范围内召唤2个共振装置",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "梦想家",
+     "keys": [
+      "atk",
+      "max_stack_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.04,
+      "max_stack_cnt": 10
+     },
+     "desc": "陷阱触发后，多萝西获得4%的攻击力，最多叠加10层",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4055_bgsnow",
+   "name": "鸿雪",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "自动打字机",
+     "keys": [
+      "cnt",
+      "duration"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1,
+      "duration": 25
+     },
+     "desc": "可使用一个持续25秒属性更强的“打字机”，“打字机”拥有和自己一样的技能，拥有独立的再部署时间",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "弱点速记",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "“打字机”的攻击会使命中目标的防御力下降18%，持续4秒；若“打字机”放在鸿雪周围四格则效果提升至23%",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4065_judge",
+   "name": "斥罪",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "律法卫士",
+     "keys": [
+      "max_hp_ratio",
+      "kill_hp_ratio",
+      "born_hp_ratio",
+      "higher_effect_hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_hp_ratio": 3,
+      "kill_hp_ratio": 0.12,
+      "born_hp_ratio": 0.7,
+      "higher_effect_hp_ratio": 1
+     },
+     "desc": "部署后立即获得相当于生命上限70%的屏障，每击倒一名敌人时获得相当于生命上限12%的屏障（最多不超过生命上限300%）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "荆棘环身",
+     "keys": [
+      "atk_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 0.5
+     },
+     "desc": "拥有来源于自身的屏障时，每次受到攻击对目标造成相当于斥罪攻击力50%的法术伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4072_ironmn",
+   "name": "白铁",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "战地工程师",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 3
+     },
+     "desc": "可以携带3个<支援装置>(最多可部署2个)，效果根据技能改变而改变",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "节约经费",
+     "keys": [
+      "prob",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.9,
+      "cnt": 1
+     },
+     "desc": "当白铁周围8格存在自身装置时技力回复速度+0.2/秒，当这些装置损毁时有90%的几率回收使白铁额外获得1个装置",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4080_lin",
+   "name": "林",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "韬光"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "计出万全",
+     "keys": [
+      "value",
+      "atk_scale",
+      "stun",
+      "interval"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "value": 200,
+      "atk_scale": 1,
+      "stun": 1,
+      "interval": 8
+     },
+     "desc": "拥有可以抵挡所有伤害的琉璃璧；琉璃璧在受到单次超过200点伤害时破碎，对周围所有敌人造成相当于林攻击力100%的法术伤害、使其晕眩1秒，并在8秒后再次生成",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "韬光",
+     "keys": [
+      "prob",
+      "sp"
+     ],
+     "status": "installed",
+     "rule": "onHurtSp"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4088_hodrer",
+   "name": "赫德雷",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "及锋而试",
+     "keys": [
+      "atk_scale",
+      "atk_scale_2"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 1.4,
+      "atk_scale_2": 1.1
+     },
+     "desc": "攻击敌人时攻击力提升至110%，若目标处于晕眩、束缚则改为提升至140%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "余火之氅",
+     "keys": [
+      "damage_resistance",
+      "damage_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_resistance": 0.28,
+      "damage_scale": 1.1
+     },
+     "desc": "使自身与身后一格的友军获得28%的庇护，且造成的物理伤害提升10%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4098_vvana",
+   "name": "薇薇安娜",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "燃烛施明",
+     "keys": [
+      "damage_resistance_pm",
+      "damage_scale_m",
+      "super_scale",
+      "ep_damage_ratio_m"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_resistance_pm": 0.08,
+      "damage_scale_m": 0.08,
+      "super_scale": 2,
+      "ep_damage_ratio_m": 0.09
+     },
+     "desc": "造成的法术伤害+8%，受到的物理和法术伤害-8%，攻击附带相当于9%伤害的灼燃损伤。攻击范围内存在精英或领袖敌人时，该效果提升至2倍",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "散华",
+     "keys": [
+      "prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.18
+     },
+     "desc": "攻击精英或领袖敌人时，有18%概率获得一层仅抵挡近战攻击的护盾（最多1层）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4117_ray",
+   "name": "莱伊",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "巡哨伙伴",
+     "keys": [
+      "damage_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "damage_scale": 0.2
+     },
+     "desc": "可以在攻击范围内部署沙地兽于25秒内侦察一片区域延伸攻击范围，自身优先攻击该区域内的目标且对其造成的物理伤害提高20%，沙地兽的再部署时间-10秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "入神",
+     "keys": [
+      "atk",
+      "max_stack_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.08,
+      "max_stack_cnt": 3
+     },
+     "desc": "攻击相同目标时每次攻击提高自身攻击力8%，最多3层",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4121_zuole",
+   "name": "左乐",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "秉烛照影",
+     "keys": [
+      "min_attack_speed",
+      "min_hp_ratio",
+      "min_sp_recovery_per_sec",
+      "hp_ratio",
+      "damage_resistance"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "min_attack_speed": 70,
+      "min_hp_ratio": 0.5,
+      "min_sp_recovery_per_sec": 2.3,
+      "hp_ratio": 0.5,
+      "damage_resistance": 0.25
+     },
+     "desc": "在场时，自身获得最高+70攻击速度和技力自然回复速度+2.3/秒的坚忍（损失50%生命值时达到最大加成）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "守正自明",
+     "keys": [
+      "prob_1",
+      "sp",
+      "prob_2",
+      "hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob_1": 0.2,
+      "sp": 1,
+      "prob_2": 0.7,
+      "hp_ratio": 0.5
+     },
+     "desc": "攻击时有20%的概率获得1点技力，生命低于50%时概率变为70%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4123_ela",
+   "name": "艾拉",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "“正中靶心”"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "雷鸣地雷",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 3
+     },
+     "desc": "可以使用3个雷鸣地雷（最多拥有4个），经过周围的第一个敌人会触发其效果，撤退时以自身为中心触发一次雷鸣地雷效果",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "“正中靶心”",
+     "keys": [
+      "atk_scale",
+      "prob"
+     ],
+     "status": "partial",
+     "rule": "attackProc",
+     "drops": [
+      "“对受到雷鸣地雷影响的目标必定触发”这一追加条件（未接雷鸣地雷状态）"
+     ]
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4132_ascln",
+   "name": "阿斯卡纶",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "死亡拘审",
+     "keys": [
+      "move_speed",
+      "atk_ratio",
+      "max_stack_cnt",
+      "debuff_duration",
+      "interval"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "move_speed": -0.18,
+      "atk_ratio": 0.11,
+      "max_stack_cnt": 3,
+      "debuff_duration": 30,
+      "interval": 1
+     },
+     "desc": "攻击对敌人施加效果：移动速度降低18％，每秒受到11％阿斯卡纶当前攻击力的法术伤害，持续30秒，效果最多叠加三层",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "噬光残影",
+     "keys": [
+      "attack_speed",
+      "attack_speed_add",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack_speed": 8,
+      "attack_speed_add": 6,
+      "cnt": 1
+     },
+     "desc": "攻击速度+8，自身周围四格有高台时，攻击速度额外+6",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4133_logos",
+   "name": "逻各斯",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "语汇演化",
+     "keys": [
+      "prob",
+      "atk_scale",
+      "sluggish",
+      "element_atk_scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.6,
+      "atk_scale": 0.6,
+      "sluggish": 0.8,
+      "element_atk_scale": 0.6
+     },
+     "desc": "对一个目标发起攻击时，有60%几率额外对攻击范围内一个随机目标造成相当于攻击力60%的法术伤害并使其停顿0.8秒，若该随机目标处于凋亡损伤爆发期间则同时造成相当于攻击力60%的元素伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "剜魂具辞",
+     "keys": [
+      "duration",
+      "magic_resistance",
+      "atk_addition"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "duration": 5,
+      "magic_resistance": -10,
+      "atk_addition": 150
+     },
+     "desc": "攻击使目标在5秒内法术抗性-10且受到的法术伤害提高150点",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4138_narant",
+   "name": "娜仁图亚",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "“我见，我得”",
+     "keys": [
+      "attack@steal_atk",
+      "attack@steal_atk_max",
+      "attack@steal_def",
+      "attack@steal_def_max"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@steal_atk": 25,
+      "attack@steal_atk_max": 300,
+      "attack@steal_def": 20,
+      "attack@steal_def_max": 240
+     },
+     "desc": "在场时，每次攻击到敌人偷取其25点攻击力（最高300点）与20点防御力（最高240点），攻击到周围8格的敌人时偷取触发2次",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "婀娜虚影",
+     "keys": [
+      "prob",
+      "damage_hitrate_physical",
+      "damage_hitrate_magical"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "prob": 0.35,
+      "damage_hitrate_physical": -0.2,
+      "damage_hitrate_magical": -0.2
+     },
+     "desc": "获得35%的物理与法术闪避，周围8格内敌人的物理与法术命中率-20%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4141_marcil",
+   "name": "玛露西尔",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "建校以来第一才女",
+     "keys": [
+      "interval",
+      "mana_add",
+      "mana_max",
+      "mana_init",
+      "sp",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "interval": 1,
+      "mana_add": 1,
+      "mana_max": 100,
+      "mana_init": 0,
+      "sp": 1,
+      "atk": 0.2
+     },
+     "desc": "技能消耗魔力且可随时开启，魔力不自然回复，不在场时每秒回复1点；有魔力时，攻击力+20%，攻击溅射范围扩大",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "可靠的同伴",
+     "keys": [
+      "mana_init",
+      "attack_speed",
+      "def"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "mana_init": 40,
+      "attack_speed": 25,
+      "def": 0.35
+     },
+     "desc": "初始魔力+40，编队中有4名【莱欧斯小队】干员时，所有【莱欧斯小队】干员攻击速度+25，防御力+35%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4179_monstr",
+   "name": "Mon3tr",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "自我修复",
+     "keys": [
+      "cnt",
+      "atk",
+      "attack@chain.extra_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1,
+      "atk": 0.25,
+      "attack@chain.extra_cnt": 1
+     },
+     "desc": "可以在攻击范围内的地面使用一个仅可被自身治疗的重构体，重构体周围友方单位的攻击力+25%，重构体受到自身和Mon3tr治疗时，可额外进行一次不会衰减的治疗跳跃，且下次跳跃也不衰减",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "战术协同",
+     "keys": [
+      "buff_duration",
+      "attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "buff_duration": 10,
+      "attack_speed": 20
+     },
+     "desc": "自身或重构体造成治疗时，使目标及自身的攻击速度+20，持续10秒（无法叠加）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4182_oblvns",
+   "name": "丰川祥子",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "颂乐音符",
+     "keys": [
+      "delay",
+      "def_penetrate_ratio",
+      "magic_resist_penetrate_ratio",
+      "attack@angle",
+      "max_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "delay": 1,
+      "def_penetrate_ratio": 0.05,
+      "magic_resist_penetrate_ratio": 0.025,
+      "attack@angle": 20,
+      "max_cnt": 12
+     },
+     "desc": "丰川祥子可以持续攻击且攻击会演奏追踪敌人的音符，音符飘出攻击范围一段时间后消失。每存在一个音符，Ave Mujica成员无视敌人5%的防御力和2.5%法术抗性（最多可叠加12层）；技能期间远程攻击不再降低攻击力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "毋畏遗忘",
+     "keys": [
+      "enable",
+      "attack_speed",
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "enable": 1,
+      "attack_speed": 12,
+      "cnt": 3
+     },
+     "desc": "对敌人造成伤害时使Fever+3；其他Ave Mujica成员的攻击范围若与自身原本攻击范围重合，则将其视作攻击范围的延伸；攻击范围内干员攻击速度+12",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4195_radian",
+   "name": "电弧",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "卡带里的灵感",
+     "keys": [
+      "cnt",
+      "max_hp",
+      "def",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 5,
+      "max_hp": 0.12,
+      "def": 0.12,
+      "atk": 0.12
+     },
+     "desc": "可以使用5个召唤物（最多同时部署3个），功能随技能选择而改变。在【岁的界园志异】中，召唤物再部署时间降低50％，且被击倒或撤退时电弧自身回复2点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "加油~",
+     "keys": [
+      "max_hp",
+      "def",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "max_hp": 0.12,
+      "def": 0.12,
+      "atk": 0.12
+     },
+     "desc": "电弧的召唤物获得相当于其自身12％攻击力、防御力、生命值的鼓舞效果",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4202_haruka",
+   "name": "遥",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "浮光泡影",
+     "keys": [
+      "interval",
+      "damage_resistance",
+      "max_target_shield"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "interval": 0.5,
+      "damage_resistance": 0.3,
+      "max_target_shield": 1
+     },
+     "desc": "每过一个攻击间隔，使范围内一名友方单位获得30%庇护的浮泡，浮泡在受到敌方伤害的短暂延迟后破碎",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "扶摇花火",
+     "keys": [
+      "heal_scale",
+      "prob",
+      "sp"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "heal_scale": 0.25,
+      "prob": 0.2,
+      "sp": 1
+     },
+     "desc": "浮泡破碎时，为所在的单位治疗相当于遥攻击力25%的生命值，并有20%的概率回复1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4204_mantra",
+   "name": "真言",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "噤声限域",
+     "keys": [
+      "atk_scale",
+      "prob"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 1.6,
+      "prob": 0.15
+     },
+     "desc": "场上敌人触发麻痹效果时立即受到相当于真言攻击力160%的元素伤害，且触发麻痹时有15%概率不消耗麻痹层数",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "全局洞悉",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "距离真言最近的一个侵入点出场的敌人出现时立刻获得1层麻痹",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4212_nasti",
+   "name": "娜斯提",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "前方施工",
+     "keys": [
+      "cnt",
+      "value"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 3,
+      "value": -3
+     },
+     "desc": "可以携带3个<支援装置>(最多可部署2个)，效果根据技能改变而改变，首个装置部署费用减少；装置可与攻击范围内其他装置共同提供效果",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "注意安全",
+     "keys": [
+      "nasti_t2[add_sp].interval",
+      "nasti_t2[res_plus].damage_resistance",
+      "nasti_t2[res].damage_resistance"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "nasti_t2[add_sp].interval": 6,
+      "nasti_t2[res_plus].damage_resistance": 0.15,
+      "nasti_t2[res].damage_resistance": 0.1
+     },
+     "desc": "获得10%庇护；远程敌人出现后，改为使自身和场上的高台干员获得15%庇护，且每6秒获得1点技力",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4217_makoto",
+   "name": "结城理",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "不羁之力",
+     "keys": [
+      "atk",
+      "base_attack_time",
+      "sluggish",
+      "max_hp_t1"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.95,
+      "base_attack_time": 0.4,
+      "sluggish": 10,
+      "max_hp_t1": 0.4
+     },
+     "desc": "结城理切换为<替身>状态时停顿周围一定范围内敌人10秒；<替身>状态下结城理召唤人格面具作战，攻击间隔增大，攻击力+95%，生命值+40%，作战能力随技能选择而改变",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "S.E.E.S.队长",
+     "keys": [
+      "atk_scale",
+      "multi_attack_total_cnt",
+      "final_damage_different_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk_scale": 4.3,
+      "multi_attack_total_cnt": 1,
+      "final_damage_different_ratio": 1
+     },
+     "desc": "结城理<替身>状态结束后，带领S.E.E.S.小队发动总攻击，对S.E.E.S.小队队员周围一定范围内的所有敌人造成相当于结城理攻击力430%的真实伤害（可叠加）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4226_veen",
+   "name": "维伊",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "“在挥刀之前”",
+     "keys": [
+      "atk",
+      "attack_speed"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "atk": 0.1,
+      "attack_speed": 15
+     },
+     "desc": "特性储存的能量达到3个时，合成为1个转置能量（至多储存等同于9倍的能量），拥有转置能量时攻击力+10%，未拥有转置能量时攻击速度+15",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "战争技艺",
+     "keys": [
+      "attack@duration",
+      "attack@value",
+      "attack@max_stack_cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "attack@duration": 5,
+      "attack@value": 120,
+      "attack@max_stack_cnt": 4
+     },
+     "desc": "攻击和储存的能量使目标在5秒内每秒受到120点法术伤害（至多叠加4次，发射转置能量可以叠加3次），维伊不以该效果影响的敌人为攻击目标",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4228_closur",
+   "name": "可露希尔",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "精准投放",
+     "keys": [
+      "cnt"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1
+     },
+     "desc": "可以在战术点召唤指挥中心协助作战，其被击败后会在15秒后自动刷新；战术点效果范围随携带技能变化，效果范围内的友方单位视为自身的援军",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "极限调度",
+     "keys": [
+      "cost",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cost": -5,
+      "atk": 0.08
+     },
+     "desc": "携带可露希尔时，部署费用下限降低5，【罗德岛】干员攻击力+8%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4229_aphris",
+   "name": "谬因",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 1,
+   "installedBy": [
+    "取样优化"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "链路协议",
+     "keys": [
+      "cnt",
+      "atk"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "cnt": 1,
+      "atk": 0.35
+     },
+     "desc": "可以使用一个持续时间35秒的“中继器”，“中继器”再部署时间变短，能改变自身的攻击方向，且使该次攻击距离+2；“中继器”在场时，自身攻击力+35%",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "取样优化",
+     "keys": [
+      "magic_resist_penetrate_fixed"
+     ],
+     "status": "installed",
+     "rule": "auraRange"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4230_mcnist",
+   "name": "机械师",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "结构性原理",
+     "keys": [],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {},
+     "desc": "可以使用一个持续30秒的结构性原理，拥有独立的再部署时间；在【沉沦者的黑流树海】中，结构性原理的持续时间无限，5秒内未受到伤害后每秒获得4%最大生命的屏障（上限为最大生命的20%）",
+     "reason": "empty blackboard: the effect lives in the description text only (a summon / roster mechanic)"
+    },
+    {
+     "index": 1,
+     "name": "生命方程",
+     "keys": [
+      "hp_ratio"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "hp_ratio": 0.3
+     },
+     "desc": "自身和结构性原理部署时获得最大生命30%的屏障；来自自身的屏障可以抵挡超额的伤害",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_4235_thumpy",
+   "name": "珊比",
+   "kit": "generic",
+   "declared": 2,
+   "installed": 0,
+   "installedBy": [],
+   "talents": [
+    {
+     "index": 0,
+     "name": "探险理论",
+     "keys": [
+      "ep_damage_scale",
+      "duration_dec",
+      "ep_damage_ratio[trigger]"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "ep_damage_scale": 0.85,
+      "duration_dec": 1,
+      "ep_damage_ratio[trigger]": 0.1
+     },
+     "desc": "珊比受到的元素损伤降低15%；珊比造成物理伤害时，附带攻击力10%的侵蚀损伤，并使目标的侵蚀损伤冷却减少1秒",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    },
+    {
+     "index": 1,
+     "name": "坚硬脚板",
+     "keys": [
+      "def",
+      "atk",
+      "shield_value",
+      "max_stack_cnt",
+      "scale"
+     ],
+     "status": "unexpressed",
+     "rule": null,
+     "bb": {
+      "def": 12,
+      "atk": 5,
+      "shield_value": 400,
+      "max_stack_cnt": 30,
+      "scale": 3
+     },
+     "desc": "受到过来自珊比伤害的敌人侵蚀损伤爆发时，珊比获得12点防御力和5点攻击力（最多叠加30层），以及400点屏障（不超过最大生命值的300%）",
+     "reason": "no faithful kit-DSL form for this key set / wording"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_601_cguard",
+   "name": "预备干员-近卫",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "攻击提升",
+     "keys": [
+      "atk"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_602_cdfend",
+   "name": "预备干员-重装",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "防御提升",
+     "keys": [
+      "def"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_603_csnipe",
+   "name": "预备干员-狙击",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "攻击提升",
+     "keys": [
+      "atk"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_604_ccast",
+   "name": "预备干员-术师",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "施法速度提升",
+     "keys": [
+      "attack_speed"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_605_cmedic",
+   "name": "预备干员-医疗",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "攻击提升",
+     "keys": [
+      "atk"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  },
+  {
+   "chessId": "chess_free_char_606_csuppo",
+   "name": "预备干员-辅助",
+   "kit": "wrapper(genericKit + the kit installs the talent itself)",
+   "declared": 1,
+   "installed": 1,
+   "installedBy": [
+    "(kit)"
+   ],
+   "talents": [
+    {
+     "index": 0,
+     "name": "施法速度提升",
+     "keys": [
+      "attack_speed"
+     ],
+     "status": "installed-by-kit",
+     "rule": "selfStat",
+     "note": "the hand-authored kit of this record installs this talent itself (WRAPPER_KITS)"
+    }
+   ]
+  }
+ ]
+}

@@ -736,6 +736,16 @@ displacement by the official 力度 − 重量 rules (拖拽/hookmaster: `pullTo
 宴 +65 % ATK for 14 s) and the self/counter effects — their scales describe procs that need a kit. Instant skills with
 mods/targeting but no attack override apply them to the next attack (the skill range is switched in for that attack).
 
+**Talents (`content/genericTalents.js`, §7.4 continued).** The generic kit's `talents` are translated from the DECLARED
+talents of the record (`def.talents`, the loadout-resolved composer output — a module's `talentChanges` are already
+merged into the blackboards by `shared/loadoutRecord.js composeTalents`, so a module on a kit-less record becomes live
+with the same fix), not left empty: plain/conditional self stat buffs, profession & range auras, `atk_scale`/`prob`
+attack riders, deployment stun / SP / cost, interval & on-hurt & nearby-kill SP, blocked-enemy debuffs, on-field timers.
+Every talent (and every half of a talent) the translator cannot express faithfully is REPORTED, never silently dropped:
+`kit.talentPlan` carries one row per declared talent (`installed` | `partial` + `drops` | `unexpressed` + `reason` |
+`installed-by-kit` for the wrapper kits of `WRAPPER_KITS`), `test/content/generic_talents.test.js` pins it and
+`docs/research/15-generic-talents.json` is the generated research note (`node tools/talent-plan.mjs [--check]`).
+
 ### 7.5 Worked examples (real operators, numbers from blackboards)
 
 **1. Ammo sniper — 隐现 `chess_char_1_01_a` “解决麻烦”** (bb `atk 0.8, base_attack_time −0.3, attack@trigger_time 14`;
