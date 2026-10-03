@@ -16,8 +16,10 @@ const chessOf = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : (Objec
 
 // NORMAL seed 6 draws kjeragShip + siracusaShip + kazimierzShip among its core bans (the same fixtures pool.test.js uses)
 const SEED = 6;
-const BANNED = 'chess_char_3_18_a'; // 忍冬 → siracusaShip (banned at this seed)
-const SAFE = 'chess_char_3_01_a';   // 能天使 → lateranoShip (not banned)
+// 自选候选 fixtures: the season pool never appears here (a 自选候选 is by definition an operator it does NOT offer)
+const BANNED = 'chess_free_char_4037_demetr'; // 贝洛内 → siracusaShip (banned at this seed)
+const SAFE = 'chess_free_char_112_siege';     // 推进之王 → victoriaShip (not banned)
+const SEASON = 'chess_char_3_01_a';           // 能天使: a season chess, only for the 主盟约-derivation test
 
 function start(picks) {
   const seat = { seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, picks };
@@ -51,8 +53,8 @@ test('自选干员: 主盟约以数据 bonds 为准(隐藏势力),而不是 nati
   const ps = h.ps('p_0');
   // 能天使 is 龙门 (lungmen) by nationId but carries 拉特兰 — user: "游戏过程中的实际盟约可能与别处显示的盟约有冲突,
   // 此处以实际盟约为准"
-  assert.equal(chessOf(SAFE).nationId, 'lungmen');
-  assert.equal(ps.freePickMainBond(chessOf(SAFE)), 'lateranoShip', 'the record bonds win over the faction');
+  assert.equal(chessOf(SEASON).nationId, 'lungmen');
+  assert.equal(ps.freePickMainBond(chessOf(SEASON)), 'lateranoShip', 'the record bonds win over the faction');
   // a prototype carries no faction at all ⇒ 协防干员
   assert.equal(ps.freePickMainBond(chessOf(proto6[0])), 'emptyShip');
   h.m.dispose();
@@ -124,7 +126,7 @@ test('自选干员: 信标不能把它送走 —— 拒绝装备,且干员不被
   assert.equal(res.error, ERR.BAD_TARGET, '信标 refuses a 自选干员');
   assert.ok(ps.allChess().some((p) => p.uid === target.uid), 'and the operator survives — the effect destroys its target');
   // a season operator is still a valid 信标 target (nothing else changed)
-  const normal = give(m, ps, SAFE, 'hand');
+  const normal = give(m, ps, SEASON, 'hand');
   assert.equal(m.handle('p_0', { t: 'g.equip', itemUid: beacon.uid, targetUid: normal.uid }).ok, true, 'a season chess is unaffected');
   m.dispose();
 });

@@ -415,6 +415,8 @@ function LoadoutScreen({ st }) {
   const [narrowDetail, setNarrowDetail] = useState(false); // phones: the detail slides over the roster
   const [io, setIo] = useState(null);                      // 导出 / 导入 dialog: { mode, text } | null
   const [freeFor, setFreeFor] = useState(null);            // 自由位置 picker: the 调度中心 level it is open for
+  const [freeQuery, setFreeQuery] = useState('');          // 自由位置 picker: search text
+  const [freeProf, setFreeProf] = useState(null);          // 自由位置 picker: class filter
 
   // 自由位置 (DESIGN §21). `m.private.freePicks` is what the server actually let into the pool: a pick missing from it was
   // dropped because its 主盟约 is banned this match, and the strip marks it instead of silently doing nothing.
@@ -434,6 +436,18 @@ function LoadoutScreen({ st }) {
     const level = FREE_PICK_LEVELS.find((lv) => (freePicks[String(lv)] || []).includes(id));
     if (level != null) setPicks(clearPick(freePicks, level, id));
   };
+  // the picker's candidates for the open level (search + class filter; the roster is ~90 operators now)
+  const freeCandidates = useMemo(() => {
+    if (freeFor == null) return [];
+    const q = freeQuery.trim().toLowerCase();
+    return freeRoster.filter((c) => {
+      if (!freePickLevelsOf(c).includes(freeFor)) return false;
+      if (freeProf && c.profession !== freeProf) return false;
+      if (!q) return true;
+      const bondNames = (c.bonds || []).map((b) => getBond(b)?.name || b).join(' ');
+      return `${c.name} ${c.appellation || ''} ${PROF_NAME[c.profession] || ''} ${bondNames}`.toLowerCase().includes(q);
+    });
+  }, [freeFor, freeQuery, freeProf, freeRoster, ready]);
 
   const pick = (id) => { loadoutStore.set({ sel: id }); setNarrowDetail(true); };
   const change = (patch) => { if (base) setEntries(setChoice(loadoutStore.get().entries, base, golden, patch)); };
@@ -560,23 +574,29 @@ function LoadoutScreen({ st }) {
       title=${`自由位置 · 调度中心 ${ROMAN[freeFor]} 级`} micro="FREE PICK"
       actions=${html`<${Button} variant="ghost" onClick=${() => setFreeFor(null)}>关闭<//>`}>
       <p class="lo-free__hint">选一名干员编入<b>你自己</b>的干员池：本局他会像其他干员一样被随机抽出，且不能被信标送走。
-        ${freeFor === 5 ? '5 级还可以选四星原型干员（先锋 / 特种除外）。' : ''}已选过的干员不能重复选取。</p>
+        ${freeFor === 5 ? '5 级还可以选四星原型干员（先锋 / 特种除外）。' : ''}已选过的干员不能重复选取，且不会列出本赛季干员池已有的干员。</p>
+      <div class="lo-free__bar">
+        <${TextField} size="sm" icon="search" value=${freeQuery} placeholder="搜索干员 / 职业 / 盟约" class="lo-free__search"
+          onInput=${(v) => setFreeQuery(String(v).slice(0, 24))} />
+        <div class="lo-chips lo-chips--prof" role="group" aria-label="职业">
+          ${PROF_ORDER.map((p) => html`<button key=${p} type="button" class=${cx('lo-chip', 'lo-chip--prof', freeProf === p && 'is-on')}
+            aria-pressed=${freeProf === p ? 'true' : 'false'} title=${PROF_NAME[p]}
+            onClick=${() => setFreeProf(freeProf === p ? null : p)}><span class="lo-chip__lbl">${PROF_NAME[p]}</span></button>`)}
+        </div>
+        <span class="lo-free__found t-dim" data-testid="free-found">${freeCandidates.length} 名</span>
+      </div>
       <div class="lo-free__grid" data-testid="free-picker">
-        ${(() => {
-          const list = freeRoster.filter((c) => freePickLevelsOf(c).includes(freeFor));
-          if (!list.length) return html`<p class="lo-free__hint t-dim">没有可选的干员</p>`;
-          return list.map((c) => {
-            const taken = freeTaken.has(c.chessId);
-            return html`<button type="button" key=${c.chessId} class=${cx('lo-free__pick', taken && 'is-taken')}
-              data-testid=${`free-pick-${c.chessId}`} disabled=${taken}
-              title=${taken ? `${c.name}：已在自由位置中，不能重复选取` : `${c.name}${c.freePick ? '（原型干员）' : ''}`}
-              onClick=${() => freeAdd(freeFor, c.chessId)}>
-              <span class="lo-free__art"><${Img} src=${chessAvatarUrl(m, c)} fallback=${html`<span class="lo-free__glyph">${[...(c.name || '?')][0]}</span>`} /></span>
-              <span class="lo-free__name">${c.name}</span>
-              <span class="lo-free__meta">${c.rarity ? `${c.rarity}★` : ''}${c.freePick ? ' 原型' : ''}</span>
-            </button>`;
-          });
-        })()}
+        ${freeCandidates.length ? freeCandidates.map((c) => {
+          const taken = freeTaken.has(c.chessId);
+          return html`<button type="button" key=${c.chessId} class=${cx('lo-free__pick', taken && 'is-taken')}
+            data-testid=${`free-pick-${c.chessId}`} disabled=${taken}
+            title=${taken ? `${c.name}：已在自由位置中，不能重复选取` : `${c.name}${c.freePick ? '（原型干员）' : ''}`}
+            onClick=${() => freeAdd(freeFor, c.chessId)}>
+            <span class="lo-free__art"><${Img} src=${chessAvatarUrl(m, c)} fallback=${html`<span class="lo-free__glyph">${[...(c.name || '?')][0]}</span>`} /></span>
+            <span class="lo-free__name">${c.name}</span>
+            <span class="lo-free__meta">${c.rarity ? `${c.rarity}★` : ''}${c.freePick ? ' 原型' : ''}</span>
+          </button>`;
+        }) : html`<p class="lo-free__hint t-dim">没有符合条件的干员</p>`}
       </div>
     <//>` : null}
   </div>`;

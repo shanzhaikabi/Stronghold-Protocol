@@ -476,7 +476,7 @@ const FREE = JSON.parse(readFileSync(path.join(ROOT, 'data/freePicks.json'), 'ut
 const getAny = (id) => (Object.hasOwn(CHESS, id) ? CHESS[id] : Object.hasOwn(FREE, id) ? FREE[id] : null);
 const FREE6 = Object.keys(FREE).filter((id) => FREE[id].rarity === 6).sort();
 const FREE4 = Object.keys(FREE).filter((id) => FREE[id].rarity === 4).sort();
-const NORMAL6 = 'chess_char_3_01_a'; // 能天使: a season 6★ NORMAL — "玩家拥有的六星干员"
+const SEASON6 = 'chess_char_3_01_a'; // 能天使: a season 6★ NORMAL — already in the pool, so NEVER pickable [user]
 const PRESET6 = 'chess_char_3_19_a'; // 伺夜: a season 6★ PRESET — 预设干员, never selectable
 
 test('自选干员: parseStoredPicks 容错(等级键/每级上限/重复/id 形状);toStored 往返', () => {
@@ -493,7 +493,7 @@ test('自选干员: parseStoredPicks 容错(等级键/每级上限/重复/id 形
 test('自选干员: setPick 校验可选身份 / 等级 / 重复 / 槽位上限;clearPick 移除', () => {
   assert.equal(FREE_PICK_PER_LEVEL, 2);
   assert.deepEqual([...FREE_PICK_LEVELS], [5, 6]);
-  assert.deepEqual(setPick({}, 5, NORMAL6, getAny), { 5: [NORMAL6] }, 'a season 六星 NORMAL is pickable');
+  assert.equal(setPick({}, 5, SEASON6, getAny), null, 'a season chess is already in the pool — never pickable [user]');
   assert.deepEqual(setPick({}, 6, FREE6[0], getAny), { 6: [FREE6[0]] }, 'a 六星 自选候选 at 6 级');
   assert.deepEqual(setPick({}, 5, FREE4[0], getAny), { 5: [FREE4[0]] }, 'a 四星 自选候选 at 5 级');
   assert.equal(setPick({}, 6, FREE4[0], getAny), null, 'the same 四星 is not selectable at 6 级');
@@ -513,8 +513,9 @@ test('自选干员: setPick 校验可选身份 / 等级 / 重复 / 槽位上限;
 test('自选干员: freePickSlots 补空槽(界面直接渲染);sanitizePicks 丢掉已不可选的', () => {
   assert.deepEqual(freePickSlots({}), { 5: [null, null], 6: [null, null] });
   assert.deepEqual(freePickSlots({ 5: [FREE4[0]] }), { 5: [FREE4[0], null], 6: [null, null] });
-  const picks = { 5: [NORMAL6], 6: [FREE6[0]] };
+  const picks = { 5: [FREE6[0]], 6: [FREE6[1]] };
   assert.deepEqual(sanitizePicks(picks, getAny), picks, 'selectable picks survive');
+  assert.deepEqual(sanitizePicks({ 5: [SEASON6] }, getAny), {}, 'a stale season-chess pick is dropped [user rule]');
   assert.deepEqual(sanitizePicks({ 5: [PRESET6] }, getAny), {}, 'a PRESET pick is dropped');
   assert.deepEqual(sanitizePicks({ 6: [FREE4[0]] }, getAny), {}, 'a 四星 filed at 6 级 is dropped');
   assert.deepEqual(sanitizePicks({ 5: ['gone'] }, getAny), {}, 'an unknown id is dropped');
