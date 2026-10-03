@@ -106,10 +106,14 @@ export function loadoutRecord(rec, lo) {
  * The attack range a (loadout-resolved) chess record fights with from its deployment — the detail card without a live
  * entry, the board's range overlay and the deploy wheel (DESIGN §16), the same tiles the battle unit starts with (prep
  * m.unitStats `range`): the selected skill's grid when it reads "被动效果：攻击范围扩大" (引星棘刺 S3 3-9: her own range
- * while she carries it, tier5 kit); else an elite whose equipped module reads "攻击范围扩大" uses that module's own grid
+ * while she carries it, tier5 kit); else a chess whose equipped module reads "攻击范围扩大" uses that module's own grid
  * — its range-only talent change (talentIndex −1), e.g. SPC-X = the 3×3 caster range + the centre tile [0,3] — as the
  * kits do (tier4 moduleRangeGrid, tier5 moduleRangeUp); anything else its `rangeGrid`. Then grown by the 特性's
  * permanent 攻击距离 (traitRangeExtend: 信仰搅拌机 SPT-Y "攻击距离+1"). A running skill's range is the live entry's.
+ *
+ * [port] The `rec.isGolden &&` guard upstream puts on the module branch is dropped: the module is read from
+ * `rec.modules`, and a 自选候选 (its own elite — its record has no `_b`, so `isGolden` is never true for it, DESIGN §22)
+ * must be covered like a golden chess. A normal season chess carries no `modules`, so nothing else changes.
  * @param {object|null} rec loadoutRecord(…) output (or a data/chess.json record: its default module)
  * @returns {number[][]|null}
  */
@@ -120,7 +124,7 @@ export function attackRangeGrid(rec) {
   const m = rec.module;
   if (sk && Array.isArray(sk.rangeGrid) && sk.rangeGrid.length && /被动效果：攻击范围扩大/.test(String(sk.desc ?? ''))) {
     g = sk.rangeGrid;
-  } else if (rec.isGolden && m && m.active && m.id && /攻击范围扩大/.test(String(rec.trait?.moduleDesc ?? ''))) {
+  } else if (m && m.active && m.id && /攻击范围扩大/.test(String(rec.trait?.moduleDesc ?? ''))) {
     const mod = (Array.isArray(rec.modules) ? rec.modules : []).find((x) => x && x.uniEquipId === m.id);
     const mg = (mod?.talentChanges || []).find((t) => t && t.talentIndex === -1 && Array.isArray(t.rangeGrid) && t.rangeGrid.length)?.rangeGrid;
     if (mg) g = mg;

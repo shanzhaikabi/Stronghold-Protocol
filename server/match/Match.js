@@ -143,6 +143,8 @@ import { buildBattleSpec, createBattleFromSpec, resultDigest, compactResult as c
 import { CreditPool } from './finalAssault.js';
 import { buildResult } from './results.js';
 import { botPrepBeginSteps, botPrepEndSteps, botPickBand, botPickCard } from './bot.js';
+// TEMPORARY debug room (2026-10-03): remove with server/debugRoom.js (see its header).
+import { grantDebugChess, grantDebugItems, applyDebugRoomSetup } from '../debugRoom.js';
 
 const BOT_REHEARSAL_DEFAULT = 3;
 /** Wall-clock ms of bot layout rehearsal per scheduler callback (real time; virtual time runs it in one go). */
@@ -256,6 +258,12 @@ export class Match {
     /** wall-clock ms per slice of a server-run normal / 联防 field (virtual time: at once) */
     this.headlessSliceMs = Number.isFinite(opts.headlessSliceMs) && opts.headlessSliceMs > 0 ? opts.headlessSliceMs : this.sched.virtual ? Infinity : HEADLESS_SLICE_MS;
     this.verifyStats = { checked: 0, mismatches: 0, rejected: 0, takeovers: 0 };
+    // TEMPORARY debug room (server/debugRoom.js): chess handed to every human at round 1 (null = normal match).
+    this.debugGrants = Array.isArray(opts.debugGrants) && opts.debugGrants.length ? opts.debugGrants.slice() : null;
+    // TEMPORARY debug room (server/debugRoom.js): items (+ their 转职球 pair) handed to every human at round 1.
+    this.debugItems = Array.isArray(opts.debugItems) && opts.debugItems.length ? opts.debugItems.slice() : null;
+    /** TEMPORARY debug room: `{ shopLevel, bondLayers }` applied to every human before round 1's own startRound. */
+    this.debugSetup = opts.debugSetup && typeof opts.debugSetup === 'object' ? { ...opts.debugSetup } : null;
     this._battleSeq = 0;
     /** solo pause (g.pause, DESIGN §14): the field clocks / deadlines are frozen while true (m.public.paused) */
     this.paused = false;
@@ -311,10 +319,13 @@ export class Match {
     this.bossId = setup.bossId;
     this.hiddenBossId = setup.hiddenBossId;
     const bans = drawDisabledBonds(this.gd, this.rngSetup);
-    this.disabledBonds = bans.drawn;
+    // TEMPORARY debug room (server/debugRoom.js): `noBans` opens the whole pool for the test match — no drawn bond
+    // bans, so a 自选干员 whose 主盟约 the draw would have banned (freePickIds) still reaches the shop
+    const openPool = !!(this.debugSetup && this.debugSetup.noBans);
+    this.disabledBonds = openPool ? [] : bans.drawn;
     this.staticInactiveBonds = bans.staticOff;
-    this.bannedChess = bans.banned;
-    this.pool = new SharedPool(this.gd, { banned: bans.banned });
+    this.bannedChess = openPool ? [] : bans.banned;
+    this.pool = new SharedPool(this.gd, { banned: this.bannedChess });
 
     this.phase = PHASE.LOBBY;
     this.round = 0;
@@ -422,6 +433,26 @@ export class Match {
     let res = OK;
     this.guard(() => {
       if (!ps.setLoadout(loadout)) { res = fail(ERR.BAD_TARGET, 'loadout does not match the game data'); return; }
+      this.markPrivate(ps);
+    });
+    return res;
+  }
+
+  /**
+   * 自由位置 picks (DESIGN §22), accepted with room.loadout: only while INFO_CHECK runs, like the loadout itself (the
+   * briefing's 干员调配 entry). The lobby already checked them structurally/semantically; PlayerState.setFreePicks
+   * re-checks against this match's data. Ban filtering is not done here — freePickIds() applies it on demand.
+   * @param {string} playerId
+   * @param {Record<string, string[]> | null} picks `{ [level]: chessId[] }`
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  setFreePicks(playerId, picks) {
+    const ps = this.players.get(playerId);
+    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
+    if (this.disposed || this.ended || this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE, '自选干员 locked for this match');
+    let res = OK;
+    this.guard(() => {
+      if (!ps.setFreePicks(picks)) { res = fail(ERR.BAD_TARGET, '自选干员 do not match the game data'); return; }
       this.markPrivate(ps);
     });
     return res;
@@ -1371,7 +1402,14 @@ export class Match {
     } else {
       this.wave = buildNormalWave(this.gd, this.rngWaves, this.factions, r);
     }
+    // TEMPORARY debug room (server/debugRoom.js): the 调度中心 level and bond layers the room asks for go in BEFORE
+    // the players' own round start (round 1 rolls its shop at the level this leaves); the chess hand-out follows it
+    if (this.debugSetup && r === 1) applyDebugRoomSetup(this, this.debugSetup);
     for (const ps of alive) ps.startRound(r);
+    // TEMPORARY debug room (server/debugRoom.js): the room created by /debug/room hands its chess out here
+    if (this.debugGrants && r === 1) grantDebugChess(this, this.debugGrants);
+    // …and its items (the 转职球 knob) right after, through the same normal acquisition path
+    if (this.debugItems && r === 1) grantDebugItems(this, this.debugItems);
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     for (const ps of alive) ps.recompute();
     this.setDeadline(DELAYS.ROUND_START / 1000, () => this.afterRoundStart(), { silent: this.soloUntimed });
@@ -1540,7 +1578,7 @@ export class Match {
    * pool filtered by `tier` / `minTier` / `maxTier` (number or 'shopLevel') / `bond`; `golden: true` yields the elite id.
    * @returns {{ kind: 'item'|'chess', id: string, golden?: boolean } | null}
    */
-  rollPool(poolId, { shopLevel = 6 } = {}) {
+  rollPool(poolId, { shopLevel = 6, extra = null } = {}) {
     const pools = this.gd.choices.pools && typeof this.gd.choices.pools === 'object' ? this.gd.choices.pools : {};
     const p = typeof poolId === 'string' && Object.hasOwn(pools, poolId) ? pools[poolId] : null;
     if (!p || typeof p !== 'object') return null;
@@ -1571,6 +1609,8 @@ export class Match {
         tier: Number.isInteger(p.tier) ? p.tier : null,
         maxTier,
         filter: (cid, e) => e.tier >= minTier && (!bond || (Array.isArray(this.gd.chess(cid)?.bonds) && this.gd.chess(cid).bonds.includes(bond))),
+        // DESIGN §22: the rolling player's 自选干员 join the draw too (they are part of that player's pool)
+        extra,
       });
     }
     if (!id) return null;

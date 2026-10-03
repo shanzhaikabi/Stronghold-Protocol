@@ -202,9 +202,9 @@ export function normalizeChess(rec) {
 //
 // A loadout `{ skillIndex, moduleId }` (also accepted: `{ skill, module }`, the client's per-browser shape) is resolved
 // against a data/chess.json record: `skillIndex` must be the index of one of `rec.skills` (the skills unlocked at the
-// record's status), `moduleId` 'none' or the uniEquipId of one of `rec.modules` (golden chess only). Anything else —
-// missing, unknown, not unlocked at this record (a tier-1/2 normal chess has no S3) — falls back to the default.
-// Research-shaped records (no `skills` list) always resolve to their single skill.
+// record's status), `moduleId` 'none' or the uniEquipId of one of `rec.modules` (a golden chess, or a 自选候选 — its
+// record is its own elite, DESIGN §22). Anything else — missing, unknown, not unlocked at this record (a tier-1/2 normal
+// chess has no S3) — falls back to the default. Research-shaped records (no `skills` list) resolve to their single skill.
 
 /** Resolve a loadout against a chess record (shared/loadoutRecord.js resolveRecordLoadout). */
 export const resolveLoadout = resolveRecordLoadout;
@@ -500,11 +500,16 @@ export function freezeDef(d) {
 
 /**
  * A DataSource resolves ids to normalised defs. `raw` is `{ chess, enemies, tokens, stages, waves }`.
+ *
+ * `raw.freePicks` (data/freePicks.json, DESIGN §22) is merged into the chess map: a 自选候选 is a chess-shaped record
+ * of that separate file, and the sim has to resolve it like any chess — otherwise `getChess(id)` is null and
+ * `Battle._addAllyFromInput` drops the unit ("unknown chess") the moment a battle starts. A season chess always wins
+ * the (impossible) id collision; the browser runner fetches the file through `SIM_DATA_FILES` (runner.js).
  */
 export class DataSource {
   constructor(raw = {}, fallback = null) {
     this.raw = {
-      chess: asMap(unwrap(raw.chess, 'chess'), 'chessId') ?? {},
+      chess: { ...(asMap(unwrap(raw.chess, 'chess'), 'chessId') ?? {}), ...(asMap(unwrap(raw.freePicks, 'freePicks'), 'chessId') ?? {}) },
       enemies: asMap(unwrap(raw.enemies, 'enemies'), 'key') ?? {},
       tokens: asMap(unwrap(raw.tokens, 'tokens'), 'tokenId') ?? {},
       stages: asMap(unwrap(raw.stages, 'stages'), 'id') ?? {},

@@ -34,7 +34,7 @@ async function safeImport(path) {
 }
 
 const TIERS = await Promise.all([1, 2, 3, 4, 5, 6].map((t) => safeImport(`./kits/tier${t}.js`)));
-// 自选干员 of 自由位置 (DESIGN §21): the hand-authored kits of the 6★ 原型干员 batch (data/freePicks.json records are
+// 自选干员 of 自由位置 (DESIGN §22): the hand-authored kits of the 6★ 原型干员 batch (data/freePicks.json records are
 // keyed by their own chess id, so they never collide with a tier module's `chess_char_N_NN_a` keys)
 const FREE_PICKS = await safeImport('./kits/freePicks.js');
 const DOMAIN_NAMES = ['tokens', 'devices', 'enemies', 'bosses', 'bonds', 'garrisons', 'items', 'bands', 'choices'];

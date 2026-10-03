@@ -25,6 +25,8 @@
 //   trap_create_self_choice {choice_event}                教鞭 / 神秘顾客 (Art)  add a random bounty to your next battle
 // [ASSUMED simplification, documented in docs/META.md: 教鞭/神秘顾客 pick the bounty for the player instead of opening
 //  a personal choice overlay.]
+// [port] 自选干员 guard added to the 信标 handler below (see the comment there); nothing else of ours is kept here — the
+// 突变细胞 is upstream v0.1.1's (PlayerState.transformChess returns the whole equipment set to the 整备区).
 
 import { getData } from '../data.js';
 import { itemKey } from './gamedata.js';
@@ -139,6 +141,13 @@ const ITEM_HANDLERS = {
     onEquip(ctx, ev) {
       const target = ctx.piece(ev.target.uid);
       if (!target) return;
+      // DESIGN §22: a 自选干员 lives in its OWNER's private pool, so 信标 must not hand it to a teammate. The refuse
+      // happens here, before the effect destroys its target — otherwise the operator would be lost for nothing.
+      if (ctx.gd.chess(ctx.gd.baseIdOf(target.id))?.freePick === true) {
+        ev.error = 'BAD_TARGET';
+        ev.detail = '自选干员不能被信标送走';
+        return;
+      }
       const tier = ctx.gd.tierOf(target.id);
       const n = Math.max(1, int(paramsOf(ctx, ev.item).refresh_cnt, 2));
       const bonds = ctx.pieceBonds(target.uid);
@@ -239,6 +248,15 @@ const EFFECT_HANDLERS = {
       if (!to || !p.chessId) return;
       const got = to.grantChess(p.chessId);
       if (got) to.giftTicker(ctx.name, p.chessId);
+    },
+  },
+  // 突变细胞: the cell a battle used up comes back to the item list at the next round start
+  builtin_return_item_next_round: {
+    onRoundStart(ctx) {
+      const ref = ctx.source.ref;
+      ctx.removeEffect(ref.id);
+      const p = ref.params || {};
+      if (p.itemId) ctx.grantItem(p.itemId, { source: 'mutation' });
     },
   },
   // 整备: the next purchased item becomes advanced (golden)
