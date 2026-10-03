@@ -338,10 +338,27 @@ function installLaterano(battle, pid, bb, members) {
  * 流失 (battle.loseHp: no DEF, shields, dodge or damage multipliers — research "5000-point physical 流失"; the kill is
  * credited to the marker) in marking order. A unit that died cancels its remaining marks (as target and as marker).
  * Each devoured operator adds its tier to 阿戈尔 once (IN_BATTLE gain, disabled in 联防 / boss fields).
- * Tokens / devices / empty tiles are never devoured.
+ * Tokens / devices / empty tiles are never devoured. An operator force-withdrawn at the start of a 联防 battle (knocked
+ * out in its own combat) still counts as the operator of its tile for the chain (see the note in `devour`).
  */
 function devour(battle, pid, bb, members) {
   const memberSet = new Set(members);
+  // 联防 (upstream issue #33 item 3, user: "食物链直接断掉"): a helper's operator knocked out at the end of its own
+  // combat is fielded with `carryState { down: true }` and force-withdrawn just before `battleStart` (SIM.md §1.1,
+  // DESIGN §19.3). It is still the operator of its tile (the battle shows it down there), so the battle-start devour
+  // must still see it as that tile's operator: otherwise ONE knocked-out member severs the whole 阿戈尔 food chain —
+  // every member behind it marks nothing, not even the units in front of the members the chain would have reached
+  // through it (measured: 3 members + a fodder, the middle member down ⇒ no devour at all).
+  // It does not ACT: a withdrawn operator is no marker (`order` stays `onField`), it only keeps the chain link and can
+  // be marked (it takes no 流失 — it is not alive). [READING] The official order of "部署完成后…强制退场" (the 联防
+  // setup) against "战斗开始时…吞噬" is not readable from the client data (the sim's ordering is [ASSUMED], DESIGN
+  // §19.3); the other reading — the withdrawn member also devours — is for the next playtest.
+  const downByTile = new Map();
+  for (const u of members) {
+    if (u && u.carry && u.carry.down === true && !u.alive && !u.removed && u.ownerId === pid) {
+      downByTile.set(u.tileR * S.COLS + u.tileC, u);
+    }
+  }
   // "更靠左和靠上": left first (on the player's own board: mirrored players count from the field's right), then top
   // first — row 0 is the BOTTOM row (DESIGN §3), so the top of the board is the highest row index. The order is a
   // board position, independent of the members' directions (only "身前" follows each member's `dir`).
@@ -351,7 +368,8 @@ function devour(battle, pid, bb, members) {
   const opAt = (u) => {
     const [r, c] = S.frontTile(u);
     const a = S.allyAt(battle, r, c, pid);
-    return a && S.isOp(a) && a.alive ? a : null;
+    if (a && S.isOp(a) && a.alive) return a;
+    return downByTile.get(r * S.COLS + c) ?? null; // force-withdrawn: still the operator of its tile
   };
   const markedBy = new Map(); // marker → [targets]
   const marks = [];
@@ -400,10 +418,15 @@ function installEgir(battle, pid, bb, members) {
   battle.on('battleStart', () => devour(battle, pid, bb, members), { once: true });
   if (!reached(battle, pid, 'egirShip', bb.power_bond_char_cnt)) return;
   // 5: "前3名【阿戈尔】干员首次被击倒时立刻复活" — PRTS: the knocked-out unit's next deployment has 0 redeploy time and
-  // 0 cost, i.e. it IS knocked out (被击倒 triggers, 克莱门莎, 幽灵鲨 … fire) and redeploys at once on the tile it was
-  // knocked out on (engine redeploy `tile`: a raid-relocated member comes back where it fell, later redeploys use its
-  // board tile) with full HP, SP reset and `deploy` effects (卡西米尔 / 叙拉古). Death priority 11: before 不屈 (10),
-  // whose redeploy "also consumes a 复活 charge" — with this order the charge is always the one used, same outcome.
+  // 0 cost, i.e. it IS knocked out (被击倒 triggers, 克莱门莎, 幽灵鲨 … fire) and redeploys at once on its INITIAL
+  // DEPLOYMENT TILE with full HP, SP reset and `deploy` effects (卡西米尔 / 叙拉古). That tile is the unit's `homeR/homeC`
+  // — the field tile of the board placement the match fielded it on, already in FIELD coordinates for a boss field
+  // (`mapTile`: board row 9–12 → 2–5, sim/constants BOSS_ROW_OFFSET), so it is the same tile every later redeploy uses;
+  // no separate bookkeeping is needed. User report 2026-10-03: an operator a position-modifying skill moved (乌尔比安 S3's
+  // relocation, any teleport) must not revive "wherever it last stood" on the tile the skill left it on. The tile it fell
+  // on is only the fallback, so an occupied initial tile (a raid redeploy covers a downed operator, issue #50) never
+  // swallows the revive. Death priority 11: before 不屈 (10), whose redeploy "also consumes a 复活 charge" — with this
+  // order the charge is always the one used, same outcome.
   const memberSet = new Set(members);
   const max = Math.max(0, Math.floor(num(bb.max_free_respawn_cnt, 0)));
   const st = { knocked: new Set(), revives: 0 };
@@ -412,7 +435,8 @@ function installEgir(battle, pid, bb, members) {
     if (c.reason !== 'killed' || !memberSet.has(u) || st.knocked.has(u)) return;
     st.knocked.add(u);
     if (st.revives >= max || u.alive || u.removed) return;
-    if (!battle.redeploy(u, { free: true, tile: [u.tileR, u.tileC] }) && !battle.redeploy(u, { free: true })) return;
+    const fell = [u.tileR, u.tileC];
+    if (!battle.redeploy(u, { free: true }) && !battle.redeploy(u, { free: true, tile: fell })) return;
     st.revives++;
     S.fxOn(battle, 'revive', u, 'bond:egirShip', 'respawn', { n: st.revives });
   }, { priority: 11 });
