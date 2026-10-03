@@ -14,6 +14,8 @@
 // { [playerId]: SimClient options } (tamper / mute / stall …), verify ('off' | 'sample' | 'all'), headlessSliceMs
 // (server-run fields in wall-clock slices even in virtual time).
 // Hooks: h.onSend [(playerId, msg) => void], h.onBroadcast [(msg) => void].
+// TEMPORARY debug room (server/debugRoom.js): debugGrants (chess handed out at round 1) and debugSetup
+// ({ shopLevel, bondLayers, noBans } applied before the players' own startRound).
 // Captures: h.sent [[playerId, msg]], h.bc [msg], h.ended (summary), h.logs { error: [], warn: [] }.
 
 import assert from 'node:assert/strict';
@@ -79,6 +81,8 @@ export function makeMatch(o = {}) {
     headlessSliceMs: o.headlessSliceMs,
     // TEMPORARY debug room (server/debugRoom.js): chess handed to every human at round 1
     debugGrants: o.debugGrants ?? null,
+    // … and the `{ shopLevel, bondLayers }` its match starts with (applied before the players' own startRound)
+    debugSetup: o.debugSetup ?? null,
   });
   const m = h.m;
   if (m.clientCombat && o.clients !== false) {
