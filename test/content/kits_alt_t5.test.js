@@ -852,7 +852,10 @@ test('归溟幽灵鲨 S1/S3: the S2 "HP never below 1" guard does not run under 
   hx.step(); hy.step();
   for (const [g, v] of [[hx, x], [hy, y]]) { g.b.dealDamage(null, v, { amount: 1e9, type: 'true' }); g.run(0.5); assert.ok(v.trait.doll); }
   const t2 = tal(y, 1).max_hp;
-  approx(y.s.maxHp / y.base.maxHp, (x.s.maxHp / x.base.maxHp) * (1 + t2 + y.def.traitBb.max_hp) / (1 + t2), 'PUM-Y +20 % substitute HP', 1e-3);
+  // PUM-Y `max_hp` (+20 %) is the trait's own substitute HP bonus (professions.js dollHpMul): the PUM-Y substitute has
+  // the operator's own max HP × 1.2, the PUM-X one × 1 (the substitute HP is NOT "half the operator's" any more)
+  approx(y.s.maxHp / y.base.maxHp, (x.s.maxHp / x.base.maxHp) * (1 + y.def.traitBb.max_hp), 'PUM-Y +20 % substitute HP', 1e-3);
+  approx(x.s.maxHp / x.base.maxHp, 1 + t2, 'PUM-X substitute = own max HP (with the T2 team bonus)', 1e-3);
   assert.ok(!y.findBuff('ghost2:module'), 'no PUM-X ATK');
   approx(y.hpRatio, 1, 'full');
   done(hx); done(hy);

@@ -86,13 +86,21 @@ const installCharger = (battle, unit) => {
 };
 
 const installDollkeeper = (battle, unit) => {
-  // the substitute's HP comes from the unit's own substitute token (风丸 纸偶) for its selected skill / module
-  // (DESIGN §16); a dollkeeper without one (归溟幽灵鲨) must not borrow another operator's token stats → 50 % of its
-  // own max HP
+  // The substitute (替身) fights with the operator's own stats: the trait blackboard's `max_hp` / `atk` are
+  // percentage IMPROVEMENTS of the substitute over the operator — 归溟幽灵鲨's module PUM-Y is written
+  // "切换成<替身>作战（替身阻挡数为0但生命值提升）(+20%)" (battle_equip_table uniequip_003_ghost2, blackboard
+  // `max_hp: 0.2`) and 风丸's PUM-X the same for `atk: 0.15`, which her kit already applies as +15 % of HER OWN ATK
+  // (tier2 `kazema:doll`). Every dollkeeper without such a module carries `max_hp: 0` (character_table trait
+  // candidates) ⇒ the substitute is at 100 % of the operator's max HP. The old 50 % fallback was [ASSUMED] and made
+  // 归溟幽灵鲨's substitute spawn at half health and die to the next hit ("归鲨死了没替身", upstream issue #44).
+  // A substitute token of the unit's own loadout (风丸 纸偶, DESIGN §16) carries the same max HP as the operator
+  // (tokens.json `token_10022_kazema_shadow`: 1816 = 风丸_a, 2214 = 风丸_b) — it is preferred when present.
+  const dollMul = 1 + (unit.profile.dollHpMul ?? 0);
   const dollHp = () => {
     const tokId = (unit.def.tokens || []).map((t) => (typeof t === 'string' ? t : t?.tokenId)).find((t) => t && /shadow|doll/.test(t));
     const tok = tokId ? battle.data.getToken?.(tokId, unit.defId, unit.def?.loadout ?? null) : null;
-    return tok && tok.stats.maxHp > 0 ? tok.stats.maxHp : unit.base.maxHp * 0.5;
+    const base = tok && tok.stats.maxHp > 0 ? tok.stats.maxHp : unit.base.maxHp;
+    return base * dollMul;
   };
   battle.on('fatal', (ctx) => {
     if (ctx.unit !== unit || ctx.prevented || unit.trait.doll) return;
@@ -427,7 +435,7 @@ const TUNE = {
   reaper: (tb) => ({ selfHeal: num(tb.value, 50) }),
   charger: (tb) => ({ dpOnKill: num(tb.cost, 1) }),
   tactician: (tb) => ({ reinforceScale: num(tb.atk_scale, 1.5) }),
-  dollkeeper: (tb) => ({ dollDuration: num(tb.duration, 20) }),
+  dollkeeper: (tb) => ({ dollDuration: num(tb.duration, 20), dollHpMul: num(tb.max_hp, 0) }),
   geek: (tb) => ({ hpDrain: num(tb.hp_ratio, 0.03) }),
   merchant: (tb) => ({ merchantInterval: num(tb.interval, 3), merchantCost: Math.abs(num(tb.cost, -3)) }),
   stalker: (tb) => ({ dodge: num(tb.prob, 0.5) }),

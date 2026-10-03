@@ -198,6 +198,26 @@ test('dollkeeper swaps to a substitute on fatal damage and swaps back after 20 s
   assert.equal(u.alive, false, 'substitute dies ⇒ unit dies');
 });
 
+test('dollkeeper substitute keeps the operator\'s max HP; the trait blackboard max_hp is a bonus on top', () => {
+  // The <替身> is the operator in another mode: the trait's `max_hp` bb is a percentage improvement over the
+  // operator's own max HP (module PUM-Y "生命值提升(+20%)"), 0 for every dollkeeper without that module.
+  const rec = (id, bb) => { const r = mk('dollkeeper', 'SPECIAL', { stats: { maxHp: 2000, blockCnt: 2 } }); r.chessId = id; r.baseId = id; r.trait = { desc: 'test', bb }; return r; };
+  const h = makeBattle({ defs: { chess: { t_doll_plain: rec('t_doll_plain', { duration: 20 }) } }, units: [{ chessId: 't_doll_plain', row: 9, col: 5 }], content: 'none' });
+  h.step();
+  const u = h.unit('t_doll_plain');
+  h.b.dealDamage(null, u, { amount: 1e5, type: 'true' });
+  assert.ok(u.alive && u.trait.doll, 'substitute');
+  approx(u.s.maxHp, 2000, 1e-6); // 100 % of the operator's own max HP (the old fallback was half of it)
+  approx(u.hp, 2000, 1e-6);
+
+  const h2 = makeBattle({ defs: { chess: { t_doll_mod: rec('t_doll_mod', { duration: 20, max_hp: 0.2 }) } }, units: [{ chessId: 't_doll_mod', row: 9, col: 5 }], content: 'none' });
+  h2.step();
+  const v = h2.unit('t_doll_mod');
+  assert.equal(v.profile.dollHpMul, 0.2, 'trait bb max_hp → profile.dollHpMul');
+  h2.b.dealDamage(null, v, { amount: 1e5, type: 'true' });
+  approx(v.s.maxHp, 2400, 1e-6); // 2000 × (1 + 0.2)
+});
+
 test('phalanx never attacks until its skill; librator ramps ATK while idle and resets on skill end', () => {
   const ph = chessRec({ id: 't_ph', profession: 'CASTER', subProfessionId: 'phalanx', attackKind: 'none', dmgType: 'arts', rangeGrid: R3, stats: { atk: 100, def: 100 }, skill: { spCost: 5, initSp: 0, duration: 5, trigger: { rule: 'SEARCH' } } });
   const h = makeBattle({ defs: { chess: { t_ph: ph }, enemies: { enemy_dummy: dummy() } }, units: [{ chessId: 't_ph', row: 10, col: 4 }], enemies: [{ key: 'enemy_dummy', pos: [10, 6] }], content: 'generic' });
