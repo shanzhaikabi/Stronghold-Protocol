@@ -266,14 +266,135 @@ test('hand-authored summoner kits: the board 狼群 deploys before 伺夜 (one p
   checkInvariants(h.b);
 });
 
-test('tactician without a board piece: the 援军 is the real talent token (狼群), never the generic one', REAL, () => {
-  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 20 });
+test('tactician with a placed piece: the 援军 is the real talent token (狼群), never the profession\'s stand-in', REAL, () => {
+  // (the old pin here spawned the pack on a tactical point the sim picked itself with no card placed — user rule
+  //  2026-10-03 overrules it: "必须手动放置"; the no-card case is covered by the "狼群 is a hand card" test below)
+  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 4, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 20 });
   h.step();
-  const vigil = h.unit('chess_char_3_19_a');
+  const vigil = h.unit(1);
   const w = vigil.trait.reinforcement;
-  assert.ok(w && w.alive && w.defId === TOKEN_IDS.wolfPack);
+  assert.ok(w && w.alive && w.defId === TOKEN_IDS.wolfPack && w.uid === 2, 'the placed card is the 援军');
   assert.ok(!h.b.allyUnits.some((u) => u.defId === 'token_tactician_reinforce'));
   checkInvariants(h.b);
+});
+
+// User report 2026-10-03: "缪缪的流型应该要手动放置。现在会自动出现在战斗场上。" 流形 is a hand card (tokens.json
+// `placeable`, PRTS 卫戍协议/帮助 §战斗部署 "如果部署的干员拥有可手动部署的附属召唤物，则该召唤物会立刻加入手牌区"):
+// the 战术点 of a tactician is the tile the player PLACES the card on, so a card left in the hand summons nothing — and
+// the profession's stand-in 援军 (professions.js installTactician) must not take its place either.
+test('流形 is a hand card: 缪尔赛思 with no placed piece summons nothing — no 流形 and no stand-in 援军', REAL, () => {
+  const h = makeBattle({ units: [{ chessId: 'chess_char_6_11_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 20 });
+  h.step();
+  const m = h.unit('chess_char_6_11_a');
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === TOKEN_IDS.manifold), 'no 流形 on the field');
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === 'token_tactician_reinforce'), 'no generic 援军 either');
+  assert.equal(m.trait.reinforcement, undefined, 'no 援军 at all');
+  h.run(5);
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === TOKEN_IDS.manifold), 'still none seconds later');
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === 'token_tactician_reinforce'), 'and no stand-in appeared');
+  checkInvariants(h.b);
+});
+
+test('流形: the piece the player placed is her 援军 and deploys on its own tile, never a fabricated 战术点', REAL, () => {
+  const h = makeBattle({ units: [{ chessId: 'chess_char_6_11_b', row: 12, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.manifold, row: 10, col: 4, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 20 });
+  h.step();
+  const m = h.unit('chess_char_6_11_b');
+  const all = h.b.allyUnits.filter((u) => u.defId === TOKEN_IDS.manifold);
+  assert.equal(all.length, 1, 'exactly one 流形: the placed piece');
+  assert.ok(all[0].alive && all[0].uid === 2);
+  assert.equal(`${all[0].tileR},${all[0].tileC}`, '10,4', 'on the tile the player chose');
+  assert.equal(m.trait.reinforcement, all[0]);
+  checkInvariants(h.b);
+});
+
+// -----------------------------------------------------------------------------------------------------------------
+// The user's rule for EVERY summon-class token (2026-10-03, authoritative): "必须手动放置 —— 放置战术点，然后无限刷新在
+// 战术点上。其他的召唤类也应该是类似的逻辑". 狼群 was the last tactician 援军 that still fabricated itself on a tactical
+// point the player never chose (kits/tier3.js `trait.install`, and content/tokens.js `ensureReinforcement` when the
+// owner's kit is generic); 可露希尔's 指挥中心 (自选干员, generic kit) had the profession's stand-in
+// (`token_tactician_reinforce`, professions.js installTactician) fabricated even beside her placed card.
+const CLOSUR = 'chess_free_char_4228_closur';
+const OURBASE = 'token_10066_closur_ourbase';
+const REINFORCE = 'token_tactician_reinforce';
+
+test('狼群 is a hand card: with no placed piece nothing appears (no 狼群, no stand-in 援军), and none is fabricated later', REAL, () => {
+  for (const [label, extra] of [['real kit', {}], ['generic kit', { kits: { chess_char_3_19_a: genericNoSkill } }]]) {
+    const h = makeBattle({ ...extra, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 20 });
+    h.step();
+    const vigil = h.unit('chess_char_3_19_a');
+    assert.ok(!h.b.allyUnits.some((u) => u.defId === TOKEN_IDS.wolfPack), `${label}: no 狼群 on the field`);
+    assert.ok(!h.b.allyUnits.some((u) => u.defId === REINFORCE), `${label}: no generic 援军 either`);
+    assert.equal(vigil.trait.reinforcement, undefined, `${label}: no 援军 at all`);
+    h.run(5);
+    assert.ok(!h.b.allyUnits.some((u) => u.defId === TOKEN_IDS.wolfPack), `${label}: still none seconds later`);
+    assert.ok(!h.b.allyUnits.some((u) => u.defId === REINFORCE), `${label}: and no stand-in appeared`);
+    checkInvariants(h.b);
+  }
+});
+
+test('狼群: the placed piece IS the pack on its own tile and comes back there after being destroyed (无限刷新在战术点上)', REAL, () => {
+  for (const [label, extra] of [['real kit', {}], ['generic kit', { kits: { chess_char_3_19_a: genericNoSkill } }]]) {
+    const h = makeBattle({ ...extra, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 3, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 60 });
+    h.step();
+    const vigil = h.unit(1), piece = h.unit(2);
+    const packs = () => h.b.allyUnits.filter((u) => u.defId === TOKEN_IDS.wolfPack && u.alive);
+    assert.equal(packs().length, 1, `${label}: exactly one pack`);
+    assert.equal(packs()[0], piece, `${label}: the piece the player placed`);
+    assert.deepEqual([piece.tileR, piece.tileC], [9, 3], `${label}: on the 战术点 the player chose`);
+    assert.equal(vigil.trait.reinforcement, piece, `${label}: it is the 援军`);
+    assert.ok(!h.b.allyUnits.some((u) => u.defId === REINFORCE), `${label}: and no stand-in beside it`);
+    // 2 狼影 at the start: the first fatal hit sheds one, the second one takes the pack down
+    h.b.dealDamage(null, piece, { amount: 1e7, type: 'true' });
+    h.b.dealDamage(null, piece, { amount: 1e7, type: 'true' });
+    assert.equal(piece.alive, false, `${label}: pack down`);
+    const died = h.b.time;
+    h.b.getPlayer('p1').dp = 99;
+    assert.ok(h.runUntil(() => packs().length === 1, 25), `${label}: respawns`);
+    const back = packs()[0];
+    assert.deepEqual([back.tileR, back.tileC], [9, 3], `${label}: back on the same 战术点`);
+    approx(h.b.time - died, piece.base.respawnTime, 0.5, `${label}: after its redeploy time`);
+    assert.equal(vigil.trait.reinforcement, back, `${label}: and it is the 援军 again`);
+    // …and it keeps coming back: the second death returns it once more (无限刷新)
+    h.b.dealDamage(null, back, { amount: 1e7, type: 'true' });
+    h.b.dealDamage(null, back, { amount: 1e7, type: 'true' });
+    assert.equal(back.alive, false, `${label}: down again`);
+    h.b.getPlayer('p1').dp = 99;
+    assert.ok(h.runUntil(() => packs().length === 1, 25), `${label}: back once more`);
+    assert.deepEqual([packs()[0].tileR, packs()[0].tileC], [9, 3], `${label}: still the same 战术点`);
+    checkInvariants(h.b);
+  }
+});
+
+test('可露希尔 指挥中心 (generic tactician): the placed card is her 援军, nothing is fabricated without it, and it returns to its tile', REAL, () => {
+  const h = makeBattle({ units: [{ chessId: CLOSUR, row: 10, col: 3 }], autoFinish: false, timeLimit: 20 });
+  h.step();
+  const c = h.unit(CLOSUR);
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === REINFORCE), 'no stand-in 援军 without a card');
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === OURBASE), 'no 指挥中心 either');
+  assert.equal(c.trait.reinforcement, undefined, 'no 援军 at all');
+  h.run(5);
+  assert.ok(!h.b.allyUnits.some((u) => u.defId === REINFORCE), 'and none is fabricated later');
+  checkInvariants(h.b);
+
+  const h2 = makeBattle({ units: [{ chessId: CLOSUR, row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: OURBASE, row: 9, col: 3, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 60 });
+  h2.step();
+  const c2 = h2.unit(1), piece = h2.unit(2);
+  const bases = () => h2.b.allyUnits.filter((u) => u.defId === OURBASE && u.alive);
+  assert.equal(bases().length, 1, 'the placed card, one piece');
+  assert.equal(bases()[0], piece);
+  assert.equal(c2.trait.reinforcement, piece, 'the placed card IS her 援军');
+  assert.ok(!h2.b.allyUnits.some((u) => u.defId === REINFORCE), 'and the stand-in never appears beside it');
+  assert.deepEqual([piece.tileR, piece.tileC], [9, 3], 'on the 战术点 the player chose');
+  h2.b.dealDamage(null, piece, { amount: 1e7, type: 'true' });
+  assert.equal(piece.alive, false, 'destroyed');
+  const died = h2.b.time;
+  h2.b.getPlayer('p1').dp = 99;
+  assert.ok(h2.runUntil(() => bases().length === 1, 25), 'respawns');
+  const back = bases()[0];
+  assert.deepEqual([back.tileR, back.tileC], [9, 3], 'back on the same 战术点');
+  approx(h2.b.time - died, piece.base.respawnTime, 0.5, 'after its redeploy time');
+  assert.equal(c2.trait.reinforcement, back, 'and it is the 援军 again');
+  checkInvariants(h2.b);
 });
 
 test('流形: copies the nearest operator (scale × stats, block, range, damage type) after its SP fills; melee copy steals ATK/DEF', REAL, () => {
@@ -948,12 +1069,14 @@ test('狼群 S3 bb: while 伺夜\'s timed skill runs, each bite on an enemy the 
   for (const [ownerId, scale] of [['chess_char_3_19_a', 0.2], ['chess_char_3_19_b', 0.3]]) {
     const kit = () => ({ generic: true, talents: [], skill: { kind: 'duration', duration: 60, trigger: 'SP_FULL', spCost: 1, initSp: 1 } });
     const extra = [];
-    const h = makeBattle({ defs: { enemies: { enemy_walker: walker({ atk: 0, res: 0 }) } }, kits: { chess_char_3_19_a: kit }, units: [{ chessId: ownerId, row: 10, col: 3 }], enemies: [{ key: 'enemy_walker', route: 0 }], autoFinish: false, timeLimit: 60,
+    const h = makeBattle({ defs: { enemies: { enemy_walker: walker({ atk: 0, res: 0 }) } }, kits: { chess_char_3_19_a: kit },
+      units: [{ chessId: ownerId, row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 3, uid: 2, ownerUid: 1 }],
+      enemies: [{ key: 'enemy_walker', route: 0 }], autoFinish: false, timeLimit: 60,
       setup: (b) => b.on('damaged', (c) => { if (c.dmg?.tags?.includes('vigil')) extra.push(c.amount); }) });
     h.step(2);
-    const vigil = h.unit(ownerId);
+    const vigil = h.unit(1);
     const wolf = vigil.trait.reinforcement;
-    assert.ok(wolf && wolf.defId === TOKEN_IDS.wolfPack && vigil.skill.active);
+    assert.ok(wolf && wolf.uid === 2 && wolf.defId === TOKEN_IDS.wolfPack && vigil.skill.active, 'the placed pack');
     const e = h.enemy('enemy_walker');
     assert.ok(h.runUntil(() => e.blockedBy === wolf && extra.length >= 2, 30), 'bonus hits');
     approx(extra[0], vigil.s.atk * scale, 1e-9, `${ownerId} S3 bonus`);
@@ -990,14 +1113,15 @@ test('流形 fixes: elite first-deploy +5 SP only once (not after respawn); modu
 });
 
 test('deploy limit: a withdrawn board piece (limit 1) never respawns — no two pieces taking turns', REAL, () => {
-  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }], autoFinish: false, timeLimit: 60, hooks: ['death'] });
+  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 4, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 60, hooks: ['death'] });
   h.step();
-  const vigil = h.unit('chess_char_3_19_a');
+  const vigil = h.unit(1);
   const a = vigil.trait.reinforcement;
-  assert.ok(a && a.alive);
+  assert.ok(a && a.alive && a.uid === 2, 'the placed pack');
   const b = h.b.spawnToken(vigil, TOKEN_IDS.wolfPack, 12, 6);
   assert.ok(b && b.alive);
   assert.equal(a.alive, false, 'oldest withdrawn');
+  h.b.getPlayer('p1').dp = 99;
   h.run(a.base.respawnTime + 5);
   assert.equal(a.alive, false, 'no respawn of the replaced pack');
   assert.equal(b.alive, true);
@@ -1133,19 +1257,20 @@ test('“双眼皮” per player: a partner\'s 机械援助 only switches on the
 // =================================================================================================================
 // verification wave 2 (regressions for the fixes of this pass)
 
-test('tactical point: without a board piece the 援军 (狼群) stands on an enemy ground path inside the tactician range', REAL, () => {
-  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 10 });
+test('tactical point: the 援军 (狼群) stands exactly where the player placed its card, never on a point the sim picked', REAL, () => {
+  // the old behaviour of this test — the pack appearing by itself on an enemy ground path inside the range — is what the
+  // user overruled (2026-10-03: "必须手动放置 —— 放置战术点，然后无限刷新在战术点上")
+  const bare = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 10 });
+  bare.step();
+  assert.equal(bare.unit('chess_char_3_19_a').trait.reinforcement, undefined, 'no card ⇒ no 援军 at all');
+
+  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 5, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 10 });
   h.step();
-  const vigil = h.unit('chess_char_3_19_a');
+  const vigil = h.unit(1);
   const w = vigil.trait.reinforcement;
-  assert.ok(w && w.alive && w.defId === TOKEN_IDS.wolfPack);
-  const onPath = new Set();
-  for (const rt of h.b.routes.filter((x) => x.motion === 'WALK')) for (const [r, c] of h.b.grid.findPath(rt.start[0], rt.start[1], rt.end[0], rt.end[1]) || []) onPath.add(`${r},${c}`);
-  assert.ok(onPath.has(`${w.tileR},${w.tileC}`), `on a path (${w.tileR},${w.tileC})`);
-  assert.ok(vigil.baseRangeKeys.includes(w.tileR * 21 + w.tileC), 'inside the initial range');
-  // official smoothed lanes (grid.js flow field): the upper gate's route (12,10) → (9,2) runs one straight diagonal
-  // through (10,4), so the nearest path tile — same row first — is right beside 伺夜
-  assert.deepEqual([w.tileR, w.tileC], [10, 4], 'the path tile nearest to 伺夜 (same row first)');
+  assert.ok(w && w.alive && w.defId === TOKEN_IDS.wolfPack && w.uid === 2);
+  assert.deepEqual([w.tileR, w.tileC], [9, 5], 'the tile the player placed the card on');
+  assert.ok(vigil.baseRangeKeys.includes(w.tileR * 21 + w.tileC), 'inside the tactician range (the 战术点 rule, issue #9)');
   checkInvariants(h.b);
 });
 
@@ -1153,14 +1278,17 @@ test('狼群 (generic 伺夜): 伺夜\'s own attacks on pack-blocked enemies ign
   const kit = () => ({ generic: true, talents: [], skill: { kind: 'duration', duration: 60, trigger: 'SP_FULL', spCost: 1, initSp: 1 } });
   const own = [], bonus = [];
   // RES 100: the 弱点伤害 garrison keeps the attacks physical (arts would do 5 %)
-  const h = makeBattle({ defs: { enemies: { enemy_walker: walker({ atk: 0, def: 300, res: 100, hp: 1e8 }) } }, kits: { chess_char_3_19_a: kit }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], enemies: [{ key: 'enemy_walker', route: 0 }], autoFinish: false, timeLimit: 60,
+  const h = makeBattle({ defs: { enemies: { enemy_walker: walker({ atk: 0, def: 300, res: 100, hp: 1e8 }) } }, kits: { chess_char_3_19_a: kit },
+    units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 3, uid: 2, ownerUid: 1 }],
+    enemies: [{ key: 'enemy_walker', route: 0 }], autoFinish: false, timeLimit: 60,
     setup: (b) => b.on('damaged', (c) => {
       if (c.source?.defId === 'chess_char_3_19_a' && c.dmg?.isAttack) own.push({ amount: c.amount, type: c.type, blocked: c.target.blockedBy?.defId === TOKEN_IDS.wolfPack });
       if (c.dmg?.tags?.includes('vigil')) bonus.push({ src: c.source?.defId, amount: c.amount });
     }) });
   h.step(2);
-  const vigil = h.unit('chess_char_3_19_a');
+  const vigil = h.unit(1);
   const wolf = vigil.trait.reinforcement;
+  assert.ok(wolf && wolf.uid === 2, 'the placed pack');
   assert.ok(vigil.skill.active);
   assert.ok(h.runUntil(() => own.some((x) => x.blocked) && bonus.some((x) => x.src === 'chess_char_3_19_a'), 30), 'owner hits a pack-blocked enemy');
   const hit = own.find((x) => x.blocked);
@@ -1179,10 +1307,11 @@ test('狼群 (generic 伺夜): 伺夜\'s own attacks on pack-blocked enemies ign
 });
 
 test('狼群 (generic 伺夜): a killed pack waits while 伺夜 is down and comes back with him', REAL, () => {
-  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3 }], autoFinish: false, timeLimit: 120 });
+  const h = makeBattle({ kits: { chess_char_3_19_a: genericNoSkill }, units: [{ chessId: 'chess_char_3_19_a', row: 10, col: 3, uid: 1 }, { kind: 'token', tokenId: TOKEN_IDS.wolfPack, row: 9, col: 3, uid: 2, ownerUid: 1 }], autoFinish: false, timeLimit: 120 });
   h.step();
-  const vigil = h.unit('chess_char_3_19_a');
+  const vigil = h.unit(1);
   const wolf = vigil.trait.reinforcement;
+  assert.ok(wolf && wolf.uid === 2, 'the placed pack');
   h.b.dealDamage(null, wolf, { amount: 1e7, type: 'true' });
   h.b.dealDamage(null, wolf, { amount: 1e7, type: 'true' });
   assert.equal(wolf.alive, false, 'pack down');

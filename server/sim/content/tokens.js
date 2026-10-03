@@ -51,10 +51,12 @@
 // Managed mode: when the summoner runs a hand-authored kit (content/kits), the owner-coupled parts of its summon
 // (海嗣 pulses/lifetime/respawn, 纸偶 burst, 流形 copy/steal/split/respawn/guard, 狼群 S3 bonus & DEF ignore) are
 // left to that kit; kits that pass `opts.kit` to spawnToken replace these token kits entirely.
-// Tacticians (伺夜/缪尔赛思): the player's board 狼群/流形 piece deploys right before its owner so the owner's kit
-// sees its 援军 standing; with the engine's default reinforcement the talent token replaces the generic 援军. Without
-// a board piece the token takes a tactical point: a free walkable tile of the owner's range on an enemy ground path
-// first (`tacticalPoint`), then the one nearest to the owner.
+// Tacticians (伺夜/缪尔赛思/可露希尔): a tactician's 援军 is the hand card its data declares (tokens.json `placeable`:
+// 狼群, 流形, 指挥中心). The tile the player places that card on IS the 战术点 its 特性 "可以在攻击范围内选择一次战术点来
+// 召唤援军" lets them pick once, so nothing is ever fabricated without one — user rule 2026-10-03 (authoritative):
+// "必须手动放置 —— 放置战术点，然后无限刷新在战术点上。其他的召唤类也应该是类似的逻辑". With no card placed the
+// profession's stand-in 援军 (professions.js installTactician) is withdrawn at once, and a destroyed 援军 comes back on the
+// same tile after its redeploy time (`ensureReinforcement`; kits/tier3.js 伺夜, kits/tier6.js 缪尔赛思 own kits).
 // Placed summons (PRTS 卫戍协议/帮助 §作战阶段; user playtest #6): every board summon piece marks the tile its summon
 // deploys on. The talent ones the owner holds from the start (狼群, 海嗣, 流形, 凯瑟琳's devices) deploy with the
 // board, after the operators. A skill's summon (赫默's 医疗探机, 巫恋's 诅咒娃娃: "获得一个…") also deploys once with the
@@ -65,8 +67,8 @@
 // (`releaseSkillSummon`; PRTS "若战场区初始部署有召唤物，若召唤物在战斗期间退场，将在满足条件后立即原地再部署1个"): one
 // in stock at most ("最多可库存1个"), after the token's redeploy time once it left, free [ASSUMED: no DP], never while
 // its owner is off the field — a stocked one deploys as soon as the owner is back. A skill's summon or a device
-// (凯瑟琳) that was not placed never appears (the hidden 待部署区 deploys nothing by itself), nor does 海嗣; only the
-// tacticians' 狼群 / 流形 still come as 援军 on a tactical point (above).
+// (凯瑟琳) that was not placed never appears (the hidden 待部署区 deploys nothing by itself), nor does 海嗣, nor 流形, nor
+// 狼群 (hand cards like the others: every owner links the placed piece and fabricates none of its own — see above).
 // Fallbacks (only while the summoner still uses the generic kit — a hand-authored kit takes over): skill summons
 // (赫默/巫恋 through their placed pieces as above; 蜜蜡/风丸/维娜/耀骑士临光/迷迭香 S3 on a tile of their own) spawn at
 // skill start — also under a hand-authored kit when only the SELECTED skill runs the generic spec (a non-default skill
@@ -1572,10 +1574,16 @@ const SKILL_SUMMONS = Object.freeze({
 });
 /** Pieces per cast of the skill summons placed several at a time (skill description; default 1). */
 const SKILL_SUMMON_PER_CAST = Object.freeze({ [TOKEN_IDS.rosmonGear]: 2 });
-/** Tactician talent tokens that replace the engine's generic 援军. */
-const TACTICIAN_TOKENS = new Set([TOKEN_IDS.wolfPack, TOKEN_IDS.manifold]);
-
 const tokenIdsOf = (u) => (u.def?.tokens || []).map((t) => (typeof t === 'string' ? t : t?.tokenId)).filter(Boolean);
+/**
+ * The 援军 a tactician's own data declares: the manually deployable summon (tokens.json `placeable`) of its token list
+ * — 狼群 (伺夜), 流形 (缪尔赛思), 指挥中心 (可露希尔). Null when its data declares none (only the profession's stand-in
+ * applies then, e.g. a chess with a 战术家 profession but no summon record).
+ */
+function tacticianToken(battle, owner) {
+  return tokenIdsOf(owner).find((t) => battle.data.rawToken?.(t)?.placeable === true) ?? null;
+}
+
 /**
  * How `owner` (its chess and selected skill / module, DESIGN §16) produces `tokenId`: the owner-loadout def's
  * `sources` (getToken(id, owner.defId, owner.def.loadout)); [] when the token has no variant of the owner's own.
@@ -1593,29 +1601,34 @@ function deployLimitOf(u) {
 }
 
 /**
- * Tactical point (战术点) of a tactician when the player placed no 援军 piece: `Battle.findTacticalPoint` — a free
- * walkable tile of its initial range, on an enemy ground path first (where a player would put the blocker), then
- * nearest to the tactician. Shared by every tactician kit (tier3 伺夜, the tokens' own fallback).
+ * Fallback tactical point (战术点) of a tactician: `Battle.findTacticalPoint` — a free walkable tile of its initial
+ * range, on an enemy ground path first (where a player would put the blocker), then nearest to the tactician. Used only
+ * when the 战术点 the player chose — the tile they PLACED the 援军 card on — cannot be taken again (someone else stands
+ * there); the card's own tile always wins, see `ensureReinforcement`.
  */
 export function tacticalPoint(battle, owner) {
   return battle.findTacticalPoint(owner);
 }
 
-/** Make sure a tactician's 援军 is its real talent token (board piece, or a fresh summon on a tactical point). */
+/**
+ * Make sure a tactician's 援军 is the hand card the player placed (the 援军 is never fabricated — user rule 2026-10-03
+ * "必须手动放置 —— 放置战术点，然后无限刷新在战术点上"). The card stands → it is the 援军; it left without being killed
+ * → it takes its tile again; it was destroyed → a fresh 援军 on the 战术点 the player chose (the card's own tile, never
+ * re-checked against the owner's current range: a placed summon stays where it was put, PlayerState._placeable), else the
+ * shared tactical point when that tile is taken. Without a placed card: nothing at all.
+ */
 function ensureReinforcement(battle, owner, tokenId) {
   // (split 流形 clones — this file's `isClone`, the 缪尔赛思 kit's `mlyssClone` — are never the 援军)
   const mine = battle.allyUnits.filter((t) => t.kind === 'token' && t.defId === tokenId && t.ownerUnit === owner && !t.mem.isClone && !t.mem.mlyssClone);
+  const piece = mine.find((t) => t.uid != null);   // only ever the card the player placed
+  if (!piece) return null;                          // no card: no 援军 at all
   const live = mine.find((t) => t.alive);
   if (live) { owner.trait.reinforcement = live; return live; }
   const waiting = mine.find((t) => !t.alive && !t.removed);
   if (waiting && battle.redeploy(waiting, { free: true })) { owner.trait.reinforcement = waiting; return waiting; }
-  // the tactical point the player chose (the board piece's tile, else the last one's) when still usable, else the
-  // shared tactical point
-  const inRange = new Set(owner.baseRangeKeys || owner.rangeKeys || []);
-  const prev = mine.slice().sort((a, b) => (b.uid != null) - (a.uid != null) || b.deploySeq - a.deploySeq)
-    .map((t) => [t.homeR, t.homeC]).find(([r, c]) => Number.isInteger(r) && Number.isInteger(c) && inRange.has(r * COLS + c)
-      && tileFree(battle, r, c) && battle.grid.canStand(r, c, { ranged: true }));
-  const best = prev ?? tacticalPoint(battle, owner);
+  const [hr, hc] = [piece.homeR, piece.homeC];
+  const usable = Number.isInteger(hr) && Number.isInteger(hc) && tileFree(battle, hr, hc) && battle.grid.canStand(hr, hc, { ranged: true });
+  const best = usable ? [hr, hc] : tacticalPoint(battle, owner);
   if (!best) return null;
   const t = battle.spawnToken(owner, tokenId, best[0], best[1]);
   if (t) owner.trait.reinforcement = t;
@@ -1662,18 +1675,35 @@ export function install(battle) {
     if (!toks.length) continue;
     const base = baseKey(owner.def?.baseId ?? owner.defId);
 
-    // tactician 援军 = its talent token: board piece first; replaces the engine's generic 援军 when that one is in use
-    const tac = toks.find((t) => TACTICIAN_TOKENS.has(t));
+    // Tactician 援军 = the hand card its data declares: the tile the player places it on is the 战术点 (user rule
+    // 2026-10-03 "必须手动放置 —— 放置战术点，然后无限刷新在战术点上"). Nothing is ever fabricated without that card:
+    // a hand-authored kit (kits/tier3.js 伺夜, kits/tier6.js 缪尔赛思) declares its own `trait.install` and links the
+    // piece itself, and content/index.js declares the same trait for a kit-less tactician whose data carries a hand card
+    // (`withCardReinforcement`), so the profession's stand-in 援军 (professions.js installTactician) is never installed
+    // for one — only a tactician with no hand card at all keeps it (nothing to place).
+    const tac = tacticianToken(battle, owner);
     if (tac && owner.profile?.sub === 'tactician') {
-      const engineDefault = !!(owner.profile.install && owner.profile.install.name === 'installTactician');
+      const kitLinks = !owner.kit?.generic;   // a hand-authored kit owns the linking (and its own respawn rules)
       battle.on('deploy', (ctx) => {
         if (ctx.unit !== owner) return;
-        if (engineDefault) { ensureReinforcement(battle, owner, tac); return; }
-        // a hand-authored kit summons its own 援军 unless one stands: bring the player's board piece in first
+        if (!kitLinks) { ensureReinforcement(battle, owner, tac); return; }
+        // a hand-authored kit (kits/tier3.js 伺夜, kits/tier6.js 缪尔赛思) links the piece itself unless one stands
         const piece = battle.allyUnits.find((t) => t.kind === 'token' && t.defId === tac && t.ownerUnit === owner && t.uid != null && !t.mem.isClone);
         if (piece && ctx.initial && !piece.alive && !piece.removed && piece.deploySeq === 0) battle.redeploy(piece, { free: true });
         if (piece && piece.alive) owner.trait.reinforcement = piece;
       }, { owner, priority: 50 });
+      if (!kitLinks) {
+        // "无限刷新在战术点上": a destroyed 援军 comes back on the tile the player placed it on (after its redeploy
+        // time), as long as its tactician stands — one knocked out before it returns comes back with its summoner
+        battle.on('death', (ctx) => {
+          const u = ctx.unit;
+          if (ctx.reason !== 'killed' || battle.finished) return;
+          if (!u || u.kind !== 'token' || u.defId !== tac || u.ownerUnit !== owner || u.mem.isClone) return;
+          battle.after(Math.max(0, num(u.base.respawnTime, 0)), () => {
+            if (!battle.finished && owner.alive && owner.deployed) ensureReinforcement(battle, owner, tac);
+          }, { owner });
+        }, { owner });
+      }
     }
 
     // generic-kit fallbacks (a hand-authored kit for the summoner replaces them); skill summons also run when only the

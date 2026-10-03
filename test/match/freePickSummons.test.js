@@ -14,6 +14,8 @@ const free = DATA.freePicks || {};
 const chessOf = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : (Object.hasOwn(free, id) ? free[id] : null));
 const WANG = 'chess_free_char_2027_wang';       // 望 (陷阱师): the reported case
 const STONE = 'token_10064_wang_stone1';        // 棋子
+const CLOSUR = 'chess_free_char_4228_closur';   // 可露希尔 (战术家): her 援军 is a hand card too
+const OURBASE = 'token_10066_closur_ourbase';   // 指挥中心
 
 function start(picks) {
   const seat = { seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, picks };
@@ -67,6 +69,36 @@ test('自选干员 的召唤物 resolve as data, and the season\'s own summons a
     for (const tid of rec.tokens || []) assert.ok((TOK[tid]?.owners || []).includes(id), `${id}: ${tid} owned by it`);
   }
   assert.ok(chessOf(WANG).tokens.includes(STONE));
+});
+
+// User rule 2026-10-03 (authoritative): "必须手动放置 —— 放置战术点，然后无限刷新在战术点上。其他的召唤类也应该是类似的
+// 逻辑". 可露希尔 is the third 战术家 (the other two are the season's 伺夜 / 缪尔赛思): her 援军 is the 指挥中心 card, not a
+// stand-in the profession makes up — the battle side is test/content/tokens_devices.test.js.
+test('自选干员 的召唤物: 可露希尔 (战术家) 的 指挥中心 是手牌 —— 摆放它的那一格才是战术点', () => {
+  assert.ok(free[CLOSUR], 'fixture: 可露希尔 is a 自选候选');
+  assert.deepEqual(free[CLOSUR].tokens, [OURBASE], 'the record carries her 援军');
+  assert.equal(free[CLOSUR].subProfessionId, 'tactician', 'and she is a 战术家');
+  const tok = DATA.tokens[OURBASE];
+  assert.equal(tok.placeable, true, '指挥中心 is a hand card (placeable)');
+  assert.deepEqual(tok.owners, [CLOSUR]);
+  const h = start({ 5: [CLOSUR] });
+  const m = h.m, ps = h.ps('p_0');
+  assert.deepEqual(m.gd.placeableTokens(CLOSUR).map((x) => x.tokenId), [OURBASE], 'the card list follows the record');
+  h.toPrep(1);
+  give(m, ps, CLOSUR, 'board', legalTileFor(m, ps, CLOSUR));
+  const card = ps.hand.find((p) => p && p.kind === 'token' && p.id === OURBASE);
+  assert.ok(card, 'the summon joined the hand when 可露希尔 was deployed');
+  // the player places it by hand; the 战术点 rule confines it to her attack range (issue #9)
+  let placed = null;
+  for (let r = FIELD.r1; r >= FIELD.r0 && !placed; r--) {
+    for (let c = FIELD.c0; c <= FIELD.c1 && !placed; c++) {
+      const to = { area: 'board', row: r, col: c };
+      if (m.handle('p_0', { t: 'g.move', uid: card.uid, to, dir: 'RIGHT' }).ok) placed = [r, c];
+    }
+  }
+  assert.ok(placed, 'a legal 战术点 exists and the card can be placed on it');
+  assert.equal(ps.board.get(tileKey(placed[0], placed[1]))?.id, OURBASE, '指挥中心 stands where the player put it');
+  h.m.dispose();
 });
 
 /** The first 高台 tile (a tile only a RANGED-position piece may stand on) of `ps`'s deploy map, or null. */

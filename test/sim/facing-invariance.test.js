@@ -100,13 +100,17 @@ test('localOrder / localBefore: the facing-RIGHT frame tie-break equals the tile
 });
 
 test('战术家 援军 (伺夜): the tactical point is the tile in FRONT along the direction (not the one beside it)', () => {
+  // the 援军 itself is a hand card (user rule 2026-10-03) — the pack stands on the tile the player placed it on; what
+  // still turns with the owner's direction is the tactical point the sim falls back to (findTacticalPoint), used when
+  // that tile cannot be taken again
   for (const dir of ['RIGHT', 'UP', 'DOWN', 'LEFT']) {
     const h = makeBattle({ stage: OPEN, rect: RECT, routes: FAR_ROUTE, units: [{ chessId: 'chess_char_3_19_a', row: R0, col: C0, dir, abs: true }], autoFinish: false, timeLimit: 30 });
     h.run(2);
-    const wolf = h.b.allyUnits.find((u) => u.kind === 'token' && u.alive);
-    assert.ok(wolf, `${dir}: the pack is summoned`);
-    assert.deepEqual([wolf.tileR - R0, wolf.tileC - C0], rotateOffset(0, 1, dir), `${dir}: in front of 伺夜`);
-    assert.equal(wolf.dir, dir, 'the summon takes the owner direction');
+    const vigil = h.b.allyUnits.find((u) => u.defId === 'chess_char_3_19_a');
+    assert.equal(vigil.trait.reinforcement, undefined, `${dir}: no card placed ⇒ no 援军`);
+    const tile = h.b.findTacticalPoint(vigil);
+    assert.ok(tile, `${dir}: a tactical point exists`);
+    assert.deepEqual([tile[0] - R0, tile[1] - C0], rotateOffset(0, 1, dir), `${dir}: in front of 伺夜`);
   }
 });
 

@@ -73,13 +73,31 @@ export function setupUnitKit(battle, unit, mode = 'full') {
     if (typeof f === 'function') {
       try {
         const k = f(bb, raw, def);
-        if (k) return selectSkillSpec(k, bb, raw, def);
+        if (k) return selectSkillSpec(mode === 'full' ? withCardReinforcement(k, def, battle) : k, bb, raw, def);
       } catch (e) {
         battle._handlerError(`kit:${def.baseId}`, unit, e);
       }
     }
   }
-  return genericKit(bb, raw, def);
+  return mode === 'full' ? withCardReinforcement(genericKit(bb, raw, def), def, battle) : genericKit(bb, raw, def);
+}
+
+/**
+ * A 战术家 whose own data declares a manually deployable 援军 (tokens.json `placeable`: 狼群 / 流形 / 指挥中心) never gets
+ * the profession's stand-in 援军 (professions.js installTactician): the hand card the player places IS the 援军 and the
+ * tile they place it on is its 战术点 — user rule 2026-10-03 (authoritative) "必须手动放置 —— 放置战术点，然后无限刷新在
+ * 战术点上。其他的召唤类也应该是类似的逻辑". Declaring a `trait` is exactly how the hand-authored kits do it
+ * (kits/tier3.js 伺夜 and kits/tier6.js 缪尔赛思 declare their own `trait.install`, which resolveProfile prefers over the
+ * profession's), so a kit-less tactician gets the same declaration here: content/tokens.js then links the piece the
+ * player placed, brings it back to its tile after it is destroyed, and fabricates nothing when no card was placed. A
+ * tactician whose data declares no such card (a synthetic one) keeps the stand-in — it has no hand card to place.
+ */
+export function withCardReinforcement(kit, def, battle) {
+  if (!kit || kit.trait || !def || def.subProf !== 'tactician') return kit;
+  const toks = (def.tokens || []).map((t) => (typeof t === 'string' ? t : t?.tokenId)).filter(Boolean);
+  const card = toks.find((t) => battle?.data?.rawToken?.(t)?.placeable === true);
+  if (!card) return kit;
+  return { ...kit, trait: { install() { /* the 援军 is the hand card: content/tokens.js links it (see `tacticianToken`) */ } } };
 }
 
 /** A unit's own PlayerBattleInput entry (operators: kind ≠ 'token'; tokens: kind 'token'), or null. */

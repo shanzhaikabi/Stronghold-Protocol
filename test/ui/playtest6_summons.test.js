@@ -72,7 +72,11 @@ test('the guide and SIM.md state the start-of-battle rule the switch selects (fl
     assert.match(sim, /a skill's summon[^.]*waits on its tile and takes the field there\s+each time the skill gives one/, 'SIM.md token pieces');
   }
   // the exception for unplaced summons is stated for the summons it holds for (test/content/playtest6_summons)
-  assert.match(playing, /狼群、流形（战术家的援军）没有摆放时会在战术点出现/);
+  assert.match(playing, /狼群（战术家的援军）没有摆放时也不会出现/, 'user rule 2026-10-03: tactician 援军 are hand cards');
+  assert.match(playing, /摆放它的那一格就是「战术点」/, 'and the card\'s tile IS the 战术点');
+  assert.match(playing, /无限刷新/, 'destroyed ⇒ infinitely respawns on that 战术点');
+  assert.match(playing, /流形、指挥中心同理/, 'the rule covers every tactician summon');
+  assert.ok(!/狼群（战术家的援军）没有摆放时会在战术点出现/.test(playing), 'the old auto-spawn wording is gone');
   assert.ok(!/没有摆放的召唤物不会出现/.test(playing), 'no blanket "unplaced summons never appear"');
 });
 

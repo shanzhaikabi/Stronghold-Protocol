@@ -402,16 +402,17 @@ test('getToken: def.sources / def.count follow the owner loadout (which summons 
 });
 
 test('a Battle built WITHOUT the spec path (server-run fields) resolves mid-battle summons with the owner loadout', { skip }, () => {
-  // 缪尔赛思 without a 流形 piece: her 援军 is summoned during the battle (凯瑟琳's devices, the old example, are placed
-  // pieces since user playtest #6)
+  // 缪尔赛思 with the 流形 piece the player placed (a hand card: since user report 2026-10-03 the sim summons none by
+  // itself, kits/tier6.js). A placed token resolves its def through the same owner loadout the mid-battle path uses.
   const MLYSS = 'chess_char_6_11_a', WTRMAN = 'token_10030_mlyss_wtrman';
   const run = (skillIndex) => {
     const players = [{ playerId: 'p1', seat: 0, side: 'L', colOffset: 0, bonds: {}, playerEffects: [],
-      units: [{ uid: 1, kind: 'chess', chessId: MLYSS, row: 10, col: 5, dir: 'RIGHT', ...(skillIndex != null ? { skillIndex } : {}) }] }];
+      units: [{ uid: 1, kind: 'chess', chessId: MLYSS, row: 10, col: 5, dir: 'RIGHT', ...(skillIndex != null ? { skillIndex } : {}) },
+        { uid: 2, kind: 'token', tokenId: WTRMAN, ownerUid: 1, row: 10, col: 6, dir: 'RIGHT' }] }];
     const b = new Battle({ seed: 3, kind: 'normal', stageId: 'act2autochess_m01', timeLimit: 30, players, spawns: [], routes: [], data: freshDs(), recordEvents: false, quiet: true });
-    for (let i = 0; i < 60 && !b.allyUnits.some((u) => u.defId === WTRMAN); i++) b.step();
+    for (let i = 0; i < 60 && !b.allyUnits.some((u) => u.defId === WTRMAN && u.alive); i++) b.step();
     const t = b.allyUnits.find((u) => u.defId === WTRMAN);
-    assert.ok(t && t.uid == null, 'a 流形 spawned during the battle');
+    assert.ok(t && t.uid === 2, 'the placed 流形 piece deployed');
     return [b, t];
   };
   const [b1, t1] = run(0);
