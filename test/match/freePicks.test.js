@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ERR } from '../../shared/constants.js';
+import { createRng } from '../../server/sim/rng.js';
 import { DATA, makeMatch, give, giveItem } from './harness.js';
 
 const free = DATA.freePicks || {};
@@ -80,7 +81,7 @@ test('自选干员: m.private 暴露真正进池的列表;Match.setFreePicks 仅
   m.dispose();
 });
 
-test('自选干员: 进入本人池 —— 出现在该玩家的抽卡候选里,并绕过 tier ≤ 调度中心等级 的门槛', () => {
+test('自选干员: 进入本人池 —— 出现在该玩家的抽卡候选里,并按自己的阶级服从 tier ≤ 调度中心等级', () => {
   const h = start({ 5: [proto6[0]] });
   const ps = h.ps('p_0');
   const entries = ps.freePickEntries();
@@ -90,9 +91,19 @@ test('自选干员: 进入本人池 —— 出现在该玩家的抽卡候选里,
 
   // the shared pool alone never lists it — a prototype is not a season chess
   assert.ok(!h.m.pool._eligible({ maxTier: 6 }).some(([id]) => id === proto6[0]), 'absent from the shared list');
-  // …but this player's draw does, even at 5 级 with a 6★ pick (that is the plan-A gate bypass)
-  assert.ok(h.m.pool._eligible({ maxTier: 5, extra: entries }).some(([id]) => id === proto6[0]), 'listed at 5 级 too');
-  // an exact-tier request (the reward / effect rolls) still filters by tier
+  // …and this player's draw obeys the same gate as any operator of that tier (DESIGN §21; research 01 §6
+  // "shop level L offers operators of tier ≤ L"): a 6★ pick is NOT drawable at 调度中心 5 级, only at 6 级
+  const lists = (maxTier) => h.m.pool._eligible({ maxTier, extra: entries }).some(([id]) => id === proto6[0]);
+  const shared6 = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 6).chessId;
+  const sharedAt = (maxTier) => h.m.pool._eligible({ maxTier }).some(([id]) => id === shared6);
+  for (const level of [1, 4, 5]) {
+    assert.equal(lists(level), false, `not listed at 调度中心 ${level} 级`);
+    assert.equal(sharedAt(level), false, `(a season 6★ is not either — no special case)`);
+  }
+  assert.equal(lists(6), true, 'drawable at 6 级');
+  assert.equal(sharedAt(6), true);
+  // an exact-tier request (the merge promotion reward / 信标) still filters by tier — that is how a lower-level merge
+  // legitimately reaches one tier above (research 01 §7)
   assert.ok(!h.m.pool._eligible({ tier: 5, extra: entries }).some(([id]) => id === proto6[0]), 'not for an exact tier-5 draw');
   assert.ok(h.m.pool._eligible({ tier: mine.tier, extra: entries }).some(([id]) => id === proto6[0]), 'but for its own tier');
   // the caller's filter applies to extras as well (寻呼模块 etc. roll by bond)
@@ -100,6 +111,53 @@ test('自选干员: 进入本人池 —— 出现在该玩家的抽卡候选里,
   assert.ok(!h.m.pool._eligible({ maxTier: 6, extra: entries, filter: (id, e) => e.tier === 4 }).some(([id]) => id === proto6[0]), 'filter sees the extra tier');
 
   assert.deepEqual(h.ps('ai_0').freePickEntries(), [], 'other players never see it — the pool is private');
+  h.m.dispose();
+});
+
+test('自选干员: 商店槽位按调度中心等级放行 —— 5 级抽不到 6★ 选取,6 级能;4★ 预备干员 4 级就进池', () => {
+  const t4 = freeIds.find((id) => free[id].rarity === 4);
+  const h = start({ 5: [proto6[0], t4] });   // a 6★ pick and a 4★ 预备干员 (pickable at 5 级, tier 4)
+  const ps = h.ps('p_0');
+  h.toPrep(1);
+  /** id sets the shop slot yields at a level (the real `PlayerState._rollChessSlot` call). */
+  const shopIds = (level, n = 400) => {
+    ps.shop.level = level;
+    const seen = new Set();
+    for (let i = 0; i < n; i++) seen.add(ps._rollChessSlot().id);
+    return seen;
+  };
+  for (const level of [1, 4, 5]) {
+    const seen = shopIds(level);
+    assert.ok(!seen.has(proto6[0]), `the 6★ pick never rolls at 调度中心 ${level} 级`);
+    assert.ok([...seen].every((id) => h.m.gd.tierOf(id) <= level), `nothing above the gate at ${level} 级`);
+  }
+  assert.ok(shopIds(4).has(t4), 'the 4★ 预备干员 (tier 4) IS drawable at 4 级 — same gate as a normal T4');
+  assert.ok(!shopIds(3).has(t4), 'and not at 3 级');
+  assert.ok(shopIds(6).has(proto6[0]), 'the 6★ pick is drawable once 调度中心 reaches 6 级');
+  h.m.dispose();
+});
+
+test('自选干员: 三合一晋升奖励 — 5 级合出的 6★ 抽取里能有选取,4 级合出的 5★ 抽取里能有 5★ 选取', () => {
+  // the roster has no 5★ record (6★ + the 4★ 预备干员 only), so the level-4 case gets one injected: same shape, its
+  // own 自选干员 data, tier 5, selectable at 调度中心 5 级 only
+  const T5 = 'chess_free_test_t5';
+  const data = { ...DATA, freePicks: { ...free, [T5]: { ...free[proto6[0]], chessId: T5, baseId: T5, name: '测试五星原型', rarity: 5, tier: 5, freePickLevels: [5] } } };
+  const seat = { seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, picks: { 5: [T5, proto6[0]] } };
+  const bot = { seat: 1, playerId: 'ai_0', name: 'AI0', isBot: true, connected: true };
+  const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: SEED, fake: true, data, seats: [seat, bot] }).start();
+  const ps = h.ps('p_0');
+  const entries = ps.freePickEntries();
+  assert.equal(entries.length, 2, 'both picks joined the pool');
+  const rng = () => createRng(5);
+  for (const [level, pick, tier] of [[4, T5, 5], [5, proto6[0], 6]]) {
+    ps.shop.level = level;
+    ps.offers.length = 0;
+    const offer = ps.pushRewardOffer('merge');   // what _mergeChess queues after a 三合一
+    assert.equal(offer.tier, tier, `a merge at ${level} 级 offers tier ${tier} (research 01 §7 min(shopLevel+1, 6))`);
+    // the offer's own roll (PlayerState.pushRewardOffer: `pool.roll(rng, { tier: tt, filter: fresh, extra })`) admits it
+    assert.ok(h.m.pool._eligible({ tier, extra: entries }).some(([id]) => id === pick), `the tier-${tier} candidate set contains the pick`);
+    assert.equal(h.m.pool.roll(rng(), { tier, filter: (id) => id === pick, extra: entries }), pick, 'and an exact-tier roll can yield it');
+  }
   h.m.dispose();
 });
 

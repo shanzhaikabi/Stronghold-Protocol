@@ -80,8 +80,49 @@ test('rolls are copy-weighted: an exhausted chess never rolls; tier/filter optio
   assert.equal(f, chessOfTier(5)[2]);
 });
 
-test('item slot: tier ≤ level, shop-eligible normal equipment only', () => {
-  const gd = gdOf();
+test('自选干员 (extra entries) honour the same shop tier gate as any operator: level L ⇒ tier ≤ L (user report 2026-10-03)', () => {
+  const pool = new SharedPool(gdOf());
+  const extra = [
+    { id: 'free_4', tier: 4, left: 3 }, { id: 'free_5', tier: 5, left: 3 }, { id: 'free_6', tier: 6, left: 3 },
+  ];
+  const tierOf = new Map(extra.map((x) => [x.id, x.tier]));
+  /** The extra entries a call admits, in order ("id:left"). */
+  const admitted = (opts) => pool._eligible({ extra, ...opts })
+    .filter(([id]) => tierOf.has(id)).map(([id, n]) => `${id}:${n}`);
+  for (let level = 1; level <= 6; level++) {
+    assert.deepEqual(admitted({ maxTier: level }),
+      extra.filter((x) => x.tier <= level).map((x) => `${x.id}:${x.left}`), `shop level ${level}`);
+  }
+  // the call the shop slot makes (PlayerState._rollChessSlot) never returns one above the level …
+  const rng = createRng(11);
+  for (let level = 1; level <= 6; level++) {
+    for (let i = 0; i < 500; i++) {
+      const id = pool.roll(rng, { maxTier: level, extra });
+      const t = tierOf.get(id);
+      assert.ok(t == null || t <= level, `level ${level} rolled ${id}`);
+    }
+    // … and a pick IS reachable at its own tier once the gate allows it (alone under a filter: its copy weight)
+    if (level >= 4) {
+      const id = `free_${level}`;
+      assert.equal(pool.roll(rng, { maxTier: level, extra, filter: (x) => x === id }), id, `level ${level} draws ${id}`);
+    }
+  }
+  // an exact-`tier` request (the merge promotion reward, 信标) is how a lower level reaches one tier above
+  assert.deepEqual(admitted({ tier: 5 }), ['free_5:3']);
+  assert.deepEqual(admitted({ tier: 6 }), ['free_6:3']);
+  assert.ok(!admitted({ tier: 6 }).some((s) => s.startsWith('free_5')), 'a tier-6 roll never yields a 5★ pick');
+  // the caller's filter and the copy weight still apply to them
+  assert.deepEqual(admitted({ maxTier: 6, filter: (id) => id !== 'free_5' }), ['free_4:3', 'free_6:3'], 'filter respected');
+  assert.ok(!pool._eligible({ maxTier: 6, extra: [{ id: 'free_6', tier: 6, left: 0 }] }).some(([id]) => id === 'free_6'), 'an exhausted pick drops out');
+  // and the shared pool is untouched by passing extras: the same entries, the same weights
+  const shared = (opts) => pool._eligible(opts).filter(([id]) => !tierOf.has(id));
+  for (let level = 1; level <= 6; level++) {
+    assert.deepEqual(shared({ maxTier: level, extra }), shared({ maxTier: level }), `level ${level}: shared chess unchanged`);
+  }
+  assert.deepEqual(shared({ tier: 5, extra }), shared({ tier: 5 }));
+});
+
+test('item slot: tier ≤ level, shop-eligible normal equipment only', () => {  const gd = gdOf();
   const pool = new SharedPool(gd);
   const rng = createRng(99);
   for (let level = 1; level <= 6; level++) {
