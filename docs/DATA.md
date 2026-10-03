@@ -252,9 +252,9 @@ them up by accident. Records carry the same shape as §2 plus:
 | `bondSource` | `prts` / `hint:lungmen` / `none` | where that bond came from (build diagnostics) |
 | `garrisonIds` | `[]` | 自选干员 不拥有特质 |
 | `charId`, `assets` | `char_608_acpion`, … | the operator's own art (avatar / portrait / spine / skill icon) |
-| `tier` | `6` / `4` | **provisional** (= rarity); the 自由位置 shop-tier gate is settled together with the pool work |
+| `tier` | `6` / `4` | the operator's shop tier (= its rarity): a pick obeys the ordinary gate, `tier ≤ 调度中心 level`, and only an exact-tier roll (the 三合一 promotion reward, `tier = min(shopLevel + 1, 6)`) is how a lower level reaches one tier above (DESIGN §21.6) |
 | `module`, `modules[]`, `status.equipLevel`, `statsBase` / `traitBase` / `talentsBase` | see §2.2 | 模组 of the operator (user rule 模组相关规则和普通干员一致): the record is **its own elite** (no `_b` sibling), so it carries the same block a golden chess does — default = the season's `backupCharUniEquipId` for that character, else the first ADVANCED 模组, else 不装备; level = the season's tier rule (6★ ⇒ 3). A character with no ADVANCED 模组 (all six 4★ 预备干员) keeps `module: null`, `equipLevel: 0` and no `modules[]` — `checkLoadout` then refuses a module for it |
-| `tokens` | `[]` | empty until these operators' skills get kits — their summons belong to that step |
+| `tokens` | `["token_10064_wang_stone1"]` | the operator's summons, resolved like a season chess's (26 of the 93 picks grant summons = 37 token records, `tokens.json` 22 → 59 keys). Its battle behaviour is still whatever `content/tokens.js` authors for that token id — a summon without an entry uses the generic token kit (DESIGN §21.11) |
 
 **The roster is derived, not listed** (`freePickCharIds` in `tools/build-data.mjs`): every 6★ operator of
 `character_table` that **no season chess record uses** — so a candidate can never duplicate one the shop already offers
@@ -265,8 +265,10 @@ the season's own `backup` data (`docs/research/03-operators.json`).
 entry — including a `null` entry, meaning "checked, none of the 8" — then the client-data hints `nationId` / `groupId` /
 `teamId` (`FACTION_BOND`: 阿戈尔 / 卡西米尔 / 拉特兰 / 萨尔贡 / 维多利亚 / 谢拉格 / 叙拉古 / 炎, where 龙门 and every 炎
 sub-faction count as 炎), else 协防干员. Hints alone are not enough: the client data carries no 隐藏势力 and disagrees with
-PRTS for many operators. Addition of assets (`docs/research/07-assets.md` §0) and a kit spec per skill are the follow-up
-work for newly added operators — an operator without art renders as its first character rather than breaking.
+PRTS for many operators. The art of the 78 candidates outside research 07 comes from a locally installed PC client
+(`tools/local-extract/extract.py` → `tools/assets/plan.mjs syntheticOperator` → `node tools/fetch-assets.mjs --offline`);
+art stays optional at runtime, so an operator without it renders as its first character rather than breaking (DESIGN
+§21.10). A hand-authored kit per summon is still the follow-up work (DESIGN §21.11).
 `test/freePicks.test.js` locks the invariants (roster derived + no pool duplicate, one 主盟约, no 特质, prototype art).
 
 ---
