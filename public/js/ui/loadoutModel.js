@@ -55,10 +55,10 @@ export function parseStored(raw) {
   return out;
 }
 
-/** Serialised form for localStorage (entries + 自由位置 picks, DESIGN §21). */
+/** Serialised form for localStorage (entries + 自由位置 picks, DESIGN §22). */
 export const toStored = (entries, picks = {}) => ({ v: LOADOUT_VERSION, entries: entries || {}, picks: picks || {} });
 
-// ---- 自由位置 picks (DESIGN §21) ------------------------------------------------------------------------------------
+// ---- 自由位置 picks (DESIGN §22) ------------------------------------------------------------------------------------
 
 /** The 调度中心 levels that hold 自由位置 slots (5 级 and 6 级), re-exported for the screen. */
 export const FREE_PICK_LEVELS = Object.freeze([...FREE_PICK_LIMITS.levels]);
@@ -120,7 +120,7 @@ export function sanitizePicks(picks, getChess) {
 }
 
 /**
- * Put `id` into the 自由位置 slot list of `level` (DESIGN §21). Returns the NEW picks, or null when the operator is
+ * Put `id` into the 自由位置 slot list of `level` (DESIGN §22). Returns the NEW picks, or null when the operator is
  * not selectable at that level, is already picked at another level, or the level's slots are full.
  * @param {any} picks @param {number|string} level @param {string} id @param {(id: string) => any} getChess
  * @returns {Record<string, string[]> | null}
@@ -233,7 +233,7 @@ export function parseImport(input) {
 
 /**
  * The chess records of one loadout slot.
- * A 自选候选 (DESIGN §21, `freePick: true`) has `goldenId: null` and no `_b` sibling but carries its own `modules[]`
+ * A 自选候选 (DESIGN §22, `freePick: true`) has `goldenId: null` and no `_b` sibling but carries its own `modules[]`
  * (DATA.md / tools/build-data.mjs freePickModuleBlock), so the record is returned as its own elite — the detail panel
  * then shows its 模组 section exactly like a season operator's (模组相关规则和普通干员一致).
  * @param {string} baseId normal chess id
@@ -381,7 +381,7 @@ export function selectedModule(loadout, chess, getChess) {
  */
 /**
  * Whether a chess record is a loadout slot (what the server's `checkLoadout` accepts): a visible season chess, or a
- * 自选候选 of the free-pick roster (DESIGN §21 — invisible + hidden by design so the shop pool never offers it, yet its
+ * 自选候选 of the free-pick roster (DESIGN §22 — invisible + hidden by design so the shop pool never offers it, yet its
  * owner picks it and configures its skill like any other operator).
  */
 export const isLoadoutSlot = (c) => !!c && !c.isGolden && !c.isDiy && (!c.baseId || c.baseId === c.chessId)
@@ -394,7 +394,7 @@ export function rosterOf(list) {
 }
 
 /**
- * The 自由位置 candidates a 调度中心 level may draw from (DESIGN §21): the 自选候选 records of `data/freePicks.json`.
+ * The 自由位置 candidates a 调度中心 level may draw from (DESIGN §22): the 自选候选 records of `data/freePicks.json`.
  * The season pool never appears — a candidate is by definition an operator it does NOT offer [user] — and the level gate
  * is `freePickLevelsOf`, the same function the server checks with. Sorted 6★ first (the 4★ 预备干员 last).
  * @param {any[]} list data.list('freePicks') @param {number} level 5 or 6

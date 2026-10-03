@@ -312,7 +312,7 @@ function Filters({ m, filters, onFilters, bonds }) {
   </div>`;
 }
 
-// ---- 自由位置 (DESIGN §21) -------------------------------------------------------------------------------------------
+// ---- 自由位置 (DESIGN §22) -------------------------------------------------------------------------------------------
 //
 // 调度中心 5 级 and 6 级 each hold two 自由位置 slots: the player picks an operator BEFORE the match and it joins their OWN
 // shop pool — drawn at random like any other operator, never gifted away by 信标, and its pool is private (server:
@@ -477,7 +477,7 @@ function LoadoutScreen({ st }) {
   const [freeFor, setFreeFor] = useState(null);
   const [freeSel, setFreeSel] = useState(null);            // 自由位置 sub-page: the candidate it shows
 
-  // 自由位置 (DESIGN §21) — its own sub-page (FreePickPage), opened from a slot. `m.private.freePicks` is what the server
+  // 自由位置 (DESIGN §22) — its own sub-page (FreePickPage), opened from a slot. `m.private.freePicks` is what the server
   // actually let into the pool: a pick missing from it was dropped because its 主盟约 is banned this match, and the strip
   // marks it instead of silently doing nothing.
   const freePicks = st.picks || {};
@@ -565,7 +565,7 @@ function LoadoutScreen({ st }) {
   const [syncText, syncCls] = SYNC_TEXT[st.sync] || SYNC_TEXT.idle;
   const fromText = st.from === 'briefing' ? '确认本局信息阶段结束前可调整本局配置' : '开始模拟前可调整干员携带的技能与模组，干员等级不可调整';
 
-  // The 自由位置 sub-page (DESIGN §21) is a screen of its own, like the main 干员调配 one — it replaces the overlay
+  // The 自由位置 sub-page (DESIGN §22) is a screen of its own, like the main 干员调配 one — it replaces the overlay
   // entirely, so a 自选干员 is browsed, filtered and configured with exactly the same components. Every hook above runs
   // before this point, so the early return cannot change the hook order.
   if (freeFor != null) {

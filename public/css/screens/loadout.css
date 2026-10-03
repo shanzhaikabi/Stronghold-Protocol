@@ -28,8 +28,12 @@
 }
 /* every layer but the background stacks above it. :where() keeps this at the specificity of the old `.lo > *` (one
    class), so the rules after it still win where they did, and it never matches .lo__bg: as `.lo > *` (same specificity,
-   later rule) it beat the layer's `position: absolute`, which left a 0-px tall flex item that never drew (PR #14). */
-.lo > :where(:not(.lo__bg)) { position: relative; }
+   later rule) it beat the layer's `position: absolute`, which left a 0-px tall flex item that never drew (PR #14).
+   [port] it must not match .modal either: a modal opened from the screen is a full-viewport overlay of its own and keeps
+   `position: fixed` from components.css — this rule would otherwise win the cascade (same specificity, loadout.css loads
+   later) and turn it into a flex item pushed to the bottom. Both exclusions sit inside :where() so the specificity stays
+   at (0,1,0). */
+.lo > :where(:not(.lo__bg, .modal)) { position: relative; }
 
 /* ---- top bar ---------------------------------------------------------------------------------------------------- */
 .lo-top {
@@ -67,6 +71,70 @@
 .lo-note .icon { width: max(.16rem, 11px); height: max(.16rem, 11px); color: var(--mint-500); flex: none; }
 .lo-note.is-locked { color: var(--amber); background: linear-gradient(90deg, rgba(246, 163, 41, .12), transparent 70%); }
 .lo-note.is-locked .icon { color: var(--amber); }
+
+/* ---- 自由位置 (DESIGN §21) ----------------------------------------------------------------------------------------- */
+
+.lo-free {
+  flex: none; display: flex; flex-direction: column; gap: .07rem; padding: .1rem .36rem .12rem;
+  background: linear-gradient(180deg, rgba(78, 216, 175, .06), transparent);
+  border-bottom: 1px solid rgba(47, 58, 53, .6);
+}
+.lo-free__head { display: flex; align-items: center; gap: .14rem; }
+.lo-free__title { display: inline-flex; align-items: center; gap: .08rem; flex: none; font-size: max(.17rem, 11px); font-weight: 600; }
+.lo-free__hint { margin: 0; flex: 1; font-size: max(.15rem, 10px); line-height: 1.5; }
+.lo-free__hint b { color: var(--mint-500); font-weight: 600; }
+.lo-free__count { flex: none; font-size: max(.15rem, 10px); color: var(--text-lo); }
+.lo-free__count .num { color: var(--text-hi); }
+.lo-free__row { display: flex; align-items: center; gap: .14rem; }
+.lo-free__lvl { flex: none; width: .46rem; font-size: max(.15rem, 10px); color: var(--text-lo); }
+.lo-free__lvl .num { color: var(--mint-500); }
+.lo-free__slots { display: flex; gap: .1rem; flex-wrap: wrap; }
+
+.lo-free__slot {
+  position: relative; display: flex; align-items: center; gap: .07rem; min-width: 1.6rem; padding: .04rem .08rem .04rem .04rem;
+  border: 1px solid var(--line); border-radius: .06rem; background: rgba(16, 20, 19, .72);
+  font-size: max(.15rem, 10px); color: var(--text-lo);
+}
+button.lo-free__slot { cursor: pointer; font-family: inherit; }
+button.lo-free__slot:not(:disabled):hover { border-color: var(--mint-500); }
+button.lo-free__slot:disabled { opacity: .5; cursor: default; }
+.lo-free__slot.is-empty { justify-content: center; min-width: 1.15rem; border-style: dashed; }
+.lo-free__slot.is-empty .icon { width: max(.16rem, 11px); height: max(.16rem, 11px); color: var(--mint-500); }
+.lo-free__slot.is-banned { border-color: rgba(246, 163, 41, .6); }
+.lo-free__open {
+  display: flex; align-items: center; gap: .07rem; flex: 1; min-width: 0; padding: 0; border: 0; background: none;
+  color: inherit; font-family: inherit; font-size: inherit; text-align: left; cursor: pointer;
+}
+.lo-free__open:disabled { cursor: default; }
+.lo-free__open:not(:disabled):hover .lo-free__name { color: var(--mint-500); }
+.lo-free__art { flex: none; width: .42rem; height: .42rem; border-radius: .04rem; overflow: hidden; background: #1b201e; }
+.lo-free__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.lo-free__glyph { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--text-lo); }
+.lo-free__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-hi); }
+.lo-free__tag { flex: none; padding: 0 .04rem; border: 1px solid rgba(78, 216, 175, .45); border-radius: .03rem; font-size: max(.13rem, 9px); color: var(--mint-500); }
+.lo-free__ban { flex: none; display: inline-flex; align-items: center; justify-content: center; width: .2rem; height: .2rem; color: var(--amber); }
+.lo-free__ban .icon { width: max(.16rem, 11px); height: max(.16rem, 11px); }
+.lo-free__x {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: .24rem; height: .24rem;
+  padding: 0; border: 0; border-radius: .04rem; background: none; color: var(--text-lo); cursor: pointer;
+}
+.lo-free__x:hover:not(:disabled) { color: #e2554f; background: rgba(226, 85, 79, .14); }
+.lo-free__x:disabled { opacity: .4; cursor: default; }
+.lo-free__x .icon { width: max(.15rem, 10px); height: max(.15rem, 10px); }
+
+.lo-free__bar { display: flex; align-items: center; gap: .12rem; margin-bottom: .1rem; flex-wrap: wrap; }
+.lo-free__search { flex: none; width: 3.2rem; }
+.lo-free__found { flex: none; font-size: max(.15rem, 10px); }
+.lo-free__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(1.2rem, 1fr)); gap: .1rem; max-height: 50vh; overflow-y: auto; }
+.lo-free__pick {
+  display: flex; flex-direction: column; align-items: center; gap: .04rem; padding: .08rem .05rem;
+  border: 1px solid var(--line); border-radius: .06rem; background: rgba(16, 20, 19, .72);
+  color: var(--text-hi); font-family: inherit; font-size: max(.15rem, 10px); cursor: pointer;
+}
+.lo-free__pick:not(:disabled):hover { border-color: var(--mint-500); background: rgba(78, 216, 175, .1); }
+.lo-free__pick.is-taken { opacity: .38; cursor: default; filter: grayscale(.75); }
+.lo-free__pick .lo-free__art { width: .56rem; height: .56rem; }
+.lo-free__meta { color: var(--text-lo); font-size: max(.13rem, 9px); }
 
 .lo-loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: .14rem; color: var(--text-lo); font-size: max(.18rem, 12px); }
 
@@ -362,3 +430,22 @@
 .sp-coarse .lo-chip, .sp-coarse .lo-toggle, .sp-coarse .lo-select { min-height: 30px; }
 .sp-coarse .lo-seg button { min-height: 28px; }
 @media (prefers-reduced-motion: reduce) { .lo, .lo-card { animation: none; transition: none; } }
+
+/* 导出 / 导入 (干员调配 presets): a JSON textarea inside the shared Modal, plus the hidden input behind 选择文件 */
+.lo-io__hint { margin: 0 0 max(.1rem, 8px); font-size: max(.18rem, 12px); line-height: 1.55; color: var(--text-md); }
+.lo-io__hint b { color: var(--mint-400); font-size: max(.22rem, 13px); margin: 0 .02rem; }
+.lo-io__hint strong { color: var(--gold); }
+.lo-io__text {
+  box-sizing: border-box; width: 100%; height: max(2.4rem, 160px); min-height: 120px; resize: vertical;
+  padding: max(.1rem, 8px) max(.12rem, 10px);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* 16 px: iOS zooms into a focused field below that (same reason as ui/clipboard.js) */
+  font-size: max(.2rem, 16px); line-height: 1.45;
+  color: var(--text-hi); background: rgba(4, 10, 8, .55);
+  border: 1px solid var(--line-2); border-radius: 2px; outline: none;
+  /* wrap instead of a horizontal scrollbar: phones are narrow and the payload is meant to be read/copied whole */
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto;
+}
+.lo-io__text:focus { border-color: var(--mint-700); }
+.lo-io__text::placeholder { color: var(--text-lo); }
+.lo-io__file { display: none; }

@@ -30,7 +30,7 @@ function readStoredPicks() {
 /** Loadout + screen state (separate from the app store: it must survive room / match resets). */
 export const loadoutStore = createStore({
   entries: readStored(),
-  // 自由位置 picks (DESIGN §21): `{ [调度中心 level]: chessId[] }`, sent with the loadout and kept per browser
+  // 自由位置 picks (DESIGN §22): `{ [调度中心 level]: chessId[] }`, sent with the loadout and kept per browser
   picks: readStoredPicks(),
   open: false,
   from: null,          // 'lobby' | 'room' | 'briefing'
@@ -47,7 +47,7 @@ export function setEntries(entries) {
 }
 
 /**
- * Replace the 自由位置 picks (DESIGN §21), persisted and synced like the entries. Callers pass the result of
+ * Replace the 自由位置 picks (DESIGN §22), persisted and synced like the entries. Callers pass the result of
  * `setPick` / `clearPick` (ui/loadoutModel.js), which already enforce selectability and the no-duplicate rule.
  * @param {Record<string, string[]>} picks
  */
@@ -79,7 +79,7 @@ export function openLoadout(from = 'lobby', sel = null) {
   data.load('bonds');
   data.load('assets');
   data.load('local');
-  // DESIGN §21: the 自由位置 picker needs the 自选候选 records too (they live outside chess.json)
+  // DESIGN §22: the 自由位置 picker needs the 自选候选 records too (they live outside chess.json)
   data.load('freePicks');
   loadoutStore.set({ open: true, from, ...(sel ? { sel } : {}) });
 }
