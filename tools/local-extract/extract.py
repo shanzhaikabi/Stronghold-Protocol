@@ -19,6 +19,11 @@ aklz4.py registers a decoder for it. This script pulls the art the web sources l
   - derived PBR maps for three.js (DERIVED): Unity stores the theme's normal map as two channels (BC5: RG = XY, B = 0)
     and metallic/gloss with the smoothness in A; the board renderer needs an RGB normal map (Z rebuilt) and a
     roughness map in G (1 − smoothness; metalness B = 0), written next to the source as <name>_rgb.png / _rough.png
+  - the art of the 自选干员 the free-pick roster adds (DESIGN §21), which the released bundle does not carry: the
+    avatars and 半身像 portraits of every such operator (spritepack/ui_char_avatar_*.ab, spritepack/char_portrait_*.ab),
+    their battle Spine, both directions (chararts/<charId>.ab) and their skill icons (spritepack/skill_icons_*.ab) —
+    written into public/assets/char, public/assets/spine and public/assets/skill, i.e. the layout tools/assets/plan.mjs
+    expects, NOT under public/assets/local
 
 Usage:
   python3 -m venv .venv && .venv/bin/pip install -r tools/local-extract/requirements.txt
@@ -27,7 +32,11 @@ Usage:
 
 Writes <out>/**.png|.skel|.atlas and data/local-assets.json (manifest of what was extracted). With --only, just the
 jobs whose output subdir starts with one of the prefixes run, and their groups replace those of the existing manifest
-(every other group is kept as is).
+(every other group is kept as is). The operator-art jobs (char/*, spine/op/*) are the exception: they write under the
+--public root (public/assets/char and public/assets/spine) instead of --out, because the released art lives there and
+not in public/assets/local, and they record nothing in that manifest (data/assets.json is their manifest). Run them
+with `--only char` and `--only spine/op` — and, to extract into a scratch tree rather than the real public/assets,
+`--public <dir>` — then rebuild the manifest with `node tools/fetch-assets.mjs --offline`.
 Everything is (c) Hypergryph; for private, non-commercial fan use only.
 """
 import argparse
@@ -71,8 +80,86 @@ MESH_BUNDLES = [
     ('arts/maps/common/meshes/s_wind_device.ab', 's_wind_device'),
 ]
 
-# (bundle path relative to the AB root, output subdir, which object types to export[, name regex to keep])
+# ---------------------------------------------------------------------------
+# Operator art of the 自选干员 (DESIGN §21). It is the one class of output that does NOT belong under
+# public/assets/local: the released bundle already ships public/assets/char/**, public/assets/spine/** and
+# public/assets/skill/**, and these files have to sit next to them (the layout tools/assets/plan.mjs +
+# tools/fetch-assets.mjs resolve against). A JOBS entry therefore may name its own output root as an optional 5th field
+# — relative to the public directory (--public, default <repo>/public, so `--public <tmp>` extracts everything into a
+# scratch tree) — and an extraction mode as an optional 6th: 'spine' for the battle Spine (its two directions share
+# their object names, export_spine resolves them through the prefab) and 'skill_icon' for the skill icons (their object
+# names carry the client's `skill_icon_` prefix, export_skill_icons drops it).
+
+def _read_json(rel):
+    """Parsed JSON of a repository file, or None (the job table must stay importable without the data files)."""
+    try:
+        return json.loads((ROOT / rel).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+
+def free_pick_chars():
+    """charIds of data/freePicks.json that docs/research/07-assets.json does not cover — the 自选干员 of DESIGN §21:
+    the released bundle carries the season's own pools (the 138 operators of research 07) and nothing else, so these
+    are exactly the operators whose art has to come from the local client. Research 07 is the reference (not
+    data/assets.json, which is rebuilt from the extracted files and would make the jobs vanish once it is complete)."""
+    picks = _read_json('data/freePicks.json') or {}
+    covered = set((_read_json('docs/research/07-assets.json') or {}).get('operators') or {})
+    ids = {rec['charId'] for rec in picks.values() if isinstance(rec, dict) and isinstance(rec.get('charId'), str)}
+    return sorted(ids - covered)
+
+
+def free_pick_skill_icons():
+    """Skill iconIds of those operators — the `skills[]` of their data/freePicks.json records, which is what
+    tools/assets/plan.mjs resolves as public/assets/skill/<iconId>.png for them (the season's own operators come from
+    research 07 and already ship their icons, so they are not included). The client names the sprite
+    `skill_icon_<iconId>` (SKILL_ICON_PREFIX)."""
+    wanted = set(OP_CHARS)
+    ids = set()
+    for rec in (_read_json('data/freePicks.json') or {}).values():
+        if not isinstance(rec, dict) or rec.get('charId') not in wanted:
+            continue
+        for skill in rec.get('skills') or []:
+            icon = (skill.get('iconId') or skill.get('skillId')) if isinstance(skill, dict) else None
+            if isinstance(icon, str) and icon:
+                ids.add(icon)
+    return sorted(ids)
+
+
+OP_CHARS = free_pick_chars()
+# Output root of the operator-art jobs, inside the public directory: `assets`, i.e. public/assets/char, /spine and
+# /skill next to the released art (instead of the --out default, public/assets/local).
+OP_ROOT = 'assets'
+# Only these operators are exported: the spritepack bundles carry every operator of the game, and the season's own art
+# must not be replaced by a client extraction (`{charId}` / `{charId}_1` / `{charId}_2`; a client without the roster
+# yields a never-matching filter).
+OP_KEEP = r'^(' + '|'.join(re.escape(c) for c in OP_CHARS) + r')(_1|_2)?$' if OP_CHARS else r'(?!)'
+# Client prefix of a skill-icon sprite: `skill_icon_skchr_kalts_1` is plan.mjs's skill/skchr_kalts_1.png.
+SKILL_ICON_PREFIX = 'skill_icon_'
+OP_SKILL_ICONS = free_pick_skill_icons()
+OP_SKILL_KEEP = r'^' + SKILL_ICON_PREFIX + r'(' + '|'.join(re.escape(i) for i in OP_SKILL_ICONS) + r')$' \
+    if OP_SKILL_ICONS else r'(?!)'
+
+# (bundle path relative to the AB root, output subdir, which object types to export[, name regex to keep
+#  [, output root under --public[, extraction mode]]]). `bundle` may use `*` / `?` (not `[`: bundle names such as
+#  `[uc]autochesscommon.ab` are literal), `keep` is matched against the object name, `extraction mode` is 'objects'
+#  (default: export the objects `kinds` selects), 'spine' (an operator's battle Spine, resolved through its prefab —
+#  see export_spine) or 'skill_icon' (a skill icon, renamed to plan.mjs's path — see export_skill_icons).
 JOBS = [
+    # Avatars and 半身像 portraits of the 自选干员. spritepack/ui_char_avatar_<n>.ab holds every operator's 精英0 / 精英2
+    # avatar (180x180) as the sprites `{charId}` / `{charId}_2`; spritepack/char_portrait_<n>.ab holds the 半身像
+    # (180x360) as `{charId}_1` / `{charId}_2` — which is exactly the layout plan.mjs expects
+    # (char/avatar/{charId}.png + {charId}_2.png, char/portrait/{charId}_1.png + {charId}_2.png). Both are series of
+    # spritepack bundles, hence the glob. (arts/charavatars/avatar_hub.ab and arts/charportraits/portraits_hub.ab are
+    # index bundles — a single MonoBehaviour each, 0 Sprites/Texture2Ds — so the art is in the spritepacks.)
+    ('spritepack/ui_char_avatar_*.ab', 'char/avatar', {'Sprite'}, OP_KEEP, OP_ROOT),
+    ('spritepack/char_portrait_*.ab', 'char/portrait', {'Sprite'}, OP_KEEP, OP_ROOT),
+    # Skill icons of the 自选干员: spritepack/skill_icons_<n>.ab holds every operator's icon (128x128) as the Sprite
+    # `skill_icon_<iconId>`, while the plan wants skill/<iconId>.png — hence the 'skill_icon' mode.
+    ('spritepack/skill_icons_*.ab', 'skill', {'Sprite'}, OP_SKILL_KEEP, OP_ROOT, 'skill_icon'),
+    # Battle Spine of each 自选干员: one chararts bundle per operator, holding BOTH directions. See export_spine for
+    # why this needs its own mode (the Front and the Back skeleton are named identically inside the bundle).
+    *[(f'chararts/{charId}.ab', f'spine/op/{charId}', {'TextAsset', 'Texture2D'}, None, OP_ROOT, 'spine') for charId in OP_CHARS],
     ('arts/maps/map_autochess/res.ab', 'map/autochess', {'Texture2D', 'Material'}),
     ('arts/maps/map_autochesssand/res.ab', 'map/autochesssand', {'Texture2D', 'Material'}),
     ('ui/autochess/[uc]autochesscommon.ab', 'ui/common', {'Sprite'}),
@@ -114,10 +201,28 @@ def safe_name(name):
 
 
 def job_parts(job):
-    """(rel, sub, kinds, keep) of a JOBS entry; keep is a compiled name filter or None."""
+    """(rel, sub, kinds, keep, base, mode) of a JOBS entry: keep is a compiled name filter or None, base the job's own
+    output root relative to the repository (None = the --out argument) and mode 'objects' or 'spine'."""
     rel, sub, kinds = job[:3]
     keep = re.compile(job[3]) if len(job) > 3 and job[3] else None
-    return rel, sub, kinds, keep
+    base = job[4] if len(job) > 4 and job[4] else None
+    mode = job[5] if len(job) > 5 and job[5] else 'objects'
+    return rel, sub, kinds, keep, base, mode
+
+
+def job_bundles(ab_root, rel):
+    """The bundle files a job covers. `rel` may use `*` / `?` (the operator-art jobs cover a whole spritepack series);
+    `[` is literal, because bundle names such as `ui/autochess/[uc]autochesscommon.ab` contain it."""
+    if '*' not in rel and '?' not in rel:
+        return [ab_root / rel]
+    return [p for p in sorted(ab_root.glob(rel)) if p.is_file()]
+
+
+def url_root(base):
+    """Public URL directory of a job's output. Jobs without their own base keep the historical /assets/local (what
+    data/local-assets.json has always described, whatever --out was set to); a job that names its own root under the
+    public directory gets that root's URL instead (the operator art → /assets)."""
+    return '/assets/local' if not base else '/' + base.strip('/')
 
 
 def select_jobs(only):
@@ -256,7 +361,7 @@ def derive_rough_from_gloss(img):
 DERIVERS = {'normal_rg': derive_normal_rg, 'rough_from_gloss': derive_rough_from_gloss}
 
 
-def run_derived(out_root, sub, manifest, log):
+def run_derived(out_root, sub, manifest, log, url='/assets/local'):
     """Write the DERIVED maps of output subdir `sub` (from its exported PNGs) and record them in the manifest."""
     from PIL import Image
     n = 0
@@ -273,7 +378,7 @@ def run_derived(out_root, sub, manifest, log):
         except Exception as e:  # a broken source only drops the derived map (the renderer falls back)
             log(f'  warn derived {name}: {e}')
             continue
-        manifest.setdefault(sub, {})[name] = {'path': f'/assets/local/{sub}/{name}.png', 'w': img.width, 'h': img.height,
+        manifest.setdefault(sub, {})[name] = {'path': f'{url}/{sub}/{name}.png', 'w': img.width, 'h': img.height,
                                               'kind': 'Derived', 'from': src, 'derive': kind}
         n += 1
     return n
@@ -286,25 +391,48 @@ def merge_manifest(old_groups, new_groups, ran_subs):
     return {g: dict(sorted(out[g].items())) for g in sorted(out)}
 
 
-def export_bundle(ab_root, job, out_root, manifest, log):
+def export_bundle(ab_root, job, out_root, manifest, log, public_root=None):
+    """Run one JOBS entry over every bundle it covers. `out_root` is the --out argument, the output root of the jobs
+    that do not name their own; `public_root` (-–public) is the root a job that does name one is relative to."""
     import aklz4  # noqa: F401  (registers the LZ4AK decoder)
     import UnityPy
-    rel, sub, kinds, keep = job_parts(job)
-    src = ab_root / rel
-    if not src.exists():
+    rel, sub, kinds, keep, base, mode = job_parts(job)
+    bundles = job_bundles(ab_root, rel)
+    if not bundles:
         log(f'skip (missing) {rel}')
         return 0
-    try:
-        env = UnityPy.load(str(src))
-    except Exception as e:  # corrupt or unsupported bundle: report and continue
-        log(f'FAIL load {rel}: {e}')
-        return 0
-    objects = list(env.objects)  # the job's own objects, listed before any dependency joins the environment
-    for dep in dep_bundles(ab_root, kinds):
+    out = out_root if not base else (public_root or ROOT / 'public') / base
+    # The operator art is not part of the local-client board manifest: data/local-assets.json describes
+    # public/assets/local/** and is served as such, while the operator art belongs to public/assets/char|spine and is
+    # described by data/assets.json (tools/fetch-assets.mjs reads the files, not this manifest). Recording it would
+    # only grow that file with entries nothing resolves, and a full run would rewrite it.
+    dest = manifest if not base else {}
+    url = url_root(base)
+    n = 0
+    for src in bundles:
         try:
-            env.load_file(str(dep))
-        except Exception as e:  # a missing shader only leaves that material's shader name null
-            log(f'  warn dependency {dep.name}: {e}')
+            env = UnityPy.load(str(src))
+        except Exception as e:  # corrupt or unsupported bundle: report and continue
+            log(f'FAIL load {src.name}: {e}')
+            continue
+        objects = list(env.objects)  # the job's own objects, listed before any dependency joins the environment
+        if mode == 'spine':
+            n += export_spine(objects, sub, out, url, dest, log)
+            continue
+        if mode == 'skill_icon':
+            n += export_skill_icons(objects, sub, kinds, keep, out, url, dest, log)
+            continue
+        for dep in dep_bundles(ab_root, kinds):
+            try:
+                env.load_file(str(dep))
+            except Exception as e:  # a missing shader only leaves that material's shader name null
+                log(f'  warn dependency {dep.name}: {e}')
+        n += export_objects(objects, src.relative_to(ab_root).as_posix(), sub, kinds, keep, out, url, dest, log)
+    return n
+
+
+def export_objects(objects, rel, sub, kinds, keep, out_root, url, manifest, log):
+    """Export the objects of a bundle into <out_root>/<sub> and record them in the manifest."""
     out_dir = out_root / sub
     out_dir.mkdir(parents=True, exist_ok=True)
     seen, n = set(), 0
@@ -330,11 +458,10 @@ def export_bundle(ab_root, job, out_root, manifest, log):
                 img.save(out_dir / fname)
                 seen.add(fname)
                 manifest.setdefault(sub, {})[name] = {
-                    'path': f'/assets/local/{sub}/{fname}', 'w': img.width, 'h': img.height, 'kind': t}
+                    'path': f'{url}/{sub}/{fname}', 'w': img.width, 'h': img.height, 'kind': t}
                 n += 1
             elif t == 'TextAsset':
-                raw = data.m_Script
-                blob = raw.encode('utf-8', 'surrogateescape') if isinstance(raw, str) else bytes(raw)
+                blob = text_asset_bytes(data)
                 if name.endswith('.atlas') or name.endswith('.skel'):
                     fname = name
                 elif blob[:1] in (b'\n', b'') or b'size:' in blob[:200]:
@@ -342,7 +469,7 @@ def export_bundle(ab_root, job, out_root, manifest, log):
                 else:
                     fname = name + '.skel'
                 (out_dir / fname).write_bytes(blob)
-                manifest.setdefault(sub, {})[fname] = {'path': f'/assets/local/{sub}/{fname}', 'kind': t}
+                manifest.setdefault(sub, {})[fname] = {'path': f'{url}/{sub}/{fname}', 'kind': t}
                 n += 1
             elif t == 'Mesh':
                 text = data.export()
@@ -354,7 +481,7 @@ def export_bundle(ab_root, job, out_root, manifest, log):
                 (out_dir / fname).write_text(text, encoding='utf-8')
                 seen.add(fname)
                 verts = sum(1 for line in text.splitlines() if line.startswith('v '))
-                manifest.setdefault(sub, {})[name] = {'path': f'/assets/local/{sub}/{fname}', 'kind': 'Mesh', 'verts': verts}
+                manifest.setdefault(sub, {})[name] = {'path': f'{url}/{sub}/{fname}', 'kind': 'Mesh', 'verts': verts}
                 mesh_keys[obj.path_id] = name
                 n += 1
             elif t == 'Material':
@@ -376,10 +503,226 @@ def export_bundle(ab_root, job, out_root, manifest, log):
         else:
             payload = dict(sorted(payload.items()))
         (out_dir / fname).write_text(json.dumps(payload, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
-        manifest.setdefault(sub, {})[key] = {'path': f'/assets/local/{sub}/{fname}', 'kind': key.capitalize(), 'count': len(payload)}
+        manifest.setdefault(sub, {})[key] = {'path': f'{url}/{sub}/{fname}', 'kind': key.capitalize(), 'count': len(payload)}
         n += 1
-    n += run_derived(out_root, sub, manifest, log)
+    n += run_derived(out_root, sub, manifest, log, url)
     log(f'{rel}: {n} files -> {sub}')
+    return n
+
+
+def text_asset_bytes(data):
+    """Raw bytes of a Unity TextAsset (UnityPy hands over `str` for text-ish payloads)."""
+    raw = data.m_Script
+    return raw.encode('utf-8', 'surrogateescape') if isinstance(raw, str) else bytes(raw)
+
+
+def asset_name(obj):
+    """`m_Name` of a Unity object, or '' when it cannot be read."""
+    try:
+        return getattr(obj.read(), 'm_Name', '') or ''
+    except Exception:
+        return ''
+
+
+def _typetree(obj):
+    """Typetree of a MonoBehaviour, or None (no type tree in the bundle, or an unsupported type)."""
+    if obj is None:
+        return None
+    try:
+        return obj.read_typetree()
+    except Exception:
+        return None
+
+
+def atlas_pages(text):
+    """Page image names of a Spine atlas, with the same rule as tools/assets/atlas.mjs (a page starts at the first
+    non-blank line of the file or after a blank line; its `key: value` fields follow it)."""
+    pages = []
+    for line in re.split(r'\r\n?|\n', text):
+        if not line.strip():
+            pages.append(None)
+        elif pages and pages[-1] is None:
+            pages[-1] = line.strip()
+        elif not pages and ':' not in line:
+            pages.append(line.strip())
+    return [p for p in pages if p]
+
+
+def spine_refs(objects):
+    """{direction: {skel, atlas, pages}} of a chararts bundle (skel/atlas are UnityPy objects, pages a list of
+    {'name', 'main', 'alpha'}).
+
+    Arknights ships BOTH directions of an operator's battle Spine in one bundle and names them identically
+    (`<charId>.skel`, `<charId>.atlas`, page `<charId>.png`), so nothing about a name says which is Front and which is
+    Back — a name-based export would silently keep whichever object came last. The prefab does know: the GameObjects
+    `Front` / `Back` carry a SkeletonRenderer whose `skeletonDataAsset` points at the SkeletonDataAsset, which names
+    the skeleton TextAsset (`skeletonJSON`) and its Atlas (`atlasAssets`); the Atlas names its `atlasFile` and one
+    material per texture page, whose `_MainTex` / `_AlphaTex` are that page's colour and alpha (see page_image)."""
+    by_id = {o.path_id: o for o in objects}
+    found = {}
+    for obj in objects:
+        if obj.type.name != 'GameObject':
+            continue
+        try:
+            go = obj.read()
+        except Exception:
+            continue
+        direction = (getattr(go, 'm_Name', '') or '').lower()
+        if direction not in ('front', 'back'):
+            continue
+        for comp in getattr(go, 'm_Component', None) or []:
+            pptr = getattr(comp, 'component', comp)
+            if getattr(pptr, 'm_FileID', 0):  # external dependency: not in this bundle
+                continue
+            tree = _typetree(by_id.get(getattr(pptr, 'm_PathID', 0)))
+            sda = (tree or {}).get('skeletonDataAsset')
+            if not sda:
+                continue
+            sda_tree = _typetree(by_id.get(sda.get('m_PathID')))
+            if not sda_tree:
+                continue
+            skel = by_id.get((sda_tree.get('skeletonJSON') or {}).get('m_PathID'))
+            atlas_tree = next((t for t in (_typetree(by_id.get(a.get('m_PathID')))
+                                           for a in (sda_tree.get('atlasAssets') or [])) if t), None)
+            atlas = by_id.get((atlas_tree or {}).get('atlasFile', {}).get('m_PathID'))
+            pages = []
+            for mat in (atlas_tree or {}).get('materials') or []:
+                obj_mat = by_id.get((mat or {}).get('m_PathID'))
+                if obj_mat is None:
+                    continue
+                try:
+                    data = obj_mat.read()
+                except Exception:
+                    continue
+                page = {'name': None, 'main': None, 'alpha': None}
+                for key, tex in (getattr(data.m_SavedProperties, 'm_TexEnvs', None) or []):
+                    if key == '_MainTex':
+                        page['main'] = by_id.get(getattr(tex.m_Texture, 'm_PathID', 0))
+                    elif key == '_AlphaTex':
+                        page['alpha'] = by_id.get(getattr(tex.m_Texture, 'm_PathID', 0)) or None
+                if page['main'] is not None:
+                    page['name'] = asset_name(page['main'])
+                    pages.append(page)
+            if skel is None or atlas is None or not pages:
+                continue
+            # the default skin's skeleton is `<charId>.skel`; a skin variant is not — prefer the default
+            found[direction] = {'skel': skel, 'atlas': atlas, 'pages': pages,
+                                'stem': asset_name(skel).rsplit('.', 1)[0]}
+            break
+    return found
+
+
+def page_image(main, alpha):
+    """RGBA texture page of a Spine atlas. The client stores a page in either of two ways: as one RGBA texture, or (the
+    older split form) as an opaque `_MainTex` plus the alpha in the red channel of a greyscale `_AlphaTex`. The
+    released art ships the merged RGBA page, so a page without its alpha would be drawn as an opaque square."""
+    from PIL import Image
+    img = main.convert('RGBA')
+    if img.getchannel('A').getextrema()[0] < 250:  # the colour texture carries its own alpha
+        return img
+    if alpha is None or alpha.size != img.size:
+        return img
+    return Image.merge('RGBA', (*img.convert('RGB').split(), alpha.convert('RGB').getchannel('R')))
+
+
+def js_safe_name(name):
+    """tools/assets/sources.mjs safeName() of a name: the asset pipeline names files with it (`plan.mjs` computes every
+    local path that way), so the few exports whose name the pipeline then looks up by have to match it character for
+    character — the extractor's own safe_name() keeps `[` / `]`, which safeName() turns into '_'
+    (`skcom_atk_up[3]` → `skcom_atk_up_3_.png`, `[ucp]TX_water_normal` → `_ucp_TX_water_normal`)."""
+    return re.sub(r'[^A-Za-z0-9._-]', '_', str(name)) or '_'
+
+
+def export_skill_icons(objects, sub, kinds, keep, out_root, url, manifest, log):
+    """Export skill icons: the Sprite `skill_icon_<iconId>` of a spritepack/skill_icons_*.ab becomes
+    <out_root>/skill/<iconId>.png, the path tools/assets/plan.mjs resolves for the free picks' `skills[]`.
+
+    Two things differ from the object name and both are dictated by the plan pipeline, not by this script: the client's
+    `skill_icon_` prefix is dropped, and the rest goes through safeName() (see js_safe_name) because that is how
+    plan.mjs builds the local path — so `skcom_atk_up[3]` lands on skill/skcom_atk_up_3_.png."""
+    out_dir = out_root / sub
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n, seen = 0, set()
+    for obj in objects:
+        if obj.type.name not in kinds:
+            continue
+        try:
+            data = obj.read()
+            raw_name = getattr(data, 'm_Name', '') or ''
+            if not raw_name.startswith(SKILL_ICON_PREFIX):
+                continue
+            if keep is not None and not keep.search(raw_name):
+                continue
+            name = js_safe_name(raw_name[len(SKILL_ICON_PREFIX):])
+            if name in seen:
+                continue
+            img = data.image
+            if img is None or img.width < 2 or img.height < 2:
+                continue
+            img.save(out_dir / f'{name}.png')
+            seen.add(name)
+            manifest.setdefault(sub, {})[name] = {
+                'path': f'{url}/{sub}/{name}.png', 'w': img.width, 'h': img.height, 'kind': obj.type.name}
+            n += 1
+        except Exception as e:
+            log(f'  warn skill icon #{obj.path_id}: {e}')
+    log(f'{n} skill icons -> {sub}')
+    return n
+
+
+def export_spine(objects, sub, out_root, url, manifest, log):
+    """Export an operator's battle Spine: <out_root>/spine/op/<charId>/<front|back>/<charId>.{skel,atlas,png}."""
+    cid = sub.rsplit('/', 1)[-1]
+    refs = spine_refs(objects)
+    if not refs:
+        log(f'  skip (no Spine prefab) {sub}')
+        return 0
+    n = 0
+    for direction in ('front', 'back'):
+        ref = refs.get(direction)
+        if not ref:
+            log(f'  warn {cid}: no {direction} Spine in the bundle')
+            continue
+        if ref['stem'] and ref['stem'] != cid:
+            log(f'  warn {cid}: the {direction} skeleton is named {ref["stem"]}')
+        try:
+            skel = text_asset_bytes(ref['skel'].read())
+            atlas = text_asset_bytes(ref['atlas'].read())
+        except Exception as e:
+            log(f'  warn {cid} {direction}: {e}')
+            continue
+        out_dir = out_root / sub / direction
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for fname, blob in ((f'{cid}.skel', skel), (f'{cid}.atlas', atlas)):
+            (out_dir / fname).write_bytes(blob)
+            manifest.setdefault(sub, {})[f'{direction}/{fname}'] = {
+                'path': f'{url}/{sub}/{direction}/{fname}', 'kind': 'TextAsset'}
+            n += 1
+        # One page file per atlas page — the atlas is authoritative (spine.mjs requires every page it lists to exist,
+        # and an extra file would be an orphan). Its materials are in the same order and are named after their page
+        # (`char_1052_kalts2` / `char_1052_kalts22` for the two pages of that skeleton), so they are matched by name
+        # and fall back to the position.
+        names = atlas_pages(atlas.decode('utf-8', 'replace')) or [f'{p["name"]}.png' for p in ref['pages'] if p['name']]
+        for i, want in enumerate(names):
+            stem = want.rsplit('.', 1)[0]
+            src = next((p for p in ref['pages'] if p['name'] == stem), None)
+            if src is None and i < len(ref['pages']):
+                src = ref['pages'][i]
+            if src is None or src['main'] is None:
+                log(f'  warn {cid} {direction}: no texture for atlas page {want}')
+                continue
+            try:
+                img = page_image(src['main'].read().image, src['alpha'].read().image if src['alpha'] else None)
+            except Exception as e:
+                log(f'  warn {cid} {direction}: page {want}: {e}')
+                continue
+            fname = js_safe_name(want)
+            img.save(out_dir / fname)
+            manifest.setdefault(sub, {})[f'{direction}/{fname}'] = {
+                'path': f'{url}/{sub}/{direction}/{fname}', 'w': img.width, 'h': img.height, 'kind': 'Texture2D'}
+            n += 1
+            log(f'    {direction} page {fname} {img.width}x{img.height} (alpha {img.getchannel("A").getextrema()})')
+        log(f'  {cid} {direction}: skel {len(skel)} B, atlas {len(atlas)} B, {len(names)} page(s)')
     return n
 
 
@@ -387,6 +730,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--game', help='AssetBundle root (…/StreamingAssets/AB/Windows or …/Documents/Bundles)')
     ap.add_argument('--out', default=str(ROOT / 'public/assets/local'))
+    ap.add_argument('--public', default=str(ROOT / 'public'),
+                    help='root the jobs that name their own output (the operator art: char/, spine/) write under; '
+                         'point it at a scratch tree to extract without touching public/assets')
     ap.add_argument('--manifest', default=str(ROOT / 'data/local-assets.json'))
     ap.add_argument('--only', action='append', default=[], metavar='SUBDIR',
                     help='only run the jobs whose output subdir starts with this prefix (repeatable), e.g. emoticon')
@@ -394,8 +740,9 @@ def main():
     args = ap.parse_args()
 
     if args.print_jobs:
-        jobs = [{'bundle': rel, 'sub': sub, 'kinds': sorted(kinds), 'keep': keep.pattern if keep else None}
-                for rel, sub, kinds, keep in map(job_parts, JOBS)]
+        jobs = [{'bundle': rel, 'sub': sub, 'kinds': sorted(kinds), 'keep': keep.pattern if keep else None,
+                 'base': base, 'mode': mode}
+                for rel, sub, kinds, keep, base, mode in map(job_parts, JOBS)]
         derived = [{'sub': sub, 'from': src, 'derive': kind, 'name': name} for sub, src, kind, name in DERIVED]
         print(json.dumps({'emoteThemes': [{'themeId': t, 'dir': d} for t, d in EMOTE_THEMES], 'jobs': jobs,
                           'derived': derived}, ensure_ascii=False))
@@ -411,10 +758,11 @@ def main():
         return 2
     out_root = Path(args.out)
     out_root.mkdir(parents=True, exist_ok=True)
+    public_root = Path(args.public)
     manifest, total = {}, 0
     print(f'AB root: {ab_root}')
     for job in jobs:
-        total += export_bundle(ab_root, job, out_root, manifest, print)
+        total += export_bundle(ab_root, job, out_root, manifest, print, public_root)
     old = {}
     if args.only and Path(args.manifest).exists():
         try:

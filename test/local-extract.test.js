@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { safeName } from '../tools/assets/sources.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TOOL = path.join(ROOT, 'tools/local-extract');
@@ -37,6 +38,50 @@ describe('extract.py helpers (no UnityPy needed)', { skip: !PY && 'no python3' }
     ]);
     for (const j of mesh) assert.deepEqual(j.kinds, ['GameObject', 'Material', 'Mesh', 'Texture2D']);
     assert.equal(new Set(jobs.map((j) => j.sub)).size, jobs.length, 'one output dir per job');
+  });
+
+  test('operator-art jobs: the 自选干员\'s avatar / portrait / battle Spine / skill icons, and only theirs', () => {
+    const r = spawnSync(PY, [path.join(TOOL, 'extract.py'), '--print-jobs'], { encoding: 'utf8', env: ENV });
+    assert.equal(r.status, 0, r.stderr);
+    const { jobs } = JSON.parse(r.stdout);
+    const by = Object.fromEntries(jobs.map((j) => [j.sub, j]));
+    // The operators the released bundle does not carry: data/freePicks.json minus the season's own (research 07).
+    const picks = JSON.parse(readFileSync(path.join(ROOT, 'data/freePicks.json'), 'utf8'));
+    const assets07 = JSON.parse(readFileSync(path.join(ROOT, 'docs/research/07-assets.json'), 'utf8'));
+    const need = [...new Set(Object.values(picks).map((rec) => rec.charId))].filter((id) => !assets07.operators[id]).sort();
+    if (!need.length) return; // no built roster on this machine: the extractor then has no operator-art jobs
+    // Avatars / 半身像: one job per spritepack series, into public/assets/char/** (their own output root, not --out).
+    assert.equal(by['char/avatar'].bundle, 'spritepack/ui_char_avatar_*.ab');
+    assert.equal(by['char/portrait'].bundle, 'spritepack/char_portrait_*.ab');
+    for (const sub of ['char/avatar', 'char/portrait']) {
+      assert.deepEqual(by[sub].kinds, ['Sprite'], sub);
+      assert.equal(by[sub].base, 'assets', sub);
+      assert.equal(by[sub].mode, 'objects', sub);
+      const keep = new RegExp(by[sub].keep);
+      assert.ok(keep.test(need[0]) && keep.test(`${need.at(-1)}_2`), `${sub}: keeps the free picks`);
+      assert.ok(!keep.test('char_1012_skadi2') && !keep.test('char_1012_skadi2_2'), `${sub}: never the season's art`);
+    }
+    // Battle Spine: one job per operator, its own mode (Front and Back share their object names inside the bundle).
+    const spine = jobs.filter((j) => j.sub.startsWith('spine/op/'));
+    assert.deepEqual(spine.map((j) => j.sub), need.map((id) => `spine/op/${id}`));
+    for (const j of spine) { assert.equal(j.mode, 'spine'); assert.equal(j.base, 'assets'); }
+    // Skill icons: the client's `skill_icon_<iconId>` sprite becomes plan.mjs's skill/<safeName(iconId)>.png —
+    // the mode drops the prefix and sanitises like sources.mjs safeName (brackets: `skcom_atk_up[3]` → _3_).
+    const icons = new Set();
+    for (const rec of Object.values(picks)) {
+      if (!need.includes(rec.charId)) continue;
+      for (const s of rec.skills || []) icons.add(s.iconId || s.skillId);
+    }
+    assert.ok(icons.size, 'the free picks have skills');
+    assert.equal(by.skill.bundle, 'spritepack/skill_icons_*.ab');
+    assert.deepEqual(by.skill.kinds, ['Sprite']);
+    assert.equal(by.skill.base, 'assets');
+    assert.equal(by.skill.mode, 'skill_icon');
+    const keep = new RegExp(by.skill.keep);
+    for (const id of icons) assert.ok(keep.test(`skill_icon_${id}`), id);
+    assert.ok(!keep.test('skill_icon_skchr_amiya_1'), "never the season's icons");
+    const pyNames = py('print(json.dumps([e.js_safe_name(i) for i in e.OP_SKILL_ICONS]))');
+    assert.deepEqual(pyNames, [...icons].sort().map(safeName), 'the rename agrees with sources.mjs safeName');
   });
 
   test('material_info: textures by name with tiling, floats, colours, sorted keywords; unresolvable refs → null', () => {
