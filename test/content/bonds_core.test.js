@@ -373,6 +373,30 @@ test('阿戈尔 devour order: left first, then top first (row 0 is the bottom: t
   checkInvariants(h.b);
 });
 
+test('阿戈尔 devour in 联防: a member force-withdrawn at the start of the field (carryState down) keeps the chain', () => {
+  // Upstream issue #33 item 3 / the user: with one member knocked out in its own combat the whole food chain broke —
+  // the member behind it marked nothing, not even the units the chain reaches through it. The withdrawn member is
+  // fielded and forced out before `battleStart` (SIM.md §1.1), but it is still the operator of its tile: the devour
+  // must see it as the chain link (it does not act itself: it is no marker).
+  const list = [['g1_a', ['egirShip']], ['g2_a', ['egirShip']], ['fod_a', ['preciShip'], { tier: 4, stats: { atk: 700, blockCnt: 3, maxHp: 20000 } }]];
+  const units = [
+    { chessId: 'g1_a', row: 10, col: 3 },
+    { chessId: 'g2_a', row: 10, col: 4, carryState: { down: true } }, // knocked out in the helper's own combat
+    { chessId: 'fod_a', row: 10, col: 5 },
+  ];
+  const h = makeBattle({ kind: 'unite', defs: defsOf(list), units, bonds: { egirShip: bondOn(3, 0, null, [3, 5]) }, hooks: ['damaged'], captureNoisy: true });
+  h.step(1);
+  const [g1, g2, f] = ['g1_a', 'g2_a', 'fod_a'].map((id) => h.unit(id));
+  assert.ok(!g2.alive && !g2.deployed && g2.hp === 0, 'g2 was force-withdrawn to its tile, not removed');
+  assert.deepEqual([g2.tileR, g2.tileC], [10, 4], 'still the operator of its tile');
+  assert.deepEqual(tagged(h, 'bond:egir:devour').map((c) => [c.source.defId, c.target.defId]), [['g1_a', 'fod_a']], 'the chain passes through the withdrawn member (it takes no 流失: not alive)');
+  close(g1.s.atk, 1000 + 1000 + 700, 1e-6, 'g1 gains the withdrawn member\'s + the fodder\'s base ATK');
+  assert.equal(g1.s.blockCnt, 2 + 2 + 3);
+  close(f.hp, 20000 - 5000, 1e-6, 'the fodder is devoured');
+  assert.equal(h.b.getPlayer('p1').bonds.egirShip.layers, 0, 'IN_BATTLE layer gains stay disabled in 联防');
+  checkInvariants(h.b);
+});
+
 test('阿戈尔 5: the first 3 members knocked out for the first time redeploy at once (death + deploy fire); a second knock-out is final', () => {
   const list = [];
   for (let i = 0; i < 5; i++) list.push([`g${i}_a`, ['egirShip'], { skill: { spCost: 30, initSp: 5, duration: 10 } }]);
@@ -400,15 +424,27 @@ test('阿戈尔 5: the first 3 members knocked out for the first time redeploy a
   kill(us[0]);
   assert.ok(!us[0].alive, 'second knock-out is final');
   checkInvariants(h.b);
-  // a member moved off its board tile (突袭 / relocation) revives where it was knocked out; later redeploys go home
+  // a member a position-modifying skill moved off its board tile revives on its INITIAL DEPLOYMENT TILE, not where the
+  // skill left it (user report 2026-10-03: 乌尔比安's S3 relocates him, any teleport does the same); the tile it fell on
+  // is only the fallback (an occupied initial tile must not swallow the revive)
   const hm = makeBattle({ defs: defsOf(list), units, bonds: { egirShip: bondOn(5, 0, null, [3, 5]) }, hooks: [] });
   hm.step(1);
   const m = hm.unit('g4_a');
   const home = [m.homeR, m.homeC];
   assert.ok(hm.b.relocate(m, 12, 8));
+  assert.deepEqual([m.tileR, m.tileC], [12, 8], 'the skill moved it away');
   hm.b.dealDamage(null, m, { amount: 1e9, type: 'true' });
-  assert.ok(m.alive && m.tileR === 12 && m.tileC === 8, 'revived on the tile it fell on');
+  assert.ok(m.alive && m.tileR === home[0] && m.tileC === home[1], `revived on its initial deployment tile (${home}), not where it stood`);
   assert.deepEqual([m.homeR, m.homeC], home, 'home unchanged');
+  // the initial tile is occupied (a raid redeploy covered the downed operator, issue #50): fall back to the tile it fell on
+  const hm2 = makeBattle({ defs: defsOf(list), units, bonds: { egirShip: bondOn(5, 0, null, [3, 5]) }, hooks: [] });
+  hm2.step(1);
+  const m2 = hm2.unit('g4_a'), other = hm2.unit('g0_a');
+  const home2 = [m2.homeR, m2.homeC];
+  assert.ok(hm2.b.relocate(m2, 12, 8) && hm2.b.relocate(other, home2[0], home2[1]));
+  hm2.b.dealDamage(null, m2, { amount: 1e9, type: 'true' });
+  assert.ok(m2.alive && m2.tileR === 12 && m2.tileC === 8, 'occupied initial tile: the revive still happens, on the tile it fell on');
+  checkInvariants(hm2.b);
   checkInvariants(hm.b);
   // 3 members: no revive
   const h3 = makeBattle({ defs: defsOf(list), units: units.slice(0, 3), bonds: { egirShip: bondOn(3, 0, null, [3, 5]) } });
