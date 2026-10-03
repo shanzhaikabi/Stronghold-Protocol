@@ -102,8 +102,13 @@ and regardless of the holding (PRTS §作战阶段 "所有手动部署的召唤�
 waits on its tile and takes the field there each time the skill gives one (stock ≤ 1, after the token's redeploy time
 once it left, free; never while its owner is off the field [ASSUMED] — a stocked one deploys as soon as the owner is
 back; the doll also leaves when 巫恋 leaves, the drone stays when 赫默 leaves: PRTS token 备注). A skill's summon, a
-device or 海嗣 that was not placed never appears (the hidden 待部署区 deploys nothing by itself); the tacticians' 狼群 /
-流形 still come as their 援军 on a tactical point without a piece (content/tokens.js `tacticalPoint`). The start deploy
+device, 海嗣, 流形 or 狼群 that was not placed never appears (the hidden 待部署区 deploys nothing by itself): a tactician's
+援军 is a hand card in every case, and the tile the player places it on IS the 战术点 its 特性 "可以在攻击范围内选择一次
+战术点来召唤援军" lets them pick once — no tactician fabricates one on a point of its own choosing (content/tokens.js
+`ensureReinforcement`; kits/tier3.js 伺夜, kits/tier6.js 缪尔赛思, content/index.js `withCardReinforcement` for a kit-less
+one), and a destroyed 援军 returns to that same tile after its redeploy time (user rule 2026-10-03 "必须手动放置 —— 放置
+战术点，然后无限刷新在战术点上。其他的召唤类也应该是类似的逻辑"). What still turns with the owner's direction is the
+fallback tactical point (`Battle.findTacticalPoint`), used when the tile the player chose cannot be taken again. The start deploy
 is the user's call after playtest #6 (DESIGN §20); `shared/constants.js SKILL_SUMMON_START_DEPLOY = false` would bring
 back the playtest #4 reading (only with the skill) in the sim and the summon card's hint (docs/PLAYING.md §4 and this
 passage must follow; test/ui/playtest6_summons.test.js checks).
@@ -936,7 +941,7 @@ table: `hitSleep` (targets and damages sleeping enemies — "可以攻击沉睡�
 | sword / swordmaster | 2 hits per attack |
 | artsfghter | melee arts |
 | charger | +1 DP (bb cost) per kill |
-| tactician | spawns a 援军 token (70 % HP, 50 % ATK, block 1) on the nearest walkable tile in range at each deployment; ×1.5 vs enemies it blocks |
+| tactician | ×1.5 vs enemies its 援军 blocks; a tactician whose data declares a manually deployable summon (狼群 / 流形 / 指挥中心) takes that hand card as its 援军 — the stand-in token (70 % HP, 50 % ATK, block 1, on the nearest walkable tile in range) is only for one whose data declares none (user rule 2026-10-03, token pieces above) |
 | agent / hookmaster | can hit FLY (ranged reach); hook displacement comes from skills (generic: `force`) |
 | bearer | block 0 while the skill is active |
 | alchemist | ranged lob, can hit FLY |

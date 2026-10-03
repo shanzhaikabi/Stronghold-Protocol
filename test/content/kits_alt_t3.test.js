@@ -7,6 +7,7 @@ import { makeBattle, enemyRec, checkInvariants } from '../helpers/battleHarness.
 import { getDefaultSource } from '../../server/sim/simdata.js';
 import { skillSpecSource } from '../../server/sim/content/index.js';
 import { effectiveProfile } from '../../server/sim/ai.js';
+import { wolfShadows } from '../../server/sim/content/tokens.js';
 import { kitCoverage } from '../../tools/kit-coverage.mjs';
 import KITS from '../../server/sim/content/kits/tier3.js';
 
@@ -704,24 +705,27 @@ test('3_18 忍冬 S1 小施惩戒: next attack + extra arts and +DP; S2 坠刃�
 });
 
 test('3_19 伺夜 S1 领袖的呼唤 (ALWAYS): +DP and one more “狼影” (≤ max)', () => {
+  // the pack is the 狼群 card the player PLACED (user rule 2026-10-03: "必须手动放置 —— 放置战术点，然后无限刷新在战术点上")
   for (const id of BOTH('chess_char_3_19_a')) {
     const b = SB(id, 'skchr_vigil_1');
-    const h = makeBattle({ defs: { chess: noGarrison(id) }, timeLimit: 60, flags: { dpPerSec: 0 }, units: [U(id, 'skchr_vigil_1', 10, 3)] });
-    const u = h.unit(id), p = h.b.getPlayer('p1');
+    const h = makeBattle({ defs: { chess: noGarrison(id) }, timeLimit: 60, flags: { dpPerSec: 0 },
+      units: [U(id, 'skchr_vigil_1', 10, 3, { uid: 1 }), { kind: 'token', tokenId: 'token_10028_vigil_wolf', ownerUid: 1, row: 9, col: 4, uid: 2 }] });
+    const u = h.unit(1), p = h.b.getPlayer('p1');
     assert.equal(u.skill.rule, 'SP_FULL');
     h.step();
     const w = u.trait.reinforcement;
-    assert.equal(w.mem.wolves, 2);
+    assert.equal(w?.uid, 2, 'the placed piece is the pack');
+    assert.equal(wolfShadows(w), 2);
     const dp0 = p.dp;
     fill(u);
     h.step();
     assert.equal(u.skill.activations, 1, 'no enemy needed');
     approx(p.dp, dp0 + b.cost);
-    assert.equal(w.mem.wolves, 3);
+    assert.equal(wolfShadows(w), 3);
     assert.equal(w.s.blockCnt, 3);
     fill(u);
     h.step();
-    assert.equal(w.mem.wolves, 3, 'capped');
+    assert.equal(wolfShadows(w), 3, 'capped');
     approx(p.dp, dp0 + 2 * b.cost);
     done(h);
   }
@@ -741,13 +745,16 @@ test('3_19 伺夜 S1 领袖的呼唤 (ALWAYS): +DP and one more “狼影” (�
 });
 
 test('3_19 伺夜 S2 领袖的馈赠: +DP, the pack recovers HP, its next attack ×atk_scale, a kill by it pays +DP', () => {
+  // every battle of this file places the 狼群 card by hand (user rule 2026-10-03: the sim fabricates no 援军)
+  const wolf = (uid = 1) => ({ kind: 'token', tokenId: 'token_10028_vigil_wolf', ownerUid: uid, row: 9, col: 3, uid: uid + 1 });
   for (const id of BOTH('chess_char_3_19_a')) {
     const b = SB(id, 'skchr_vigil_2');
     const h = makeBattle({ defs: { enemies: { enemy_d: dummy('enemy_d') }, chess: noGarrison(id) }, timeLimit: 60, hooks: ['damaged', 'attack'], captureNoisy: true, flags: { dpPerSec: 0 },
-      units: [U(id, 'skchr_vigil_2', 10, 3)], enemies: [{ key: 'enemy_d', pos: [9, 3], time: 0.5 }] });
-    const u = h.unit(id), p = h.b.getPlayer('p1');
+      units: [U(id, 'skchr_vigil_2', 10, 3, { uid: 1 }), wolf(1)], enemies: [{ key: 'enemy_d', pos: [9, 3], time: 0.5 }] });
+    const u = h.unit(1), p = h.b.getPlayer('p1');
     h.run(2);
     const w = u.trait.reinforcement, e = h.enemy('enemy_d');
+    assert.equal(w?.uid, 2, 'the placed piece is the pack');
     assert.equal(e.blockedBy, w);
     w.hp = w.s.maxHp * 0.5;
     const dp0 = p.dp;
@@ -762,15 +769,15 @@ test('3_19 伺夜 S2 领袖的馈赠: +DP, the pack recovers HP, its next attack
     const dmgOf = (a) => h.hooksOf('damaged').filter((c) => c.source === w && c.dmg?.isAttack && c.dmg.attackId === a);
     const ids = [...new Set(h.hooksOf('damaged').filter((c) => c.source === w && c.dmg?.isAttack).map((c) => c.dmg.attackId))].filter((a) => a > 0).slice(-bites.length);
     const first = dmgOf(ids[0]), second = dmgOf(ids[1]);
-    assert.equal(first.length, w.mem.wolves);
+    assert.equal(first.length, wolfShadows(w));
     for (const c of first) approx(c.amount, w.s.atk * b['vigil_wolf_s_2.atk_scale'], 1e-6, 'empowered bite');
     for (const c of second) approx(c.amount, w.s.atk, 1e-6, 'one attack only');
     done(h);
 
     // kill by the empowered attack ⇒ +cost DP
     const g = makeBattle({ defs: { enemies: { enemy_d: dummy('enemy_d') }, chess: noGarrison(id) }, timeLimit: 60, flags: { dpPerSec: 0 },
-      units: [U(id, 'skchr_vigil_2', 10, 3)], enemies: [{ key: 'enemy_d', pos: [9, 3], time: 0.5 }] });
-    const v = g.unit(id), gp = g.b.getPlayer('p1');
+      units: [U(id, 'skchr_vigil_2', 10, 3, { uid: 1 }), wolf(1)], enemies: [{ key: 'enemy_d', pos: [9, 3], time: 0.5 }] });
+    const v = g.unit(1), gp = g.b.getPlayer('p1');
     g.run(2);
     g.b.addBuff(v, { key: 'test:disarm', flags: { disarm: true } }); // (his own shots must not take the kill)
     g.run(1);
@@ -789,8 +796,8 @@ test('3_19 伺夜 精锐 module TAC-Y: ×165 % on pack-blocked enemies; "援军�
   const id = 'chess_char_3_19_b', mod = 'uniequip_003_vigil';
   const tb = ds.getChess(id, { moduleId: mod }).traitBb;
   const h = makeBattle({ defs: { enemies: { enemy_h: dummy('enemy_h', { atk: 400, bat: 1 }) }, chess: noGarrison(id) }, timeLimit: 60, hooks: ['damaged'], captureNoisy: true, flags: { dpPerSec: 0 },
-    units: [{ chessId: id, row: 10, col: 3, moduleId: mod }], enemies: [{ key: 'enemy_h', pos: [9, 3], time: 0.5 }] });
-  const u = h.unit(id);
+    units: [{ chessId: id, row: 10, col: 3, moduleId: mod, uid: 1 }, { kind: 'token', tokenId: 'token_10028_vigil_wolf', ownerUid: 1, row: 9, col: 3, uid: 2 }], enemies: [{ key: 'enemy_h', pos: [9, 3], time: 0.5 }] });
+  const u = h.unit(1);
   h.run(3);
   const w = u.trait.reinforcement, e = h.enemy('enemy_h');
   assert.equal(e.blockedBy, w);

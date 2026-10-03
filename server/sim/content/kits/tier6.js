@@ -105,7 +105,7 @@ import { COLS, ROWS, PULL_STOP_RADIUS } from '../../constants.js';
 import { rotateOffset } from '../../dir.js';
 import { bodyDist, bodyInKeys, bodyInRadius, bodyKeys } from '../../body.js';
 import { hasHp } from '../../damage.js';
-import { summonToken, TOKEN_IDS } from '../tokens.js';
+import { summonToken, tacticalPoint, tileFree, TOKEN_IDS } from '../tokens.js';
 
 // ------------------------------------------------------------------------------------------------------------------
 // helpers
@@ -1830,6 +1830,34 @@ function mlyss(bb, chess, def) {
   };
 
   return {
+    // 特性 (战术家) "可以在攻击范围内选择一次战术点来召唤援军": the 战术点 is the tile the player PLACES the 流形 card on
+    // — tokens.json `placeable`, PRTS 卫戍协议/帮助 §战斗部署 "如果部署的干员拥有可手动部署的附属召唤物，则该召唤物会立刻
+    // 加入手牌区". Declaring a trait install replaces the profession's stand-in 援军 (professions.js installTactician), and
+    // content/tokens.js reads it as "this owner is not the generic tactician" and links the placed board piece instead,
+    // so a card left in the hand summons nothing at all (user report 2026-10-03: "缪缪的流型应该要手动放置。现在会自动出现
+    // 在战斗场上。"). 伺夜's pack keeps its own rule in kits/tier3.js.
+    trait: {
+      install(battle, unit) {
+        battle.on('deploy', (ctx) => {
+          if (ctx.unit !== unit) return;
+          const piece = battle.allyUnits.find((t) => isTok(t, tokId, unit) && t.uid != null && !t.mem.isClone && !t.mem.mlyssClone);
+          if (!piece) return;   // the player placed no card: no 援军 at all (never fabricated)
+          // the piece the player placed is her 援军: it stands, or takes its tile again — at the battle start (it may be
+          // listed after her in the deploy order) and whenever she redeploys, the way a tactician's 援军 does
+          if (piece.alive) { unit.trait.reinforcement = piece; return; }
+          if (battle.redeploy(piece, { free: true })) { unit.trait.reinforcement = piece; return; }
+          // destroyed for good (a killed piece is `removed`): the 援军 returns with its summoner, on the 战术点 the player
+          // chose — the card's own tile (never re-checked against her current range: a placed summon stays where it was
+          // put, PlayerState._placeable), else the shared tactical point when that tile is taken
+          const [hr, hc] = [piece.homeR, piece.homeC];
+          const usable = Number.isInteger(hr) && Number.isInteger(hc) && tileFree(battle, hr, hc) && battle.grid.canStand(hr, hc, { ranged: true });
+          const tile = usable ? [hr, hc] : tacticalPoint(battle, unit);
+          if (!tile) return;
+          const t = battle.spawnToken(unit, tokId, tile[0], tile[1]);
+          if (t) unit.trait.reinforcement = t;
+        }, { owner: unit });
+      },
+    },
     skills,
     install(battle, unit) {
       if (sid === 'skchr_mlyss_2') {

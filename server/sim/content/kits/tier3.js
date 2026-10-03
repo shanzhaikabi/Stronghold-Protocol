@@ -1507,10 +1507,16 @@ const KITS = {
       trait: { install(battle, unit) {
         // The pack is the tactician's 援军. The match also hands the player the 狼群 token to place in the prep phase
         // (= choosing the tactical point): that board piece (tokens.js kit, owner-coupled effects left to this kit) is
-        // the pack when present — deployed early on its own tile if 伺夜 deploys first — never a second pack.
+        // the pack when present — deployed early on its own tile if 伺夜 deploys first — never a second pack, and never
+        // one fabricated on a tactical point the player did not choose. User rule 2026-10-03 (authoritative):
+        // "必须手动放置 —— 放置战术点，然后无限刷新在战术点上。其他的召唤类也应该是类似的逻辑" — a card left in the hand
+        // summons nothing at all; the 流形 fix (kits/tier6.js mlyss `trait.install`) is the same shape.
         const spawn = () => {
           if (!alive(unit) || wolfOf(unit)) return;
           const pieces = tokensOf(battle, unit, wolfId);
+          // only ever the card the player placed: the tile it stands on IS the 战术点 伺夜's 特性 lets them pick once
+          const board = pieces.find((t) => t.uid != null);
+          if (!board) return;
           const live = pieces.find((t) => alive(t));
           if (live) { unit.trait.reinforcement = live; return; }
           const waiting = pieces.find((t) => !t.alive && !t.removed);
@@ -1519,8 +1525,10 @@ const KITS = {
             fx(battle, 'summon', waiting, { src: unit.id, token: wolfId });
             return;
           }
-          const board = pieces.find((t) => t.uid != null);
-          const tile = tacticalPoint(battle, unit, board ? [board.homeR, board.homeC] : null);
+          // destroyed for good (a killed piece is `removed`): the pack returns on the 战术点 the player chose (the card's
+          // own tile, never re-checked against 伺夜's current range: a placed summon stays where it was put,
+          // PlayerState._placeable), else the shared tactical point when that tile is taken
+          const tile = tacticalPoint(battle, unit, [board.homeR, board.homeC]);
           if (!tile) return;
           const w = battle.spawnToken(unit, wolfId, tile[0], tile[1], { kit: wolfKit(unit) });
           unit.trait.reinforcement = w;

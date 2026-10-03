@@ -15,9 +15,13 @@ import { botPrep } from '../../server/match/bot.js';
 const SILENCE = 'chess_char_2_02_a';
 const CATHY = 'chess_char_4_11_a';
 const SHAMARE = 'chess_char_3_15_a';
+const MLYSS = 'chess_char_6_11_a';
+const VIGIL = 'chess_char_3_19_a';
 const DRONE = 'token_10000_silent_healrb';
 const DEVICE = 'token_10041_cathy_catsld';
 const DOLL = 'token_10006_vodfox_doll';
+const WTRMAN = 'token_10030_mlyss_wtrman';
+const WOLF = 'token_10028_vigil_wolf';
 const chess = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : null);
 
 function prep({ loadout = null, stageId = 'act2autochess_m04', seed = 11 } = {}) {
@@ -96,6 +100,38 @@ test('#1 凯瑟琳 on the board sends her 支援装置 (2 = deploy limit) to the
   m.dispose();
 });
 
+// User report 2026-10-03: "缪缪的流型应该要手动放置。现在会自动出现在战斗场上。" 流形 (token_10030_mlyss_wtrman) is a
+// hand card like 赫默's drone (tokens.json `placeable`, variant `sources: [talent, display]` — her talent 净水即生命
+// grants it; the garrison_76_a/b 变形同构体 item is a different thing): it goes to the hand for the player to place, and
+// the battle summons nothing while it stays there (the tactician 战术点 IS the tile the card is placed on).
+test('#3 缪尔赛思 sends her 流形 card to the hand — it is not on the board, and she can then place it', () => {
+  const { m, ps } = prep();
+  const ml = give(m, ps, MLYSS);
+  const at = legalTileFor(m, ps, MLYSS);
+  assert.deepEqual(move(m, ml.uid, { area: 'board', row: at[0], col: at[1] }), { ok: true });
+  const card = stackOf(ps, WTRMAN);
+  assert.ok(card, 'the 流形 card is in the hand (整备区)');
+  assert.equal(card.ownerUid, ml.uid);
+  assert.equal(card.count, 1, 'deploy limit 1');
+  assert.equal([...ps.board.values()].filter((p) => p.kind === 'token').length, 0, 'nothing on the board yet');
+  const input = ps.battleInput({ side: 'L', colOffset: 0 });
+  assert.ok(!input.units.some((u) => u.kind === 'token'), 'and nothing is handed to the battle');
+  // the player places it by hand; the 战术点 rule confines it to her attack range (issue #9)
+  let placed = null;
+  for (let r = 12; r >= 9 && !placed; r--) {
+    for (let c = 2; c <= 10 && !placed; c++) {
+      if (move(m, card.uid, { area: 'board', row: r, col: c }, 'RIGHT').ok) placed = [r, c];
+    }
+  }
+  assert.ok(placed, 'a legal 战术点 exists and the card can be placed on it');
+  const piece = ps.board.get(`${placed[0]},${placed[1]}`);
+  assert.equal(piece.kind, 'token');
+  assert.equal(piece.id, WTRMAN);
+  assert.equal(ps.deployCount, 1, 'summons use no deploy slot');
+  checkInvariants(m);
+  m.dispose();
+});
+
 test('巫恋 (S2 诅咒娃娃) sends a doll card like 赫默', () => {
   const { m, ps } = prep();
   give(m, ps, SHAMARE, 'board', [9, 3]);
@@ -125,8 +161,10 @@ test('moving an owner on the board sends its placed summons back to its card (PR
   m.dispose();
 });
 
-test('bots place the summon cards: 赫默\'s drone and 凯瑟琳\'s devices end up on the board, each device facing an operator', () => {
-  for (const [owner, token] of [[SILENCE, DRONE], [CATHY, DEVICE]]) {
+test('bots place the summon cards: 赫默\'s drone, 凯瑟琳\'s devices, 缪尔赛思\'s 流形 and 伺夜\'s 狼群 end up on the board, each device facing an operator', () => {
+  // the tactician 援军 belong here since the sim summons no tactician card itself (user rule 2026-10-03: "必须手动放置"):
+  // a bot that left one in the hand would field no 援军 at all
+  for (const [owner, token] of [[SILENCE, DRONE], [CATHY, DEVICE], [MLYSS, WTRMAN], [VIGIL, WOLF]]) {
     const h = makeMatch({ mode: 'coop', humans: 1, bots: 1, seed: 21 }).start();
     h.toPrep(2);
     const bp = h.ps('ai_0');

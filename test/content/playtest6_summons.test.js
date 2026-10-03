@@ -10,8 +10,9 @@
 //     there each time the owner's skill gives one — also as soon as its owner is back with one in stock;
 //     not placed ⇒ it never appears (the hidden 待部署区 deploys nothing by itself);
 //   * a talent's summon the owner holds from the start (凯瑟琳 "携带3个支援装置（最多部署2个）") deploys with the board;
-//   * not placed: a skill's summon, a device or 海嗣 never appears; the tacticians' 狼群 / 流形 still come as their 援军 on
-//     a tactical point (docs/PLAYING.md §4 and docs/SIM.md say exactly this).
+//   * not placed: a skill's summon, a device or 海嗣 never appears, nor does 缪尔赛思's 流形 (its 战术点 is the tile the
+//     player placed the card on — user report 2026-10-03, kits/tier6.js mlyss `trait.install`); only 伺夜's 狼群 still
+//     comes as its 援军 on a tactical point (docs/PLAYING.md §4 and docs/SIM.md say exactly this).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeBattle, chessRec, checkInvariants } from '../helpers/battleHarness.js';
@@ -132,7 +133,7 @@ test('#1 凯瑟琳 with no device placed: no device in battle', REAL, () => {
   checkInvariants(h.b);
 });
 
-test('not placed: 赫默 / 巫恋 / 凯瑟琳 / 浊心斯卡蒂 summon nothing; 伺夜 / 缪尔赛思 still bring their 援军 on a tactical point', REAL, () => {
+test('not placed: 赫默 / 巫恋 / 凯瑟琳 / 浊心斯卡蒂 / 缪尔赛思 / 伺夜 summon nothing — every summon is a hand card', REAL, () => {
   const run = (chessId, cast = false) => {
     const h = makeBattle({ units: [{ chessId, row: 10, col: 3, uid: 1 }], autoFinish: false, timeLimit: 20 });
     h.run(2);
@@ -149,10 +150,11 @@ test('not placed: 赫默 / 巫恋 / 凯瑟琳 / 浊心斯卡蒂 summon nothing; 
   };
   for (const id of [SILENCE, SHAMARE]) assert.equal(run(id, true).length, 0, id);
   for (const id of [CATHY, 'chess_char_6_04_a']) assert.equal(run(id).length, 0, id);
-  const wolf = run('chess_char_3_19_a');
-  assert.deepEqual(wolf.map((u) => u.defId), [TOKEN_IDS.wolfPack], '伺夜: her 狼群 as 援军');
-  const mf = run('chess_char_6_11_a');
-  assert.deepEqual(mf.map((u) => u.defId), [TOKEN_IDS.manifold], '缪尔赛思: her 流形 as 援军');
+  // 狼群 is a hand card too (user rule 2026-10-03: "必须手动放置 —— 放置战术点，然后无限刷新在战术点上。其他的召唤类也应该
+  // 是类似的逻辑"): no card placed ⇒ no pack, and no stand-in 援军 either (the tactical point is the card's own tile)
+  assert.equal(run('chess_char_3_19_a').length, 0, '伺夜: nothing without a placed 狼群');
+  assert.equal(run('chess_char_6_11_a').length, 0, '缪尔赛思: nothing without a placed 流形');
+  assert.equal(run('chess_free_char_4228_closur').length, 0, '可露希尔: nothing without a placed 指挥中心');
 });
 
 test('巫恋 leaves ⇒ her doll leaves (PRTS 诅咒娃娃 备注); 赫默 leaves ⇒ her drone stays (PRTS 医疗探机 备注)', REAL, () => {
