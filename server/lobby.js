@@ -61,7 +61,7 @@ import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
 import { checkLoadout, checkFreePicks } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
-import { getData as defaultGetData, getChess, getBond, lookup } from './data.js';
+import { getData as defaultGetData, getChess, getBond, getItem, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
 // TEMPORARY debug room (2026-10-03): env-gated, remove with server/debugRoom.js (see its header).
 import { debugRoomSpec, debugBondChess } from './debugRoom.js';
@@ -349,10 +349,11 @@ export class Lobby {
    * (or reuse) a room with a FIXED code whose matches hand every human the debug chess at round 1 and start their
    * first prep with the requested 调度中心 level / bond layers. Coop mode so the player can join it by code from the
    * lobby. `spec.bondMembers` is resolved here into real chess ids (data/chess.json `bonds`) and appended to
-   * `debugGrants`, so those pieces take the one existing round-1 grant path. Nothing here runs unless
-   * `SP_DEBUG_ROOM` is set.
+   * `debugGrants`, so those pieces take the one existing round-1 grant path; `spec.items` (the 转职球 knob) is
+   * validated against data/items.json and becomes `debugItems` (the second round-1 grant path). Nothing here runs
+   * unless `SP_DEBUG_ROOM` is set.
    * @returns {{ ok: true, code: string, mode: string, difficulty: string, grants: string[], reused: boolean,
-   *             shopLevel: number|null, bondLayers: Record<string, number> } | { error: string }}
+   *             shopLevel: number|null, bondLayers: Record<string, number>, items?: string[] } | { error: string }}
    */
   createDebugRoom(spec = debugRoomSpec()) {
     if (!spec) return fail(ERR.ROOM_NOT_FOUND, 'debug room disabled (set SP_DEBUG_ROOM)');
@@ -376,24 +377,32 @@ export class Lobby {
     for (const id of grants) {
       if (!getChess(id, data)) return fail(ERR.BAD_TARGET, `unknown chess ${id}`);
     }
+    // SP_DEBUG_ITEMS: the item grant (转职球 变形同构体 + the giveBondId item it needs to pair with) — item record ids
+    // of data/items.json, granted through PlayerState.acquireItem at round 1
+    const items = Array.isArray(spec.items) ? spec.items.filter(Boolean) : [];
+    for (const id of items) {
+      if (!getItem(id, data)) return fail(ERR.BAD_TARGET, `unknown item ${id}`);
+    }
     const setup = { shopLevel: spec.shopLevel ?? null, bondLayers, noBans: !!spec.noBans };
     const existing = this.rooms.get(code);
     if (existing) {
       existing.debugGrants = grants.slice();
+      existing.debugItems = items.slice();
       existing.debugSetup = setup;
-      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}; setup ${JSON.stringify(setup)}`);
-      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans };
+      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}; items: ${items.join(', ') || '(none)'}; setup ${JSON.stringify(setup)}`);
+      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans, ...(items.length ? { items: items.slice() } : {}) };
     }
     if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
     const mode = 'coop';
     const difficulty = spec.difficulty || 'NORMAL';
     const room = new Room(code, mode, difficulty, this.now());
     room.debugGrants = grants.slice();
+    room.debugItems = items.slice();
     room.debugSetup = setup;
     this.rooms.set(code, room);
-    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}; setup ${JSON.stringify(setup)}`);
+    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}; items: ${items.join(', ') || '(none)'}; setup ${JSON.stringify(setup)}`);
     this.broadcastState(room);
-    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans };
+    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans, ...(items.length ? { items: items.slice() } : {}) };
   }
 
   join(session, { code }) {
@@ -588,6 +597,8 @@ export class Lobby {
         matchNo: room.matchCount + 1,
         // TEMPORARY debug room (server/debugRoom.js): round-1 hand-out for the room created by /debug/room …
         debugGrants: Array.isArray(room.debugGrants) && room.debugGrants.length ? room.debugGrants.slice() : null,
+        // … plus its round-1 item hand-out (SP_DEBUG_ITEMS, the 转职球 knob) …
+        debugItems: Array.isArray(room.debugItems) && room.debugItems.length ? room.debugItems.slice() : null,
         // … plus the 调度中心 level / bond layers its match starts with (applied before the players' startRound)
         debugSetup: room.debugSetup && typeof room.debugSetup === 'object' ? room.debugSetup : null,
         data: this.safeData(),

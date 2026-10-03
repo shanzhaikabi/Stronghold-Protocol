@@ -1,6 +1,11 @@
 // server/sim/content/generic.js — generic kit derived from a chess's skill blackboard + skill metadata.
 //
 // Used for every chess without a hand-authored kit (and for tokens with skills), so every unit fights sensibly.
+// Its TALENTS come from content/genericTalents.js — the blackboard of each declared talent translated into kit hooks
+// where that is faithful, everything else reported (`kit.talentPlan`, docs/research/15-generic-talents.json):
+// a kit-less record used to install `talents: []` and `Battle.js` installs `u.kit.talents` only, so 78 of the 93
+// 自选干员 fought with none of their declared talents and the module `talentChanges` of their resolved def were dead.
+
 // Kind: PASSIVE (or a free skill without duration/ammo) ⇒ passive · durationType AMMO ⇒ ammo · duration > 0 ⇒
 //   duration · duration < 0 ⇒ ammo when an ammo key exists, toggle only for an explicitly endless skill
 //   ("持续时间无限", 史尔特尔) — the official data also uses −1 for instant/charge skills ("立即…", "下一次攻击…",
@@ -38,6 +43,7 @@
 import { normalizeSkill } from '../simdata.js';
 import { sortEnemyTargets } from '../targeting.js';
 import { PUSH_EFFECT_SKILLS } from '../constants.js';
+import { translateTalents } from './genericTalents.js';
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : (typeof v === 'string' && v !== '' && Number.isFinite(+v) ? +v : undefined));
 
@@ -376,12 +382,20 @@ function installGeneric(spec) {
 
 /**
  * Generic kit: `(bb, chess, def?) => Kit`. `chess` is the data record; `def` the normalised def when available.
+ *
+ * Talents (G1/G2 of the 2026-10-03 talent audit): this kit used to install NONE, and `Battle.js` installs
+ * `u.kit.talents` and nothing else — so every kit-less record (76 of the 93 自选干员, plus 火陈 / 望 whose kits author
+ * a skill but no talent) fought without a single one of its declared talents, and the module `talentChanges` that the
+ * resolved `def.talents` already carries were dead with them. `genericTalents` translates the blackboards the kit DSL
+ * can reproduce faithfully and reports the rest (`content/genericTalents.js`,
+ * `test/content/generic_talents.test.js`, `docs/research/15-generic-talents.json`). `kit.talentPlan` is that report.
  */
 export function genericKit(bb, chess, def = null) {
   const sk = def?.skill ?? normalizeSkill(chess);
-  if (!sk) return { skill: null, talents: [], generic: true };
+  const { installs, report } = translateTalents(def ?? chess, chess);
+  if (!sk) return { skill: null, talents: installs, generic: true, talentPlan: report };
   const spec = genericSkillSpec(sk, bb && Object.keys(bb).length ? bb : sk.bb, def);
-  const kit = { skill: spec, talents: [], generic: true };
+  const kit = { skill: spec, talents: installs, generic: true, talentPlan: report };
   const inst = installGeneric(spec);
   if (inst) kit.install = inst;
   return kit;

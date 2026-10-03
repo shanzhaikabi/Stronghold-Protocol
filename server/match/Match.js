@@ -144,7 +144,7 @@ import { CreditPool } from './finalAssault.js';
 import { buildResult } from './results.js';
 import { botPrepBeginSteps, botPrepEndSteps, botPickBand, botPickCard } from './bot.js';
 // TEMPORARY debug room (2026-10-03): remove with server/debugRoom.js (see its header).
-import { grantDebugChess, applyDebugRoomSetup } from '../debugRoom.js';
+import { grantDebugChess, grantDebugItems, applyDebugRoomSetup } from '../debugRoom.js';
 
 const BOT_REHEARSAL_DEFAULT = 3;
 /** Wall-clock ms of bot layout rehearsal per scheduler callback (real time; virtual time runs it in one go). */
@@ -254,6 +254,8 @@ export class Match {
     this.verifyStats = { checked: 0, mismatches: 0, rejected: 0, takeovers: 0 };
     // TEMPORARY debug room (server/debugRoom.js): chess handed to every human at round 1 (null = normal match).
     this.debugGrants = Array.isArray(opts.debugGrants) && opts.debugGrants.length ? opts.debugGrants.slice() : null;
+    // TEMPORARY debug room (server/debugRoom.js): items (+ their 转职球 pair) handed to every human at round 1.
+    this.debugItems = Array.isArray(opts.debugItems) && opts.debugItems.length ? opts.debugItems.slice() : null;
     /** TEMPORARY debug room: `{ shopLevel, bondLayers }` applied to every human before round 1's own startRound. */
     this.debugSetup = opts.debugSetup && typeof opts.debugSetup === 'object' ? { ...opts.debugSetup } : null;
     this._battleSeq = 0;
@@ -1394,6 +1396,8 @@ export class Match {
     for (const ps of alive) ps.startRound(r);
     // TEMPORARY debug room (server/debugRoom.js): the room created by /debug/room hands its chess out here
     if (this.debugGrants && r === 1) grantDebugChess(this, this.debugGrants);
+    // …and its items (the 转职球 knob) right after, through the same normal acquisition path
+    if (this.debugItems && r === 1) grantDebugItems(this, this.debugItems);
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     for (const ps of alive) ps.recompute();
     this.setDeadline(DELAYS.ROUND_START / 1000, () => this.afterRoundStart(), { silent: this.soloUntimed });

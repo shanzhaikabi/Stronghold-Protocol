@@ -1,13 +1,14 @@
 // test/debugRoom.test.js — the TEMPORARY debug room (2026-10-03, server/debugRoom.js) that hands a 自选干员 out at
 // round 1 and can open a match up from its first prep (调度中心 level, bond layers, the members that activate a
-// bond) so the user can verify the battle fix and the 自选干员 shop pool without playing to 调度中心 5 级 first.
-// Delete this file with the feature.
+// bond, the 转职球 items) so the user can verify the battle fix, the 自选干员 shop pool and the 转职道具 fix without
+// playing to 调度中心 5 级 first. Delete this file with the feature.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  debugRoomSpec, debugRoomEnabled, grantDebugChess, applyDebugRoomSetup, debugBondChess,
+  debugRoomSpec, debugRoomEnabled, grantDebugChess, grantDebugItems, applyDebugRoomSetup, debugBondChess,
   DEBUG_ROOM_ENV, DEBUG_GRANT_ENV, DEBUG_DIFFICULTY_ENV, DEBUG_SHOP_LEVEL_ENV, DEBUG_BOND_LAYERS_ENV,
-  DEBUG_BOND_MEMBERS_ENV, DEBUG_NO_BANS_ENV, DEFAULT_DEBUG_GRANT, DEFAULT_DEBUG_CODE,
+  DEBUG_BOND_MEMBERS_ENV, DEBUG_NO_BANS_ENV, DEBUG_ITEMS_ENV, DEFAULT_DEBUG_GRANT, DEFAULT_DEBUG_CODE,
+  DEFAULT_DEBUG_ITEM, DEFAULT_DEBUG_BOND_ITEM, DEFAULT_DEBUG_ITEMS,
 } from '../server/debugRoom.js';
 import { APP_VERSION } from '../shared/constants.js';
 import { makeMatch, DATA, legalTileFor } from './match/harness.js';
@@ -16,7 +17,7 @@ import { TestClient } from './helpers/wsClient.js';
 
 const ENV_KEYS = [
   DEBUG_ROOM_ENV, DEBUG_GRANT_ENV, DEBUG_DIFFICULTY_ENV, DEBUG_SHOP_LEVEL_ENV, DEBUG_BOND_LAYERS_ENV,
-  DEBUG_BOND_MEMBERS_ENV, DEBUG_NO_BANS_ENV,
+  DEBUG_BOND_MEMBERS_ENV, DEBUG_NO_BANS_ENV, DEBUG_ITEMS_ENV,
 ];
 
 /** Run `fn` with the debug env vars set, restoring them afterwards. */
@@ -39,12 +40,23 @@ const WANG = DEFAULT_DEBUG_GRANT;
 const STONE = 'token_10064_wang_stone1';
 /** 奇迹's real key in data/bonds.json (the value SP_DEBUG_BOND_LAYERS / SP_DEBUG_BOND_MEMBERS take). */
 const MIRA = 'miraShip';
+const VICTORIA = 'victoriaShip';
 const MIRA_OPS = debugBondChess(DATA, MIRA, 2);
+/** 变形同构体 (转职球): its bearer counts as a member of the bond of the OTHER item it wears (bondsMeta.pieceBonds). */
+const ISO = DEFAULT_DEBUG_ITEM;
+/** 维式重锤: `giveBondId: victoriaShip` — the partner that makes the 转职球 do something (and vice versa). */
+const HAMMER = DEFAULT_DEBUG_BOND_ITEM;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Every piece a player holds (board, hand, 整备区) with the given chess id. */
 const held = (owner, id) => [...owner.board.values(), ...owner.hand.filter(Boolean), ...owner.temp.filter(Boolean)]
   .filter((p) => p && p.id === id);
+
+/** Every ITEM a player holds in the 备战区 (hand + temp; equipped items live on the chess piece). */
+const itemsInHand = (owner, id) => [...owner.hand, ...owner.temp].filter((p) => p && p.kind === 'item' && p.id === id);
+
+/** The 维多利亚 bond count the 转职球 changes (0 when the bond record carries no member of its own). */
+const vicCount = (owner) => (owner.bonds[VICTORIA] ? owner.bonds[VICTORIA].count : 0);
 
 test('debugRoomSpec: off unless SP_DEBUG_ROOM is set; a code, a grant list and a difficulty otherwise', async () => {
   await withEnv(Object.fromEntries(ENV_KEYS.map((k) => [k, null])), () => {
@@ -53,12 +65,12 @@ test('debugRoomSpec: off unless SP_DEBUG_ROOM is set; a code, a grant list and a
   });
   await withEnv({ [DEBUG_ROOM_ENV]: '1' }, () => {
     assert.deepEqual(debugRoomSpec(), {
-      code: DEFAULT_DEBUG_CODE, grants: [WANG], difficulty: 'NORMAL', shopLevel: null, bondLayers: {}, bondMembers: {}, noBans: false,
+      code: DEFAULT_DEBUG_CODE, grants: [WANG], items: [], difficulty: 'NORMAL', shopLevel: null, bondLayers: {}, bondMembers: {}, noBans: false,
     });
   });
   await withEnv({ [DEBUG_ROOM_ENV]: 'wxyz', [DEBUG_GRANT_ENV]: `${WANG}, chess_char_1_01_a`, [DEBUG_DIFFICULTY_ENV]: 'hard' }, () => {
     assert.deepEqual(debugRoomSpec(), {
-      code: 'WXYZ', grants: [WANG, 'chess_char_1_01_a'], difficulty: 'HARD', shopLevel: null, bondLayers: {}, bondMembers: {}, noBans: false,
+      code: 'WXYZ', grants: [WANG, 'chess_char_1_01_a'], items: [], difficulty: 'HARD', shopLevel: null, bondLayers: {}, bondMembers: {}, noBans: false,
     });
   });
   // a value that is not a room code falls back to the default code (SP_DEBUG_ROOM=yes)
@@ -90,6 +102,37 @@ test('debugRoomSpec: the prep-opening knobs (调度中心 level, bond layers, bo
     assert.deepEqual(s.bondMembers, {});
     assert.equal(s.noBans, false);
   });
+});
+
+test('debugRoomSpec: SP_DEBUG_ITEMS (the 转职球 knob) is off unless set, and takes a comma-separated list of item ids', async () => {
+  // fixtures: the ball grants the bond of the OTHER item its bearer wears, so a pair is what the user needs
+  assert.equal(DATA.items[ISO].canGiveBond, true, `${ISO} is the 转职球`);
+  assert.equal(DATA.items[ISO].giveBondId, null, '…which grants nothing on its own');
+  assert.equal(DATA.items[HAMMER].giveBondId, VICTORIA, `${HAMMER} is the giveBondId partner`);
+  assert.equal(DATA.items[HAMMER].canGiveBond, false);
+  for (const v of [undefined, '', '  ']) {
+    await withEnv({ [DEBUG_ROOM_ENV]: 'WANG', [DEBUG_ITEMS_ENV]: v }, () => {
+      assert.deepEqual(debugRoomSpec().items, [], `unset/blank (${JSON.stringify(v)}) grants no item`);
+    });
+  }
+  await withEnv({ [DEBUG_ROOM_ENV]: 'WANG', [DEBUG_ITEMS_ENV]: `${ISO}, ${HAMMER}` }, () => {
+    assert.deepEqual(debugRoomSpec().items, [ISO, HAMMER], 'whitespace is trimmed, the order is kept');
+  });
+  await withEnv({ [DEBUG_ROOM_ENV]: 'WANG', [DEBUG_ITEMS_ENV]: ISO }, () => {
+    assert.deepEqual(debugRoomSpec().items, [ISO], 'a single id is a valid (if bond-less) list');
+  });
+  // `1` (the SP_DEBUG_ROOM convention) = the default 转职球 pair; a list of nothing stays off
+  for (const v of ['1', 'on', 'yes', 'true']) {
+    await withEnv({ [DEBUG_ROOM_ENV]: 'WANG', [DEBUG_ITEMS_ENV]: v }, () => {
+      assert.deepEqual(debugRoomSpec().items, [ISO, HAMMER], `${v} → the default pair`);
+    });
+  }
+  for (const v of [',', ' , ']) {
+    await withEnv({ [DEBUG_ROOM_ENV]: 'WANG', [DEBUG_ITEMS_ENV]: v }, () => {
+      assert.deepEqual(debugRoomSpec().items, [], `${JSON.stringify(v)} lists no id → still off`);
+    });
+  }
+  assert.deepEqual(DEFAULT_DEBUG_ITEMS, [ISO, HAMMER]);
 });
 
 test('debugBondChess: the season chess that carry a bond, cheapest first, golden excluded', () => {
@@ -256,6 +299,66 @@ test('grantDebugChess: unknown ids are skipped, a full hand is not fatal', () =>
   h.m.dispose();
 });
 
+test('grantDebugItems: unknown ids are skipped, a full hand is not fatal', () => {
+  const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 6, fake: true, humans: 1, bots: 1 });
+  h.start();
+  h.toPrep(1);
+  const ps = h.ps('p_0');
+  // ISO (upgradeNum 100, not mergeable) so filling the hand cannot trigger an item merge on the way
+  for (let i = 0; i < ps.hand.length; i++) ps.hand[i] = ps.newPiece('item', ISO);
+  for (let i = 0; i < ps.temp.length; i++) ps.temp[i] = ps.newPiece('item', ISO);
+  assert.equal(grantDebugItems(h.m, ['chess_item_nope', HAMMER]), 0, 'nothing fits into a full hand + 整备区');
+  assert.equal(itemsInHand(ps, HAMMER).length, 0);
+  assert.doesNotThrow(() => grantDebugItems(h.m, ['chess_item_nope']));
+  h.m.dispose();
+});
+
+test('grantDebugItems: the 转职球 knobs an item out at prep 1, bots never get one, the pairing 转职s an operator', () => {
+  const h = makeMatch({
+    mode: 'coop', difficulty: 'NORMAL', seed: 6, fake: true,
+    seats: [{ seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true },
+      { seat: 1, playerId: 'ai_0', name: 'AI0', isBot: true, connected: true }],
+    debugGrants: [WANG],
+  });
+  h.start();
+  h.toPrep(1);
+  const ps = h.ps('p_0'), bot = h.ps('ai_0');
+  // the round-1 hook itself is Match.startRound's (covered by the WebSocket test below); here the grant function
+  assert.equal(grantDebugItems(h.m, [ISO, HAMMER]), 2, 'both items go out through the normal acquisition path');
+  for (const id of [ISO, HAMMER]) {
+    assert.equal(itemsInHand(ps, id).length, 1, `${id} is in the human's 备战区 at prep 1`);
+    assert.equal(itemsInHand(bot, id).length, 0, `bots never get ${id}`);
+  }
+  assert.equal(DATA.items[ISO].upgradeNum, 100, 'the 转职球 never merges away');
+  // deploy 望 (its own bond is 炎 only) and equip the pair: 变形同构体 alone grants nothing, the partner alone grants
+  // nothing (bondsMeta.pieceBonds needs BOTH), together they make the carrier a 维多利亚 member — the 转职 fix
+  const piece = held(ps, WANG)[0];
+  const at = legalTileFor(h.m, ps, WANG, new Set([...ps.board.keys()]));
+  assert.deepEqual(h.m.handle('p_0', { t: 'g.move', uid: piece.uid, to: { area: 'board', row: at[0], col: at[1] }, dir: 'RIGHT' }), { ok: true });
+  const before = vicCount(ps);
+  const iso = itemsInHand(ps, ISO)[0];
+  assert.deepEqual(h.m.handle('p_0', { t: 'g.equip', itemUid: iso.uid, targetUid: piece.uid }), { ok: true });
+  assert.equal(vicCount(ps), before, 'the 转职球 without a giveBondId partner changes nothing');
+  const ham = itemsInHand(ps, HAMMER)[0];
+  assert.deepEqual(h.m.handle('p_0', { t: 'g.equip', itemUid: ham.uid, targetUid: piece.uid }), { ok: true });
+  assert.equal(vicCount(ps), before + 1, 'the pair counts its bearer as a 维多利亚 member');
+  assert.equal(vicCount(bot), 0);
+  h.invariants();
+  h.m.dispose();
+});
+
+test('a match without debugItems hands out no item (the knob is opt-in)', () => {
+  const h = makeMatch({ mode: 'coop', difficulty: 'NORMAL', seed: 6, fake: true, humans: 1, bots: 1 });
+  h.start();
+  h.toPrep(1);
+  const ps = h.ps('p_0');
+  assert.equal(h.m.debugItems, null);
+  for (const id of [ISO, HAMMER]) assert.equal(itemsInHand(ps, id).length, 0);
+  assert.equal(vicCount(ps), 0);
+  h.m.dispose();
+});
+
+
 test('GET /debug/room exists only while SP_DEBUG_ROOM is set, and /healthz reports a build tag', async () => {
   const server = await startServer({ port: 0, quiet: true });
   try {
@@ -269,9 +372,42 @@ test('GET /debug/room exists only while SP_DEBUG_ROOM is set, and /healthz repor
   }
 });
 
+test('GET /debug/room reports the item grant only while SP_DEBUG_ITEMS is set — the unset reply is the knob-less one', async () => {
+  // unset: not one field of the reply changes (this is the exact body the tests before the knob asserted)
+  await withEnv({ [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_ITEMS_ENV]: null }, async () => {
+    const server = await startServer({ port: 0, quiet: true });
+    try {
+      const body = await (await fetch(`http://127.0.0.1:${server.port}/debug/room`)).json();
+      assert.deepEqual(body, {
+        ok: true, code: 'WXYZ', mode: 'coop', difficulty: 'NORMAL',
+        grants: [WANG], reused: false, shopLevel: null, bondLayers: {}, noBans: false,
+      });
+      assert.equal(Object.hasOwn(body, 'items'), false, 'no `items` key at all');
+      assert.deepEqual(server.lobby.rooms.get('WXYZ').debugItems, [], 'the room grants no item');
+    } finally {
+      await server.close();
+    }
+  });
+  // set: the reply names the items and the room hands them out (a single id is allowed, unknown ids are refused)
+  await withEnv({ [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_ITEMS_ENV]: `${ISO},${HAMMER}` }, async () => {
+    const server = await startServer({ port: 0, quiet: true });
+    try {
+      const body = await (await fetch(`http://127.0.0.1:${server.port}/debug/room`)).json();
+      assert.deepEqual(body.items, [ISO, HAMMER]);
+      assert.deepEqual(server.lobby.rooms.get('WXYZ').debugItems, [ISO, HAMMER]);
+      assert.equal(server.lobby.createDebugRoom({ code: 'ZZZZ', grants: [WANG], items: ['chess_item_nope'] }).error, 'BAD_TARGET');
+      assert.equal(server.lobby.rooms.has('ZZZZ'), false, 'a room with an unknown item is never created');
+      assert.equal(server.lobby.createDebugRoom({ code: 'ZZZY', grants: [WANG], items: [ISO] }).ok, true, 'the 转职球 alone is accepted');
+      assert.deepEqual(server.lobby.rooms.get('ZZZY').debugItems, [ISO]);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
 test('GET /debug/room creates the fixed-code room (reused on a second call) and resolves the bond members', async () => {
   await withEnv({
-    [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_SHOP_LEVEL_ENV]: '6',
+    [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_SHOP_LEVEL_ENV]: '6', [DEBUG_ITEMS_ENV]: null,
     [DEBUG_BOND_LAYERS_ENV]: `${MIRA}:999`, [DEBUG_BOND_MEMBERS_ENV]: `${MIRA}:2`, [DEBUG_NO_BANS_ENV]: '1',
   }, async () => {
     const server = await startServer({ port: 0, quiet: true });
@@ -308,7 +444,7 @@ test('GET /debug/room creates the fixed-code room (reused on a second call) and 
 
 test('the real lobby + WebSocket flow: joining the debug room and starting the match gives prep 1 调度中心 6, 奇迹 999, an active bond and an open pool', async () => {
   await withEnv({
-    [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_SHOP_LEVEL_ENV]: '6',
+    [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_SHOP_LEVEL_ENV]: '6', [DEBUG_ITEMS_ENV]: null,
     [DEBUG_BOND_LAYERS_ENV]: `${MIRA}:999`, [DEBUG_BOND_MEMBERS_ENV]: `${MIRA}:2`, [DEBUG_NO_BANS_ENV]: '1',
   }, async () => {
     // the 自由位置 picks the user would set in 干员调配 (only PICKED 自选干员 join the pool): 望 + 3 others
@@ -369,6 +505,64 @@ test('the real lobby + WebSocket flow: joining the debug room and starting the m
       assert.equal(bot.layers[MIRA], undefined);
       assert.equal(bot.bonds[MIRA].active, false);
       for (const id of [WANG, ...MIRA_OPS]) assert.equal(held(bot, id).length, 0, `the bot never gets ${id}`);
+    } finally {
+      await c.close();
+      await server.close();
+    }
+  });
+});
+
+test('the real lobby + WebSocket flow: SP_DEBUG_ITEMS puts the 转职球 and its giveBondId partner in hand at prep 1, and the pair 转职s a deployed operator', async () => {
+  await withEnv({ [DEBUG_ROOM_ENV]: 'WXYZ', [DEBUG_GRANT_ENV]: WANG, [DEBUG_ITEMS_ENV]: `${ISO},${HAMMER}` }, async () => {
+    const server = await startServer({ port: 0, quiet: true });
+    const c = await TestClient.connect(`ws://127.0.0.1:${server.port}/ws`);
+    try {
+      const w = await c.hello('Debug');
+      c.id = w.playerId;
+      const info = await (await fetch(`http://127.0.0.1:${server.port}/debug/room`)).json();
+      assert.deepEqual(info.items, [ISO, HAMMER], '/debug/room names the items the room will grant');
+      assert.equal((await c.request({ t: 'room.join', code: info.code })).t, 'ok');
+      await c.waitFor('room.state', (s) => s.code === 'WXYZ' && s.seats.some((x) => x && x.playerId === c.id));
+      assert.equal((await c.request({ t: 'room.addBot' })).t, 'ok');
+      await c.waitFor('room.state', (s) => s.seats.some((x) => x && x.isBot));
+      assert.equal((await c.request({ t: 'room.start' })).t, 'ok');
+      const m = server.lobby.rooms.get('WXYZ').match;
+      assert.ok(m, 'the room runs a match');
+      const ps = m.players.get(c.id);
+      const bot = [...m.players.values()].find((p) => p.isBot);
+      assert.ok(ps && bot, 'the human and the AI seat are in the match');
+      // confirm the briefing, then take the strategy (the socket drives the real protocol; the room is untimed)
+      await c.waitFor('m.public', (p) => p.phase === 'INFO_CHECK', 10_000);
+      assert.equal((await c.request({ t: 'g.infoReady' })).t, 'ok');
+      await c.waitFor('m.public', (p) => p.phase === 'BAND_DRAFT', 10_000);
+      const t0 = Date.now();
+      while (m.phase === 'BAND_DRAFT' && Date.now() - t0 < 10_000) {
+        if (m.draftTurn() === c.id) assert.equal((await c.request({ t: 'g.band', bandId: m.defaultBand(c.id) })).t, 'ok');
+        else await sleep(20);
+      }
+      const t1 = Date.now();
+      while (!(m.round === 1 && m.phase === 'PREP') && Date.now() - t1 < 20_000) await sleep(25);
+      assert.equal(m.round, 1, `round 1 reached (phase ${m.phase})`);
+      assert.equal(m.phase, 'PREP');
+      // what the user asked for: the 转职球 is in hand from the very first prep, together with the item that makes it work
+      assert.deepEqual(ps.hand.filter((p) => p && p.kind === 'item').map((p) => p.id).sort(), [HAMMER, ISO].sort());
+      for (const id of [ISO, HAMMER]) assert.equal(itemsInHand(ps, id).length, 1, `${id} in hand`);
+      assert.equal(vicCount(ps), 0, 'nothing is 维多利亚 yet');
+      // deploy the granted 望 and equip the ball alone → no 转职 (it needs the partner) …
+      const piece = held(ps, WANG)[0];
+      const at = legalTileFor(m, ps, WANG, new Set([...ps.board.keys()]));
+      assert.ok(at, 'a legal tile exists');
+      assert.deepEqual(m.handle(c.id, { t: 'g.move', uid: piece.uid, to: { area: 'board', row: at[0], col: at[1] }, dir: 'RIGHT' }), { ok: true });
+      assert.deepEqual(m.handle(c.id, { t: 'g.equip', itemUid: itemsInHand(ps, ISO)[0].uid, targetUid: piece.uid }), { ok: true });
+      assert.equal(vicCount(ps), 0, 'the 转职球 without its giveBondId partner changes nothing');
+      // … then the partner → the carrier counts as a 维多利亚 member (the 转职道具 fix the user is verifying)
+      assert.deepEqual(m.handle(c.id, { t: 'g.equip', itemUid: itemsInHand(ps, HAMMER)[0].uid, targetUid: piece.uid }), { ok: true });
+      assert.equal(vicCount(ps), 1, 'the pair 转职s the operator into 维多利亚');
+      assert.equal(itemsInHand(ps, ISO).length, 0, 'the ball is worn, no longer in hand');
+      // …and the AI teammate is untouched
+      assert.equal(itemsInHand(bot, ISO).length, 0);
+      assert.equal(itemsInHand(bot, HAMMER).length, 0);
+      assert.equal(vicCount(bot), 0);
     } finally {
       await c.close();
       await server.close();
