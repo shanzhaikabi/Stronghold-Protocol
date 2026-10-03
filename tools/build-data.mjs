@@ -334,11 +334,15 @@ async function loadContext() {
     assets: await loadResearch('07-assets.json'),
     // 自选干员 主盟约 verified against PRTS (docs/research/12-free-pick-factions.json): { bonds: { charId: bondId|null } }
     freePicks: await loadResearch('12-free-pick-factions.json'),
+    // summon 异常效果 verified against PRTS (docs/research/13-token-abnormal.json): { effects, unexpressible, tokens }
+    tokenAbnormal: await loadResearch('13-token-abnormal.json'),
   };
+  const abnormal = buildTokenAbnormal(research.tokenAbnormal);
 
   return {
     act, ac, charTable, skillTable, rangeTable, uniequip, battleEquip, handbook, enemyDb,
     levels, templateIds: [...templateIds].sort(naturalCmp), stageIds, enemyDataLevelId, research,
+    tokenAbnormal: abnormal.table, tokenAbnormalErrors: abnormal.errors, tokenAbnormalSource: abnormal.source,
   };
 }
 
@@ -1346,13 +1350,23 @@ function enemyAsTokenStats(e) {
 /**
  * Abnormal effects (异常效果) summons hold from the start that no official table carries — the PRTS summon pages
  * (召唤物 备注 "持有…"; user playtest #6 item 18). tokens.json `abnormal`; the sim gives the unit the matching flags
- * (Battle._setupUnit):
- *   healFree — 禁疗 (HEAL_FREE, PRTS 异常效果 "无法成为治疗类能力的目标，且受到的治疗量变为0"): “小自在”, “耀阳”, 斯卡蒂的海嗣,
- *              沙之碑, 流形, 狼群, 迷迭香的战术装备, 黄金盟誓, 保护目标（冻结状态） (圣聆初雪 S2's frozen target);
- *   isolated — 孤立 (ALLY_TARGET_FREE, "无法被同阵营选中": no heal and no ally selection reaches it): “炎佑” (PRTS “炎佑”
- *              天赋 "特殊机制|我方单位，孤立，可同时攻击3个目标"), 从不混淆的方向 (备注 "持有无敌、孤立…").
+ * (Battle._setupUnit) and the ONLY vocabulary that field carries today is:
+ *   healFree — 禁疗 (HEAL_FREE, PRTS 异常效果 "无法成为治疗类能力的目标，且受到的治疗量变为0");
+ *   isolated — 孤立 (ALLY_TARGET_FREE, "无法被同阵营选中": no heal and no ally selection reaches it — Battle sets
+ *              noHeal too): “炎佑” (PRTS “炎佑” 天赋 "特殊机制|我方单位，孤立，可同时攻击3个目标").
+ * Every other 异常效果 the notes name (无敌 / 阻回 / 不可阻挡 / 静默 / 缴械 / 状态免疫 …) has no key in this pipeline:
+ * writing one would be a dead key, so they are recorded per token in the research file instead (see below).
+ *
+ * The table is PRTS data, not a hand list: docs/research/13-token-abnormal.json carries, per token, the quoted 备注
+ * segment, the effects the token 持有s (`holds` → `effects` → a flag here), and every effect that is NOT applied
+ * (`unexpressed`, each with a reason in `unexpressible`) — so nothing is silently dropped and a re-verifier can
+ * re-run the harvest. buildTokenAbnormal() turns it into this map and fails the build on drift.
+ *
+ * TOKEN_ABNORMAL_FALLBACK is the season's hand table (what this file carried before the research file existed: the
+ * 10 season summons + 炎佑) and is used only when the research file is absent or `--no-research` is given; the build
+ * also asserts the research file still reproduces it exactly, so the season can never drift.
  */
-const TOKEN_ABNORMAL = Object.freeze({
+const TOKEN_ABNORMAL_FALLBACK = Object.freeze({
   token_10015_dusk_drgn: ['healFree'],        // “小自在”
   token_10019_nearl2_sword: ['healFree'],     // “耀阳”
   token_10017_skadi2_dedant: ['healFree'],    // 斯卡蒂的海嗣 (also 无敌)
@@ -1365,6 +1379,50 @@ const TOKEN_ABNORMAL = Object.freeze({
   token_10039_ulpia_block: ['isolated'],      // 从不混淆的方向 (also 无敌)
   enemy_9012_acloon: ['isolated'],            // “炎佑”
 });
+
+/** The flags Battle._setupUnit reads off tokens.json `abnormal` — do not add a name the engine ignores. */
+const TOKEN_ABNORMAL_FLAGS = Object.freeze(['healFree', 'isolated']);
+
+/**
+ * tokens.json `abnormal` from docs/research/13-token-abnormal.json. Returns `{ table, errors, source }`: `errors`
+ * are referential problems the build turns into integrity failures (an effect with no engine flag, an `unexpressed`
+ * effect without a reason, an id that is not a token, or the season's fallback table drifting); `source` says whether
+ * the research file was used at all.
+ * @param {object|null} r parsed research file
+ */
+function buildTokenAbnormal(r) {
+  const errors = [];
+  const table = {};
+  if (!r || !r.effects || !r.tokens) {
+    for (const [id, fl] of Object.entries(TOKEN_ABNORMAL_FALLBACK)) table[id] = [...fl];
+    return { table, errors, source: 'fallback (no research file / --no-research)' };
+  }
+  const unexpressed = r.unexpressible || {};
+  for (const [name, flag] of Object.entries(r.effects)) {
+    if (!TOKEN_ABNORMAL_FLAGS.includes(flag)) errors.push(`13-token-abnormal: ${name} maps to unknown flag ${flag}`);
+  }
+  for (const [id, e] of Object.entries(r.tokens)) {
+    const flags = [];
+    const holds = Array.isArray(e.holds) ? e.holds : [];
+    const not = Array.isArray(e.unexpressed) ? e.unexpressed : [];
+    for (const name of holds) {
+      const flag = r.effects[name];
+      if (!flag) { errors.push(`13-token-abnormal: ${id}: ${name} has no engine flag (list it in unexpressed + unexpressible instead)`); continue; }
+      if (!flags.includes(flag)) flags.push(flag);
+    }
+    for (const name of not) {
+      if (!unexpressed[name]) errors.push(`13-token-abnormal: ${id}: unexpressed ${name} has no reason in unexpressible`);
+      if (holds.includes(name)) errors.push(`13-token-abnormal: ${id}: ${name} is both held and unexpressed`);
+    }
+    table[id] = flags;
+  }
+  // The fallback is the season's shipped data: the research file must reproduce it flag-for-flag (and in order).
+  for (const [id, fl] of Object.entries(TOKEN_ABNORMAL_FALLBACK)) {
+    if (!(id in table)) errors.push(`13-token-abnormal: ${id} (in the season fallback table) is missing from the research file`);
+    else if (JSON.stringify(table[id]) !== JSON.stringify([...fl])) errors.push(`13-token-abnormal: ${id} changed the season's flags ${JSON.stringify(fl)} → ${JSON.stringify(table[id])}`);
+  }
+  return { table, errors, source: 'docs/research/13-token-abnormal.json' };
+}
 
 /**
  * Deployment position (部署位置) of a summon where the official `character_table.position` contradicts the actual
@@ -1387,7 +1445,8 @@ const TOKEN_POSITION = Object.freeze({
 
 /**
  * Build data/tokens.json: summons of chess (per-owner variants), bond summons (炎佑) and band map
- * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = TOKEN_ABNORMAL (PRTS), `position` = TOKEN_POSITION
+ * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = the PRTS table ctx.tokenAbnormal
+ * (docs/research/13-token-abnormal.json, TOKEN_ABNORMAL_FALLBACK without it), `position` = TOKEN_POSITION
  * (PRTS) with the client's own `character_table.position` as the fallback.
  */
 /**
@@ -1476,7 +1535,7 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
       skill: first.skill ? { skillId: first.skill.skillId, bb: first.skill.bb } : null,
       deployLimit: first.stats?.deployLimit ?? 1,
       count: first.count,
-      abnormal: TOKEN_ABNORMAL[tokenId] ? [...TOKEN_ABNORMAL[tokenId]] : [],
+      abnormal: ctx.tokenAbnormal[tokenId] ? [...ctx.tokenAbnormal[tokenId]] : [],
       variants,
       assets: { avatar: tokenId, spine: tokenId },
     };
@@ -1493,7 +1552,7 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
       stats: enemyAsTokenStats(loon), rangeGrid: null, dmgType: loon.stats.dmgType, attackKind: 'ranged',
       projectile: 'bolt', canHitFly: true, skill: loon.skills?.[0] ? { skillId: loon.skills[0].prefabKey, bb: loon.skills[0].bb } : null,
       skills: loon.skills, talents: loon.talents, deployLimit: 2, count: 1,
-      abnormal: [...TOKEN_ABNORMAL.enemy_9012_acloon], variants: {},
+      abnormal: [...(ctx.tokenAbnormal.enemy_9012_acloon || [])], variants: {},
       assets: { avatar: loon.iconId, spine: loon.spine, isEnemyModel: true },
     };
   } else warn('炎佑 enemy_9012_acloon missing from enemies');
@@ -3084,7 +3143,7 @@ function findNonFinite(obj, path, out) {
  * Cross-file referential integrity checks. Returns a list of error strings (empty = OK).
  * The same invariants are asserted by test/data.test.js.
  */
-function validateAll(f) {
+function validateAll(f, ctx) {
   const errors = [];
   const err = (m) => errors.push(m);
   const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens, freePicks } = f;
@@ -3186,9 +3245,20 @@ function validateAll(f) {
       if (r.stats && r.statsBase && (r.stats.maxHp < r.statsBase.maxHp || r.stats.atk < r.statsBase.atk)) err(`freePicks ${id}: the default module does not raise the base stats`);
     } else if (r.module || r.status?.equipLevel) err(`freePicks ${id}: a module without module choices`);
   }
-  for (const [id, fl] of Object.entries(TOKEN_ABNORMAL)) {
-    if (!tokens[id]) err(`TOKEN_ABNORMAL: ${id} is not a token`);
-    for (const f of fl) if (f !== 'healFree' && f !== 'isolated') err(`TOKEN_ABNORMAL: ${id}: unknown effect ${f}`);
+  for (const [id, fl] of Object.entries(ctx.tokenAbnormal)) {
+    if (!tokens[id]) err(`13-token-abnormal: ${id} is not a token`);
+    for (const f of fl) if (!TOKEN_ABNORMAL_FLAGS.includes(f)) err(`13-token-abnormal: ${id}: unknown effect ${f}`);
+  }
+  for (const e of ctx.tokenAbnormalErrors || []) err(e);
+  // Coverage (only meaningful with the research file): every summon's abnormal flags are PRTS-checked, and the
+  // research table carries no id the build does not emit (a token of another operator would be a silent no-op).
+  if (ctx.tokenAbnormalSource !== 'fallback (no research file / --no-research)') {
+    const verified = ctx.research.tokenAbnormal.tokens;
+    for (const t of Object.values(tokens)) {
+      if (t.kind !== 'summon' && t.kind !== 'bondSummon') continue;
+      if (!verified[t.tokenId]) err(`13-token-abnormal: token ${t.tokenId} (${t.name}) has no PRTS entry — every summon's abnormal flags must be checked`);
+    }
+    for (const id of Object.keys(verified)) if (!tokens[id]) err(`13-token-abnormal: ${id} is not a token of this build`);
   }
   for (const t of Object.values(tokens)) {
     if (!t.stats) err(`token ${t.tokenId}: no stats`);
@@ -3227,7 +3297,7 @@ async function main() {
   const config = buildConfig(ctx, waves, stages, bands);
   const files = { config, chess, freePicks, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens };
 
-  const errors = validateAll(files);
+  const errors = validateAll(files, ctx);
   let total = 0;
   const sizes = {};
   const texts = {};
