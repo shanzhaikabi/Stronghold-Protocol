@@ -226,13 +226,17 @@ function syntheticOperator(id, extra) {
  * @param {any} p.modelsData Ark-Models models_data.json
  * @param {string[]} [p.extraEnemyIds] more enemy ids that can spawn (e.g. keys of data/enemies.json)
  * @param {string[]} [p.extraTokenIds] more token ids (e.g. token_* keys of data/tokens.json)
+ * @param {Record<string,string>} [p.extraTokenOwners] tokenId → charId for tokens outside research 07 (the summons of
+ *   the 自选干员, DESIGN §21.9). research 07's `tokensUsedByPool` knows only the season's 20 pool tokens, so without
+ *   this a free-pick summon has `owner: null` — and the client's token-avatar fallback (docs/ASSETS.md: "without an
+ *   avatar, use chars[owner].avatar … or prof.battlecard.token") then has nothing to fall back to.
  * @param {Record<string,string>} [p.extraHandbook] enemyId → handbook/model id (e.g. from data/bosses.json)
  * @param {Record<string,{skills?: Array<{index:number,skillId?:string,iconId?:string}>}>} [p.extraOperators]
  *   operators outside research 07 — the 自选干员 of data/freePicks.json (DESIGN §21): their art locations are derived
  *   (syntheticOperator) and their skill icons come from the built records
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
-export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, extraOperators = {} }) {
+export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, extraEnemyIds = [], extraTokenIds = [], extraTokenOwners = {}, extraHandbook = {}, extraOperators = {} }) {
   const notes = [];
   /** @type {Map<string, any>} */
   const models = new Map();
@@ -319,7 +323,7 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
     };
     const usedBy = ops03?.tokensUsedByPool?.[id]?.usedByChess || [];
     const ownerChess = usedBy.map((cid) => chessById.get(cid)).find(Boolean);
-    const entry = { owner: ownerChess?.charId || ownerChess?.backup?.charId || null };
+    const entry = { owner: ownerChess?.charId || ownerChess?.backup?.charId || extraTokenOwners[id] || null };
     entry.avatar = t.avatar?.url ? leaf(alt(`token/avatar/${id}.png`, t.avatar.url, t.avatar.bytes)) : null;
     let model = null;
     if (t.battleSpineDefault) {

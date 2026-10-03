@@ -7,7 +7,7 @@
 // a blank card in game instead of failing the build.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -119,5 +119,44 @@ test('自选干员: their summons resolve into tokens.json, and no season operat
   // every season chess still finds each of its summons, owned by itself (the 22 season tokens are untouched)
   for (const [id, c] of Object.entries(CHESS)) {
     for (const tid of c.tokens || []) assert.ok((TOK[tid]?.owners || []).includes(id), `${id}: ${tid} still owned by it`);
+  }
+});
+
+test('自选干员 的召唤物: 图标在客户端可解析 —— 每条记录都有 manifest 条目,且有头像或能回落到持有者', () => {
+  // user report 2026-10-03: "望的召唤物没有图片". Two halves had to be fixed: the 37 summons of the roster were absent
+  // from data/assets.json altogether (tokenAvatarUrl returns null for an unknown id — NOT the owner fallback), and the
+  // build had no owner for them either (`tokensUsedByPool` of research 07 only knows the season's 20 pool tokens), so
+  // even a present-but-avatar-less entry had nothing to fall back to.
+  const TOK = load('tokens.json');
+  const MAN = load('assets.json');
+  const tokens = MAN.tokens || {};
+  const chars = MAN.chars || {};
+  const haveAssets = existsSync(path.join(ROOT, 'public', 'assets'));
+  const noEntry = [], noIcon = [], missing = [];
+  let n = 0;
+  for (const id of Object.keys(TOK)) {
+    if (!/^token_\d+_/.test(id)) continue;   // the non-token summons (炎佑, the band map characters) resolve elsewhere
+    n++;
+    const e = tokens[id];
+    if (!e) { noEntry.push(id); continue; }
+    // docs/ASSETS.md: the token icon is its own avatar, else `chars[owner].avatar` (a 召唤物 badge), else the generic
+    // battlecard token sprite — the first two are what `tokenAvatarUrl` can reach.
+    const url = e.avatar || (e.owner ? chars[e.owner]?.avatar : null);
+    if (!url) noIcon.push(id);
+    else if (haveAssets && !existsSync(path.join(ROOT, 'public', url))) missing.push(`${id}: ${url}`);
+  }
+  assert.ok(n >= 55, `every summon of data/tokens.json is covered (${n})`);
+  assert.deepEqual(noEntry, [], 'a token missing from the manifest has NO icon at all (tokenAvatarUrl bails on an unknown id)');
+  assert.deepEqual(noIcon, [], 'every token resolves to an avatar (its own, or its owner operator\'s)');
+  assert.deepEqual(missing, [], 'and that file is on disk');
+  // the reported case: 望's 棋子 has its own extracted token avatar
+  assert.equal(tokens['token_10064_wang_stone1']?.avatar, '/assets/token/avatar/token_10064_wang_stone1.png', '棋子');
+  assert.equal(tokens['token_10064_wang_stone1']?.owner, 'char_2027_wang');
+  // three summons have no avatar art in any source (the local PC client and the upstream dump both lack the object),
+  // so they rely on the owner fallback — which only works because the entry carries an `owner`
+  for (const id of ['token_10055_phatm2_mndclv', 'token_10065_demetr_dmtpos', 'token_10071_aglna2_agairp']) {
+    assert.ok(tokens[id], `${id} is in the manifest`);
+    assert.equal(tokens[id].avatar, undefined, `${id}: no avatar upstream (every client/mirror path 404s)`);
+    assert.ok(chars[tokens[id].owner]?.avatar, `${id}: falls back to ${tokens[id].owner}'s avatar`);
   }
 });
