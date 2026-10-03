@@ -328,15 +328,22 @@ async function loadContext() {
   const research = {
     core: await loadResearch('01-core-data.json'),
     bonds: await loadResearch('02-bonds.json'),
+    operators: await loadResearch('03-operators.json'),
     items: await loadResearch('04-items.json'),
     enemies: await loadResearch('05-enemies.json'),
     maps: await loadResearch('05-maps.json'),
     assets: await loadResearch('07-assets.json'),
+    // 自选干员 主盟约 verified against PRTS (docs/research/12-free-pick-factions.json): { bonds: { charId: bondId|null } }
+    freePicks: await loadResearch('12-free-pick-factions.json'),
+    // summon 异常效果 verified against PRTS (docs/research/13-token-abnormal.json): { effects, unexpressible, tokens }
+    tokenAbnormal: await loadResearch('13-token-abnormal.json'),
   };
+  const abnormal = buildTokenAbnormal(research.tokenAbnormal);
 
   return {
     act, ac, charTable, skillTable, rangeTable, uniequip, battleEquip, handbook, enemyDb,
     levels, templateIds: [...templateIds].sort(naturalCmp), stageIds, enemyDataLevelId, research,
+    tokenAbnormal: abnormal.table, tokenAbnormalErrors: abnormal.errors, tokenAbnormalSource: abnormal.source,
   };
 }
 
@@ -901,23 +908,7 @@ function buildChess(ctx) {
       }
     }
     /** token id → { sources: Set('display'|'skill'|'talent'), count } for a selected skill record. */
-    const tokenUse = (skillRec) => {
-      const skTok = skillRec?.overrideTokenKey || null;
-      const use = new Map();
-      const add = (id, src) => { if (!use.has(id)) use.set(id, new Set()); use.get(id).add(src); };
-      for (const id of Object.keys(char.displayTokenDict || {})) add(id, 'display');
-      if (skTok) add(skTok, 'skill');
-      for (const t of rec.talents) {
-        const key = t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey;
-        if (key) add(key, 'talent');
-      }
-      const count = (id) => {
-        const tal = rec.talents.find((t) => (t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey) === id && typeof t.bb.cnt === 'number');
-        const skillCnt = skTok === id ? skillRec?.bb?.cnt : undefined;
-        return tal ? tal.bb.cnt : typeof skillCnt === 'number' ? skillCnt : null;
-      };
-      return { use, count };
-    };
+    const tokenUse = (skillRec) => tokenUseOf(char, charTable, rec.talents, skillRec);
     const defUse = tokenUse(rec.skill);
     const sources = defUse.use;
     const resolvable = [...sources.keys()].filter((id) => {
@@ -969,6 +960,343 @@ function buildChess(ctx) {
     if (rec.goldenId && !out[rec.goldenId]) warn(`chess ${rec.chessId}: goldenId ${rec.goldenId} missing`);
   }
   return { chess: out, tokenOwners };
+}
+
+// ===== 自选干员 (free picks, DESIGN §21) =========================================================
+
+/**
+ * 所属势力 / 分组 / 小队 (client `nationId` / `groupId` / `teamId`) → the core bond it grants (user rule): 阿戈尔,
+ * 卡西米尔, 拉特兰, 萨尔贡, 维多利亚, 谢拉格, 叙拉古 and 炎 — **龙门 and every 炎 sub-faction count as 炎** (龙门近卫局,
+ * 李氏, 岁 …). Anything else (罗德岛, 哥伦比亚, 莱塔尼亚, 乌萨斯, 东国, 伊比利亚, 萨米, 米诺斯, 雷姆必拓, 黑钢国际,
+ * 汐斯塔, the collaboration teams …) grants no core bond, so the operator is 协防干员.
+ *
+ * These are only HINTS: the client data does not carry the 隐藏势力 the PRTS tables record, and the two disagree often
+ * (能天使 is 龙门 by nationId but 拉特兰, 水月 is 东国 but 阿戈尔, 卡涅利安 is 莱塔尼亚 but 萨尔贡, 缄默德克萨斯 is 龙门
+ * but 叙拉古 — all four confirmed by the game's own autochess bond data). `PRTS_FACTION_BONDS` below overrides them for
+ * every operator that has been checked against PRTS.
+ */
+const FACTION_BOND = Object.freeze({
+  egir: 'egirShip', kazimierz: 'kazimierzShip', kjerag: 'kjeragShip', laterano: 'lateranoShip',
+  sargon: 'sargonShip', siracusa: 'siracusaShip', victoria: 'victoriaShip', yan: 'yanShip', lungmen: 'yanShip',
+  // 炎国 sub-factions (龙门 etc.)
+  sui: 'yanShip', lgd: 'yanShip', lee: 'yanShip',
+  // 维多利亚 sub-factions
+  glasgow: 'victoriaShip', tara: 'victoriaShip',
+});
+
+/**
+ * The 自选候选 roster (DESIGN §21), DERIVED from the client data instead of hand-listed [user]:
+ *
+ *   1. every 6★ operator of character_table that no season chess record uses — so a candidate can never duplicate one the
+ *      shop already offers ("已经在干员池内的干员不应该进入自选池") and the roster grows on its own when the game adds
+ *      operators;
+ *   2. the 4★ 预备干员 of the season's own backup data (docs/research/03-operators.json `backup`, the same data the
+ *      season uses for its substitute operators) — the 6★ ones are already covered by (1).
+ *
+ * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
+ * @returns {string[]} charIds, sorted
+ */
+function freePickCharIds(ctx, seasonChess) {
+  const used = new Set();
+  for (const rec of Object.values(seasonChess)) if (rec.charId) used.add(rec.charId);
+  const out = [];
+  for (const id of Object.keys(ctx.charTable).sort(naturalCmp)) {
+    const c = ctx.charTable[id];
+    if (!c || c.rarity !== 'TIER_6' || !id.startsWith('char_') || !c.profession || c.profession === 'TOKEN') continue;
+    if (used.has(id)) continue;
+    out.push(id);
+  }
+  const seen = new Set(out);
+  const backups = new Set();
+  for (const rec of ctx.research.operators?.chess || []) {
+    if (rec && rec.backup && typeof rec.backup.charId === 'string') backups.add(rec.backup.charId);
+  }
+  for (const id of [...backups].sort(naturalCmp)) {
+    if (seen.has(id) || used.has(id) || !ctx.charTable[id]) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * The 主盟约 of a 自选候选 (DESIGN §21): the core bond of the faction PRTS records, else 协防干员 (`emptyShip`).
+ * `PRTS_FACTION_BONDS` (docs/research/12-free-pick-factions.json) is authoritative where it has an entry — including a
+ * `null` entry, which means "checked, belongs to none of the 8" — and the client-data hints decide the rest.
+ * @param {object} ctx build context
+ * @param {string} charId @param {any} char the character_table record
+ * @returns {{ bond: string, source: string }}
+ */
+function freePickMainBond(ctx, charId, char) {
+  const table = ctx.research.freePicks?.bonds;
+  if (table && Object.hasOwn(table, charId)) {
+    const v = table[charId];
+    return v ? { bond: v, source: 'prts' } : { bond: 'emptyShip', source: 'prts' };
+  }
+  for (const key of [char.nationId, char.groupId, char.teamId]) {
+    if (key && FACTION_BOND[key]) return { bond: FACTION_BOND[key], source: `hint:${key}` };
+  }
+  return { bond: 'emptyShip', source: 'none' };
+}
+
+/**
+ * 自由位置 levels a free pick is selectable at: every 6★ at 5 级 and 6 级, the 4★ 预备干员 at 5 级 only — and among
+ * those not the 先锋 / 特种 ones (6 remain: 近卫 / 重装 / 狙击 / 术师 / 医疗 / 辅助) [user].
+ */
+function freePickLevels(rarity, profession) {
+  if (rarity === 6) return [5, 6];
+  if (rarity === 4 && profession !== 'PIONEER' && profession !== 'SPECIAL') return [5];
+  return [];
+}
+
+/**
+ * 模组 block of one 自选候选 (DESIGN §16 / §21; user rule "模组相关规则和普通干员一致"): a 自选候选 has no
+ * charShopChessDatas row, so it is its own elite — the record carries the choices a season operator's GOLDEN chess
+ * carries (`modules[]` + `statsBase`/`traitBase`/`talentsBase` + the default module applied to `stats`/`trait`/`talents`
+ * and `module.active`). The default module is the one the season's backup 编队 marks for the character
+ * (`backupCharUniEquipId`), else the first ADVANCED module, else 不装备; the module level follows the season's chess
+ * tier (every tier-6 golden chess uses level 3, tiers 1–5 level 1 — 111 / 22 of the 133 golden chess), and its
+ * trait / talent candidates are read at the level the season fields a golden chess of that tier at (tier 1 → 50,
+ * 2 → 55, 3+ → 60: the 模组's own unlock level) — the operator's own stats / base talents keep the record's level.
+ * Returns null when the character has no ADVANCED module at that level: the record then keeps the module-less shape.
+ * @param {{ talentList: object[], traitDefault: object, attrs: object, backupEquip: Map<string, string>, tierLevels: Map<number, number> }} base
+ * @returns {{ equipLevel: number, module: object, modules: object[], stats: object, trait: object, talents: object[],
+ *             statsBase: object, traitBase: object, talentsBase: object[] }|null}
+ */
+function freePickModuleBlock(ctx, char, charId, tier, phase, level, base) {
+  const { uniequip, battleEquip } = ctx;
+  const { talentList, traitDefault, attrs, backupEquip, tierLevels } = base;
+  const label = `freePick ${charId}`;
+  const equipLevel = tier >= 6 ? 3 : 1;
+  const modLevel = tierLevels.get(tier) ?? 60;   // the 模组 candidate unlock level of that tier (see the header)
+  const allIds = (uniequip.charEquip?.[charId] || []).filter((id) => {
+    const meta = uniequip.equipDict?.[id];
+    return !!meta && meta.type !== 'INITIAL';
+  });
+  const phaseOf = (id) => battleEquip[id]?.phases?.find((p) => p.equipLevel === equipLevel) || null;
+  const ids = allIds.filter((id) => phaseOf(id));
+  for (const id of allIds) if (!phaseOf(id)) warn(`${label}: module ${id} has no level ${equipLevel} (not selectable)`);
+  if (!ids.length) return null;
+  const wanted = backupEquip.get(charId);
+  const modId = wanted && ids.includes(wanted) ? wanted : ids[0];
+  if (wanted && !ids.includes(wanted)) warn(`${label}: backup module ${wanted} is not selectable at level ${equipLevel}`);
+  const modulePhase = phaseOf(modId);
+  const parts = splitModuleParts(modulePhase);
+  const bonus = {};
+  for (const b of modulePhase?.attributeBlackboard || []) bonus[b.key] = (bonus[b.key] || 0) + b.value;
+  const traitOf = (opParts) => {
+    if (!opParts.some((pt) => bestCandidate(pt.overrideTraitDataBundle?.candidates, phase, modLevel))) return null;
+    const tr = traitRecord(ctx, char, phase, modLevel, opParts, charId);
+    if (JSON.stringify(tr.classify) !== JSON.stringify(traitDefault.classify)) {
+      warn(`${label}: module changes the combat classification (not applied by loadouts)`);
+    }
+    return tr;
+  };
+  const modules = [];
+  for (const id of ids) {
+    const meta = uniequip.equipDict?.[id];
+    const ph = phaseOf(id);
+    const pt = splitModuleParts(ph);
+    const tr = traitOf(pt.op);
+    modules.push({
+      uniEquipId: id, name: meta.uniEquipName || null,
+      typeName: `${meta.typeName1 || ''}${meta.typeName2 ? '-' + meta.typeName2 : ''}`,
+      typeIcon: meta.typeIcon || null, icon: meta.uniEquipIcon || id,
+      isDefault: id === modId, level: equipLevel,
+      attr: moduleAttr(ph),
+      traitOverride: tr ? tr.trait : null,
+      talentChanges: moduleTalentChanges(ctx, pt.op, phase, modLevel, label),
+    });
+  }
+  const meta = uniequip.equipDict?.[modId];
+  const tr = traitOf(parts.op);
+  return {
+    equipLevel,
+    modulePhase,
+    tokenParts: parts.token,
+    module: {
+      id: modId, name: meta?.uniEquipName || null,
+      type: meta ? `${meta.typeName1 || ''}${meta.typeName2 ? '-' + meta.typeName2 : ''}` : null,
+      level: equipLevel, active: true,
+    },
+    modules,
+    stats: statsFrom(attrs, bonus),
+    trait: (tr && tr.trait) || traitDefault.trait,
+    talents: mergeTalentChanges(talentList, moduleTalentChanges(ctx, parts.op, phase, modLevel, label)),
+    statsBase: statsFrom(attrs, {}),
+    traitBase: traitDefault.trait,
+    talentsBase: mergeTalentChanges(talentList, []),
+  };
+}
+
+/**
+ * Tokens / summons of one 自选候选 (DESIGN §21). This batch shipped with `tokens: []` ("their summons belong to that
+ * step"), so an operator like 望 (陷阱师, `token_10064_wang_stone1` 棋子) could never hand its summon to the player — user
+ * report 2026-10-03. Resolved exactly like a season chess (`buildChess`: displayTokenDict + the selected skill's
+ * `overrideTokenKey` + the talents' `tokenKey` + the module's isToken parts) and pushed onto the shared `tokenOwners`
+ * map, so `buildTokens` emits the record and its per-owner variant. The token's own battle behaviour stays whatever
+ * `content/tokens.js` authors for that token id (a token without an entry uses the generic kit — a stated gap).
+ * @returns {string[]} the record's `tokens[]`
+ */
+function freePickTokens(ctx, char, charId, phase, level, skillLevel, mod, skillRecs, defaultIdx, talents, talentsBase, tokenOwners) {
+  const { charTable } = ctx;
+  const label = `freePick ${charId}`;
+  const skills = [...skillRecs].sort((a, b) => a.index - b.index);
+  const defSkill = skills.find((s) => s.index === defaultIdx) || null;
+  // a talent tokenKey missing from character_table is a container id (凛御银灰's case): the skill's token replaces it
+  const skillToken = defSkill?.overrideTokenKey || null;
+  for (const t of [...talents, ...talentsBase]) {
+    if (t.tokenKey && !charTable[t.tokenKey] && skillToken && charTable[skillToken]) {
+      t.containerTokenKey = t.tokenKey;
+      t.tokenKey = skillToken;
+    }
+  }
+  const defUse = tokenUseOf(char, charTable, talents, defSkill);
+  const resolvable = [...defUse.use.keys()].filter((id) => {
+    if (charTable[id]) return true;
+    if (!talents.some((t) => t.containerTokenKey === id)) warn(`${label}: token ${id} not in character_table (skipped)`);
+    return false;
+  }).sort(naturalCmp);
+  const altSkills = skills.filter((s) => s.index !== defaultIdx);
+  for (const tokenId of resolvable) {
+    const src = defUse.use.get(tokenId);
+    const skillAlts = altSkills.map((s) => {
+      const u = tokenUseOf(char, charTable, talents, s);
+      return { index: s.index, count: u.count(tokenId), sources: ['talent', 'skill', 'display'].filter((x) => u.use.get(tokenId)?.has(x)) };
+    });
+    if (!tokenOwners.has(tokenId)) tokenOwners.set(tokenId, []);
+    tokenOwners.get(tokenId).push({
+      chessId: `chess_free_${charId}`, charId, phase, level, skillIndex: defaultIdx, skillLevel,
+      count: defUse.count(tokenId), golden: false,
+      modulePhase: mod?.modulePhase ?? null, moduleTokenParts: mod?.tokenParts ?? [],
+      sources: ['talent', 'skill', 'display'].filter((x) => src.has(x)),
+      skillAlts, moduleAlts: [],
+    });
+  }
+  return resolvable;
+}
+
+/**
+ * Build data/freePicks.json: one record per 自选候选 charId (freePickCharIds: every 6★ the season pool does not offer,
+ * plus the 4★ 预备干员), shaped like a chess record (the client, the sim and the pool logic can then treat it as one) but
+ * explicitly marked as a 自选候选 rather than a season chess.
+ *
+ * `bonds` carries the operator's 主盟约 alone (freePickMainBond): PRTS's faction where it has been checked, else the
+ * client-data hints, else 协防干员 — never a second bond, because the ban filter drops a pick by its single 主盟约 [user].
+ * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4); a record whose character
+ * has ADVANCED 模组 additionally carries its own module choices (freePickModuleBlock: 模组相关规则和普通干员一致) and
+ * then reports them in `status.equipLevel`, exactly like a golden chess. `tier` is provisional (= rarity). `tokens`
+ * stays empty until these operators' skills get kits (their summons belong to that step).
+ * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
+ */
+function buildFreePicks(ctx, seasonChess, tokenOwners) {
+  const { charTable, uniequip } = ctx;
+  const out = {};
+  const bondStats = {};
+  // The season's backup 编队 marks one 模组 per 原型干员 (`backupCharUniEquipId`) — the character's default module
+  // (every 原型干员 of the season is somebody's backup; a character outside them falls back to its first ADVANCED 模组).
+  const backupEquip = new Map();
+  for (const row of Object.values(ctx.act?.charShopChessDatas || {})) {
+    if (row?.backupCharId && row.backupCharUniEquipId) backupEquip.set(row.backupCharId, row.backupCharUniEquipId);
+  }
+  // The E2 level the season fields a golden chess of each tier at (tier 1 → 50, 2 → 55, 3+ → 60): the level a 模组's
+  // trait / talent candidates are unlocked at, so freePickModuleBlock reads them there.
+  const tierLevels = new Map();
+  for (const [chessId, cd] of Object.entries(ctx.act?.charChessDataDict || {})) {
+    if (!cd?.isGolden || !(cd.status?.charLevel > 0)) continue;
+    const shop = ctx.act.charShopChessDatas?.[ctx.act.chessNormalIdLookupDict?.[chessId] || chessId];
+    const t = shop?.chessLevel;
+    if (Number.isInteger(t)) tierLevels.set(t, Math.max(tierLevels.get(t) ?? 0, cd.status.charLevel));
+  }
+  for (const charId of freePickCharIds(ctx, seasonChess)) {
+    const char = charTable[charId];
+    if (!char) { warn(`freePick ${charId}: missing from character_table`); continue; }
+    const rarity = Number(String(char.rarity).replace('TIER_', '')) || null;
+    const levels = freePickLevels(rarity, char.profession);
+    if (!levels.length) { warn(`freePick ${charId}: no 自由位置 level (rarity ${rarity}, ${char.profession})`); continue; }
+    const mainBond = freePickMainBond(ctx, charId, char);
+    bondStats[mainBond.source] = (bondStats[mainBond.source] || 0) + 1;
+    const chessId = `chess_free_${charId}`;
+    const phase = 2;      // E2: every NORMAL chess of the season is fielded at phase 2
+    const level = 1;
+    const skillLevel = 4; // the season's normal-chess skill level
+    const attrs = interpolateAttrs(char, phase, level);
+    if (!attrs) warn(`freePick ${charId}: cannot interpolate attributes`);
+    const rangeId = char.phases?.[phase]?.rangeId || null;
+    const traitDefault = traitRecord(ctx, char, phase, level, [], chessId);
+    const skillRecs = [];
+    (char.skills || []).forEach((se, i) => {
+      if (!se?.skillId || !unlocked(se.unlockCond, phase, level)) return;
+      const s = buildSkill(ctx, se.skillId, skillLevel, null, `freePick ${charId}`);
+      if (!s) return;
+      s.trigger = resolveTrigger(ctx, char, charId, i, s, { operator: true });
+      s.index = i;
+      s.overrideTokenKey = se.overrideTokenKey || null;
+      skillRecs.push(s);
+    });
+    if (!skillRecs.length) warn(`freePick ${charId}: no buildable skill`);
+    // These operators have no charShopChessDatas row, so there is no official defaultSkillIndex: the highest unlocked
+    // index is the signature skill, the convention every 3-skill operator of the season follows.
+    const defaultIdx = skillRecs.length ? skillRecs[skillRecs.length - 1].index : null;
+    const talentList = baseTalentList(ctx, char, phase, level, `freePick ${charId}`);
+    // 模组 (user rule "模组相关规则和普通干员一致"): this record is its own elite — see freePickModuleBlock.
+    const mod = freePickModuleBlock(ctx, char, charId, rarity, phase, level, { talentList, traitDefault, attrs, backupEquip, tierLevels });
+    // summons (freePickTokens): resolved like a season chess so a picked operator's summon can be granted and placed
+    const talents = mod ? mod.talents : mergeTalentChanges(talentList, []);
+    const talentsBase = mod ? mod.talentsBase : mergeTalentChanges(talentList, []);
+    const tokens = freePickTokens(ctx, char, charId, phase, level, skillLevel, mod, skillRecs, defaultIdx, talents, talentsBase, tokenOwners);
+    const rec = {
+      chessId, baseId: chessId, goldenId: null, isGolden: false,
+      tier: rarity, // provisional: see the 自由位置 shop-tier gate note above
+      identifier: null,
+      isHidden: true, isDiy: false, visible: false,
+      chessType: 'PROTOTYPE',
+      freePick: true,
+      freePickLevels: levels,
+      shopSortId: null,
+      charId,
+      name: char.name, appellation: char.appellation, rarity,
+      profession: char.profession,
+      subProfessionId: char.subProfessionId,
+      subProfessionName: uniequip.subProfDict?.[char.subProfessionId]?.subProfessionName || null,
+      position: char.position,
+      nationId: char.nationId || null,
+      // the single 主盟约 of this 自选候选 (never a second bond: the ban filter drops a pick by its 主盟约 alone)
+      bonds: [mainBond.bond],
+      bondSource: mainBond.source,
+      garrisonIds: [],      // 不拥有特质 [user]
+      price: null, sellPrice: null,
+      upgradeNum: null, upgradeChessId: null,
+      status: { phase, level, skillLevel, equipLevel: mod ? mod.equipLevel : 0 },
+      stats: mod ? mod.stats : statsFrom(attrs, {}),
+      immunities: attrs ? immunitiesOf(attrs) : null,
+      rangeId, rangeGrid: rangeGrid(ctx, rangeId),
+      dmgType: null, attackKind: null, projectile: null, canHitFly: false, targetPriority: null,
+      trait: mod ? mod.trait : traitDefault.trait,
+      skill: skillRecs.find((s) => s.index === defaultIdx) || null,
+      skills: skillRecs.map((s) => ({ ...s, isDefault: s.index === defaultIdx })),
+      talents: mod ? mod.talents : mergeTalentChanges(talentList, []),
+      tokens, module: mod ? mod.module : null,
+      assets: {
+        avatar: charId, portrait: `${charId}_1`, spine: charId,
+        skillIcon: (skillRecs.find((s) => s.index === defaultIdx) || {}).iconId || null,
+        subProfIcon: `sub_${char.subProfessionId}_icon`,
+      },
+    };
+    if (mod) {
+      rec.statsBase = mod.statsBase;
+      rec.traitBase = mod.traitBase;
+      rec.talentsBase = mod.talentsBase;
+      rec.modules = mod.modules;
+    }
+    Object.assign(rec, traitDefault.classify);
+    if (!out[chessId]) out[chessId] = rec;
+  }
+  const byBond = {};
+  for (const rec of Object.values(out)) byBond[rec.bonds[0]] = (byBond[rec.bonds[0]] || 0) + 1;
+  log(`freePicks: ${Object.keys(out).length} 自选候选 — 主盟约 ${Object.entries(byBond).sort().map(([b, n]) => `${b}:${n}`).join(' ')}`);
+  log(`freePicks: bond source ${Object.entries(bondStats).sort().map(([s, n]) => `${s}:${n}`).join(' ')}`);
+  return out;
 }
 
 // ===== tokens ===================================================================================
@@ -1046,13 +1374,23 @@ function enemyAsTokenStats(e) {
 /**
  * Abnormal effects (异常效果) summons hold from the start that no official table carries — the PRTS summon pages
  * (召唤物 备注 "持有…"; user playtest #6 item 18). tokens.json `abnormal`; the sim gives the unit the matching flags
- * (Battle._setupUnit):
- *   healFree — 禁疗 (HEAL_FREE, PRTS 异常效果 "无法成为治疗类能力的目标，且受到的治疗量变为0"): “小自在”, “耀阳”, 斯卡蒂的海嗣,
- *              沙之碑, 流形, 狼群, 迷迭香的战术装备, 黄金盟誓, 保护目标（冻结状态） (圣聆初雪 S2's frozen target);
- *   isolated — 孤立 (ALLY_TARGET_FREE, "无法被同阵营选中": no heal and no ally selection reaches it): “炎佑” (PRTS “炎佑”
- *              天赋 "特殊机制|我方单位，孤立，可同时攻击3个目标"), 从不混淆的方向 (备注 "持有无敌、孤立…").
+ * (Battle._setupUnit) and the ONLY vocabulary that field carries today is:
+ *   healFree — 禁疗 (HEAL_FREE, PRTS 异常效果 "无法成为治疗类能力的目标，且受到的治疗量变为0");
+ *   isolated — 孤立 (ALLY_TARGET_FREE, "无法被同阵营选中": no heal and no ally selection reaches it — Battle sets
+ *              noHeal too): “炎佑” (PRTS “炎佑” 天赋 "特殊机制|我方单位，孤立，可同时攻击3个目标").
+ * Every other 异常效果 the notes name (无敌 / 阻回 / 不可阻挡 / 静默 / 缴械 / 状态免疫 …) has no key in this pipeline:
+ * writing one would be a dead key, so they are recorded per token in the research file instead (see below).
+ *
+ * The table is PRTS data, not a hand list: docs/research/13-token-abnormal.json carries, per token, the quoted 备注
+ * segment, the effects the token 持有s (`holds` → `effects` → a flag here), and every effect that is NOT applied
+ * (`unexpressed`, each with a reason in `unexpressible`) — so nothing is silently dropped and a re-verifier can
+ * re-run the harvest. buildTokenAbnormal() turns it into this map and fails the build on drift.
+ *
+ * TOKEN_ABNORMAL_FALLBACK is the season's hand table (what this file carried before the research file existed: the
+ * 10 season summons + 炎佑) and is used only when the research file is absent or `--no-research` is given; the build
+ * also asserts the research file still reproduces it exactly, so the season can never drift.
  */
-const TOKEN_ABNORMAL = Object.freeze({
+const TOKEN_ABNORMAL_FALLBACK = Object.freeze({
   token_10015_dusk_drgn: ['healFree'],        // “小自在”
   token_10019_nearl2_sword: ['healFree'],     // “耀阳”
   token_10017_skadi2_dedant: ['healFree'],    // 斯卡蒂的海嗣 (also 无敌)
@@ -1066,10 +1404,99 @@ const TOKEN_ABNORMAL = Object.freeze({
   enemy_9012_acloon: ['isolated'],            // “炎佑”
 });
 
+/** The flags Battle._setupUnit reads off tokens.json `abnormal` — do not add a name the engine ignores. */
+const TOKEN_ABNORMAL_FLAGS = Object.freeze(['healFree', 'isolated']);
+
+/**
+ * tokens.json `abnormal` from docs/research/13-token-abnormal.json. Returns `{ table, errors, source }`: `errors`
+ * are referential problems the build turns into integrity failures (an effect with no engine flag, an `unexpressed`
+ * effect without a reason, an id that is not a token, or the season's fallback table drifting); `source` says whether
+ * the research file was used at all.
+ * @param {object|null} r parsed research file
+ */
+function buildTokenAbnormal(r) {
+  const errors = [];
+  const table = {};
+  if (!r || !r.effects || !r.tokens) {
+    for (const [id, fl] of Object.entries(TOKEN_ABNORMAL_FALLBACK)) table[id] = [...fl];
+    return { table, errors, source: 'fallback (no research file / --no-research)' };
+  }
+  const unexpressed = r.unexpressible || {};
+  for (const [name, flag] of Object.entries(r.effects)) {
+    if (!TOKEN_ABNORMAL_FLAGS.includes(flag)) errors.push(`13-token-abnormal: ${name} maps to unknown flag ${flag}`);
+  }
+  for (const [id, e] of Object.entries(r.tokens)) {
+    const flags = [];
+    const holds = Array.isArray(e.holds) ? e.holds : [];
+    const not = Array.isArray(e.unexpressed) ? e.unexpressed : [];
+    for (const name of holds) {
+      const flag = r.effects[name];
+      if (!flag) { errors.push(`13-token-abnormal: ${id}: ${name} has no engine flag (list it in unexpressed + unexpressible instead)`); continue; }
+      if (!flags.includes(flag)) flags.push(flag);
+    }
+    for (const name of not) {
+      if (!unexpressed[name]) errors.push(`13-token-abnormal: ${id}: unexpressed ${name} has no reason in unexpressible`);
+      if (holds.includes(name)) errors.push(`13-token-abnormal: ${id}: ${name} is both held and unexpressed`);
+    }
+    table[id] = flags;
+  }
+  // The fallback is the season's shipped data: the research file must reproduce it flag-for-flag (and in order).
+  for (const [id, fl] of Object.entries(TOKEN_ABNORMAL_FALLBACK)) {
+    if (!(id in table)) errors.push(`13-token-abnormal: ${id} (in the season fallback table) is missing from the research file`);
+    else if (JSON.stringify(table[id]) !== JSON.stringify([...fl])) errors.push(`13-token-abnormal: ${id} changed the season's flags ${JSON.stringify(fl)} → ${JSON.stringify(table[id])}`);
+  }
+  return { table, errors, source: 'docs/research/13-token-abnormal.json' };
+}
+
+/**
+ * Deployment position (部署位置) of a summon where the official `character_table.position` contradicts the actual
+ * rule — the PRTS 召唤物 pages carry the authoritative value, and where the two disagree the game's own display is
+ * documented as wrong. Keyed by tokenId; a token without an entry keeps the client's own `position`.
+ *
+ *   token_10064_wang_stone1 — 棋子 (望, 陷阱师): `character_table.position` is **MELEE**, which would confine the
+ *     trap to ground tiles. PRTS 棋子 gives 部署位置 **全部位** and notes "游戏内召唤物信息与实际不符（显示为仅部署在
+ *     近战位）", i.e. the in-game text is a known data/UI error. 望's 铸子 talent agrees: the extra 棋子 it fires
+ *     (跟子) is generated with the priority 不可部署地块 > 可部署地面地块 > **可部署高台地块** — a deployable 高台 tile
+ *     is a legal tile for it. User report 2026-10-03: "他的棋子应该可以部署在高台".
+ *     This is a **per-token exception, not a traper-wide rule**: every other 陷阱师/地雷 summon is genuinely 近战位
+ *     (迎宾踏垫 霜华, 共振装置 多萝西, 雷鸣地雷 艾拉, 牵绊 贝洛内, “一会儿见！” 予愿安洁莉娜, 香槟炸弹 琳琅诗怀雅,
+ *     “夹子” 罗宾 — all MELEE in character_table AND 近战位 on PRTS), so do NOT generalise this to `subProfessionId
+ *     === 'traper'`.
+ */
+const TOKEN_POSITION = Object.freeze({
+  token_10064_wang_stone1: 'ALL',   // 棋子 (望): PRTS 部署位置 全部位 (in-game data wrongly says 近战位)
+});
+
 /**
  * Build data/tokens.json: summons of chess (per-owner variants), bond summons (炎佑) and band map
- * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = TOKEN_ABNORMAL (PRTS).
+ * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = the PRTS table ctx.tokenAbnormal
+ * (docs/research/13-token-abnormal.json, TOKEN_ABNORMAL_FALLBACK without it), `position` = TOKEN_POSITION
+ * (PRTS) with the client's own `character_table.position` as the fallback.
  */
+/**
+ * Cache of token usage per owner: `token id → { sources: Set('display'|'skill'|'talent'), count(id) }` for one selected
+ * skill record. Shared by buildChess (season chess) and buildFreePicks (自选干员, DESIGN §21) so a summon resolves
+ * identically for both: `displayTokenDict` of the character, the selected skill's `overrideTokenKey`, the talents'
+ * `tokenKey` (a container id already remapped onto the skill token by the caller counts as that token).
+ */
+function tokenUseOf(char, charTable, talents, skillRec) {
+  const skTok = skillRec?.overrideTokenKey || null;
+  const use = new Map();
+  const add = (id, src) => { if (!use.has(id)) use.set(id, new Set()); use.get(id).add(src); };
+  for (const id of Object.keys(char.displayTokenDict || {})) add(id, 'display');
+  if (skTok) add(skTok, 'skill');
+  for (const t of talents) {
+    const key = t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey;
+    if (key) add(key, 'talent');
+  }
+  const count = (id) => {
+    const tal = talents.find((t) => (t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey) === id && typeof t.bb.cnt === 'number');
+    const skillCnt = skTok === id ? skillRec?.bb?.cnt : undefined;
+    return tal ? tal.bb.cnt : typeof skillCnt === 'number' ? skillCnt : null;
+  };
+  return { use, count };
+}
+
 function buildTokens(ctx, chess, tokenOwners, enemies) {
   const { charTable, ac } = ctx;
   const out = {};
@@ -1126,7 +1553,10 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
     out[tokenId] = {
       tokenId, kind: 'summon', name: char.name, appellation: char.appellation || null,
       desc: stripRich(first.trait.desc), descRaw: first.trait.descRaw,
-      profession: char.profession, subProfessionId: char.subProfessionId, position: char.position,
+      profession: char.profession, subProfessionId: char.subProfessionId,
+      // [port] TOKEN_POSITION is ours (PRTS: 望's 棋子 is deployable on ALL tile kinds, the in-game data says MELEE);
+      // upstream v0.1.1 added `ownerRange` to the same line — both are kept.
+      position: TOKEN_POSITION[tokenId] ?? char.position,
       displayType: displayType(tokenId), placeable: displayType(tokenId) !== 'HIDDEN' && produced, ownerRange,
       owners: owners.map((o) => o.chessId),
       // Defaults = first owner's variant; per-owner data in variants[chessId].
@@ -1135,7 +1565,7 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
       skill: first.skill ? { skillId: first.skill.skillId, bb: first.skill.bb } : null,
       deployLimit: first.stats?.deployLimit ?? 1,
       count: first.count,
-      abnormal: TOKEN_ABNORMAL[tokenId] ? [...TOKEN_ABNORMAL[tokenId]] : [],
+      abnormal: ctx.tokenAbnormal[tokenId] ? [...ctx.tokenAbnormal[tokenId]] : [],
       variants,
       assets: { avatar: tokenId, spine: tokenId },
     };
@@ -1152,7 +1582,7 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
       stats: enemyAsTokenStats(loon), rangeGrid: null, dmgType: loon.stats.dmgType, attackKind: 'ranged',
       projectile: 'bolt', canHitFly: true, skill: loon.skills?.[0] ? { skillId: loon.skills[0].prefabKey, bb: loon.skills[0].bb } : null,
       skills: loon.skills, talents: loon.talents, deployLimit: 2, count: 1,
-      abnormal: [...TOKEN_ABNORMAL.enemy_9012_acloon], variants: {},
+      abnormal: [...(ctx.tokenAbnormal.enemy_9012_acloon || [])], variants: {},
       assets: { avatar: loon.iconId, spine: loon.spine, isEnemyModel: true },
     };
   } else warn('炎佑 enemy_9012_acloon missing from enemies');
@@ -3063,10 +3493,10 @@ function findNonFinite(obj, path, out) {
  * Cross-file referential integrity checks. Returns a list of error strings (empty = OK).
  * The same invariants are asserted by test/data.test.js.
  */
-function validateAll(f) {
+function validateAll(f, ctx) {
   const errors = [];
   const err = (m) => errors.push(m);
-  const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens } = f;
+  const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens, freePicks } = f;
   for (const [name, obj] of Object.entries(f)) {
     const bad = [];
     findNonFinite(obj, name, bad);
@@ -3153,9 +3583,46 @@ function validateAll(f) {
     for (const id of [...(p.items || []), ...(p.weighted || []).map((x) => x[0])]) if (!id || !(items[id] || chess[id])) err(`pool ${pid}: unresolved entry ${id}`);
   }
   for (const id of Object.keys(SHOP_EXCLUDED_ITEMS)) if (!items[id] || items[id].itemType !== 'EQUIP' || items[id].isGolden) err(`SHOP_EXCLUDED_ITEMS: ${id} is not a normal EQUIP item`);
-  for (const [id, fl] of Object.entries(TOKEN_ABNORMAL)) {
-    if (!tokens[id]) err(`TOKEN_ABNORMAL: ${id} is not a token`);
-    for (const f of fl) if (f !== 'healFree' && f !== 'isolated') err(`TOKEN_ABNORMAL: ${id}: unknown effect ${f}`);
+  // 自选干员 (DESIGN §21): every 自选候选 must build, stay out of the season pool, own no 特质 and carry exactly ONE 主盟约.
+  if (!Object.keys(freePicks).length) err('freePicks: the derived 自选候选 roster is empty');
+  const seasonCharIds = new Set();
+  for (const rec of Object.values(chess)) if (rec.charId) seasonCharIds.add(rec.charId);
+  for (const [id, r] of Object.entries(freePicks)) {
+    if (chess[id]) err(`freePicks ${id}: also a season chess (the shop pool would pick it up)`);
+    if (r.charId && seasonCharIds.has(r.charId)) err(`freePicks ${id}: its operator ${r.charId} already has a season chess (duplicate)`);
+    if (r.visible || r.chessType !== 'PROTOTYPE' || !r.freePick) err(`freePicks ${id}: bad pool flags (visible ${r.visible}, type ${r.chessType})`);
+    if (!r.stats || !(r.stats.maxHp > 0) || !(r.stats.atk > 0)) err(`freePicks ${id}: bad stats`);
+    if (!Array.isArray(r.skills) || !r.skills.length) err(`freePicks ${id}: no skill`);
+    if (r.skills?.filter((s) => s.isDefault).length !== 1) err(`freePicks ${id}: needs exactly one default skill`);
+    if (!Array.isArray(r.rangeGrid) || !r.rangeGrid.length) err(`freePicks ${id}: no attack range`);
+    if (r.garrisonIds.length) err(`freePicks ${id}: 自选干员 own no 特质`);
+    if (r.bonds.length !== 1) err(`freePicks ${id}: exactly one 主盟约, got ${r.bonds.join(',')}`);
+    else if (!bonds[r.bonds[0]]) err(`freePicks ${id}: unknown 主盟约 ${r.bonds[0]}`);
+    if (!r.freePickLevels.length) err(`freePicks ${id}: no 自由位置 level`);
+    // 模组 choices of a 自选候选 (it is its own elite): the same contract the golden chess of the season follows
+    if (r.modules) {
+      const eq = r.status?.equipLevel ?? 0;
+      if (r.modules.filter((m) => m.isDefault).length !== (r.module?.active ? 1 : 0)) err(`freePicks ${id}: module choices without exactly one default`);
+      if (!r.statsBase || !r.traitBase || !r.talentsBase) err(`freePicks ${id}: module choices without the no-module base`);
+      if (!r.module?.active || !r.modules.some((m) => m.uniEquipId === r.module.id && m.isDefault)) err(`freePicks ${id}: the default module is not an active module of the record`);
+      if (r.modules.some((m) => !(m.level > 0) || m.level !== eq)) err(`freePicks ${id}: module level ≠ status.equipLevel`);
+      if (r.stats && r.statsBase && (r.stats.maxHp < r.statsBase.maxHp || r.stats.atk < r.statsBase.atk)) err(`freePicks ${id}: the default module does not raise the base stats`);
+    } else if (r.module || r.status?.equipLevel) err(`freePicks ${id}: a module without module choices`);
+  }
+  for (const [id, fl] of Object.entries(ctx.tokenAbnormal)) {
+    if (!tokens[id]) err(`13-token-abnormal: ${id} is not a token`);
+    for (const f of fl) if (!TOKEN_ABNORMAL_FLAGS.includes(f)) err(`13-token-abnormal: ${id}: unknown effect ${f}`);
+  }
+  for (const e of ctx.tokenAbnormalErrors || []) err(e);
+  // Coverage (only meaningful with the research file): every summon's abnormal flags are PRTS-checked, and the
+  // research table carries no id the build does not emit (a token of another operator would be a silent no-op).
+  if (ctx.tokenAbnormalSource !== 'fallback (no research file / --no-research)') {
+    const verified = ctx.research.tokenAbnormal.tokens;
+    for (const t of Object.values(tokens)) {
+      if (t.kind !== 'summon' && t.kind !== 'bondSummon') continue;
+      if (!verified[t.tokenId]) err(`13-token-abnormal: token ${t.tokenId} (${t.name}) has no PRTS entry — every summon's abnormal flags must be checked`);
+    }
+    for (const id of Object.keys(verified)) if (!tokens[id]) err(`13-token-abnormal: ${id} is not a token of this build`);
   }
   for (const t of Object.values(tokens)) {
     if (!t.stats) err(`token ${t.tokenId}: no stats`);
@@ -3178,6 +3645,7 @@ async function main() {
   const ctx = await loadContext();
   log('building…');
   const { chess, tokenOwners } = buildChess(ctx);
+  const freePicks = buildFreePicks(ctx, chess, tokenOwners);
   const effects = buildEffects(ctx);
   const bonds = buildBonds(ctx, chess, effects);
   const garrisons = buildGarrisons(ctx, chess);
@@ -3194,9 +3662,9 @@ async function main() {
   // whose bond the mode switches off
   for (const b of Object.values(bands)) b.bondIds = bandBondIds(b, { bonds, pools: choices.pools });
   const config = buildConfig(ctx, waves, stages, bands);
-  const files = { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens };
+  const files = { config, chess, freePicks, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens };
 
-  const errors = validateAll(files);
+  const errors = validateAll(files, ctx);
   let total = 0;
   const sizes = {};
   const texts = {};

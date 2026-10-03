@@ -223,15 +223,21 @@ export function clientCandidates() {
   const add = (p, kind) => out.push({ path: p, kind });
   if (IS_WIN) {
     const drives = ['C', 'D', 'E', 'F', 'G', 'H'];
+    // The official PC launcher names the folder "Arknights Game" (older builds: "Arknights"), and on a data drive it
+    // may sit under a "Game" folder — observed as D:\Game\Hypergryph Launcher\games\Arknights Game\Arknights_Data\…
+    const leaves = ['Arknights', 'Arknights Game'];
     const bases = [
-      ['Program Files', 'Hypergryph Launcher', 'games', 'Arknights'],
-      ['Program Files (x86)', 'Hypergryph Launcher', 'games', 'Arknights'],
-      ['Hypergryph Launcher', 'games', 'Arknights'],
-      ['Games', 'Hypergryph Launcher', 'games', 'Arknights'],
-      ['Program Files', 'Hypergryph', 'Arknights'],
-      ['Arknights'],
+      ['Program Files', 'Hypergryph Launcher', 'games'],
+      ['Program Files (x86)', 'Hypergryph Launcher', 'games'],
+      ['Hypergryph Launcher', 'games'],
+      ['Game', 'Hypergryph Launcher', 'games'],
+      ['Games', 'Hypergryph Launcher', 'games'],
     ];
-    for (const d of drives) for (const b of bases) add(path.win32.join(`${d}:\\`, ...b, ...AB_TAIL), 'Windows');
+    for (const d of drives) {
+      for (const b of bases) for (const leaf of leaves) add(path.win32.join(`${d}:\\`, ...b, leaf, ...AB_TAIL), 'Windows');
+      for (const leaf of leaves) add(path.win32.join(`${d}:\\`, 'Program Files', 'Hypergryph', leaf, ...AB_TAIL), 'Windows');
+      add(path.win32.join(`${d}:\\`, 'Arknights', ...AB_TAIL), 'Windows');
+    }
   }
   if (IS_MAC) {
     const bottles = path.join(home, 'Library', 'Application Support', 'CrossOver', 'Bottles');

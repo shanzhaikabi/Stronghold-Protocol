@@ -222,17 +222,45 @@ async function main() {
   const audio = indexAudio(audioData);
   // The game data built by tools/build-data.mjs (when present) may reference more
   // spawnable enemies/tokens than research lists (e.g. 机变 enemy swaps): cover them too.
-  const [dataEnemies, dataTokens, dataBosses] = await Promise.all(
-    ['data/enemies.json', 'data/tokens.json', 'data/bosses.json'].map((f) => readJson(f).catch(() => null)));
+  const [dataEnemies, dataTokens, dataBosses, dataFreePicks, dataChess] = await Promise.all(
+    ['data/enemies.json', 'data/tokens.json', 'data/bosses.json', 'data/freePicks.json', 'data/chess.json'].map((f) => readJson(f).catch(() => null)));
   const extraHandbook = {};
   for (const b of Object.values(dataBosses || {})) if (b?.enemyKey && typeof b.handbookId === 'string') extraHandbook[b.enemyKey] = b.handbookId;
   const localEnemySpines = await syncLocalEnemySpines(opts);
+  // Token → owner charId for tokens outside research 07 (the summons of the 自选干员, DESIGN §21.9). data/tokens.json
+  // names the chess that grants each token; the chess record (season chess.json or the free-pick roster) names the
+  // character. Without it those tokens get `owner: null` and the client's avatar fallback (docs/ASSETS.md: the owner's
+  // avatar, then prof.battlecard.token) cannot reach the owner.
+  const tokenOwnerOf = {};
+  {
+    const chessById = {};
+    for (const rec of Object.values(dataChess || {})) if (rec?.chessId) chessById[rec.chessId] = rec;
+    for (const rec of Object.values(dataFreePicks || {})) if (rec?.chessId) chessById[rec.chessId] = rec;
+    for (const [tid, t] of Object.entries(dataTokens || {})) {
+      for (const o of t?.owners || []) {
+        const rec = chessById[o];
+        if (rec && typeof rec.charId === 'string') { tokenOwnerOf[tid] = rec.charId; break; }
+      }
+    }
+  }
+  // 自选干员 (DESIGN §21): the free-pick roster's operators are outside research 07 (which inventories the season's own
+  // autochess pools), so their art locations are derived from the documented patterns — see plan.mjs syntheticOperator.
+  // Their skill icons come from these built records.
+  const extraOperators = {};
+  for (const rec of Object.values(dataFreePicks || {})) {
+    if (!rec || typeof rec.charId !== 'string') continue;
+    extraOperators[rec.charId] = {
+      skills: (rec.skills || []).filter((s) => s && Number.isInteger(s.index)).map((s) => ({ index: s.index, skillId: s.skillId, iconId: s.iconId || s.skillId })),
+    };
+  }
   const plan = buildPlan({
     assets07, ops03, enemies05, maps05, audio, modelsData,
     extraEnemyIds: Object.keys(dataEnemies || {}),
     extraTokenIds: Object.keys(dataTokens || {}),
+    extraTokenOwners: tokenOwnerOf,
     extraHandbook,
     localEnemySpines,
+    extraOperators,
   });
   const leaves = collectLeaves(plan.template);
   log(`[plan] ${leaves.length} files + ${plan.models.size} Spine models ` +
