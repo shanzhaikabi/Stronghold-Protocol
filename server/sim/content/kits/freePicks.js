@@ -6,14 +6,15 @@
 // falls back to the id itself for such a record (there is no `_b` sibling), so one key covers the normal and the 精锐
 // piece alike.
 //
-// This batch = the nine 6★ 原型干员 of the season, 赤刃明霄陈 火陈 (the "火龙" / 剑气长龙 report, S3 only), plus a small
-// wrapper for the six 4★ 预备干员 (their shared generic
+// This batch = the nine 6★ 原型干员 of the season, 赤刃明霄陈 火陈 (the "火龙" / 剑气长龙 report, S3 only), 望 (the "她还
+// 在攻击 / 2.9 加到她自己身上" report, S3 only), plus a small wrapper for the six 4★ 预备干员 (their shared generic
 // skills `skcom_atk_up[…]` / … are reproduced exactly by the generic kit, which however installs no talent — theirs is
 // a plain stat talent that the wrapper below adds):
 //   608_acpion 郁金香 (PIONEER 尖兵)        609_acguad Sharp (WARRIOR 无畏者)   610_acfend Mechanist (TANK 铁卫)
 //   611_acnipe Stormeye (SNIPER 速射手)     612_accast Pith (CASTER 扩散术师)  613_acmedc Touch (MEDIC 医师)
 //   614_acsupo Raidian (SUPPORT 凝滞师)     615_acspec Misery (SPECIAL 处决者) 617_sharp2 领主·Sharp (WARRIOR 领主)
 //   1050_chen3 赤刃明霄陈 (WARRIOR 术战者, S3 剑气长龙)
+//   2027_wang 望 (SPECIAL 陷阱师, S3 天下劫 — 棋子 is `tokens.js wangStone`)
 //   601_cguard / 602_cdfend / 603_csnipe / 604_ccast / 605_cmedic / 606_csuppo (4★ 预备干员, `reserveKit`)
 // Every number comes from the record's own blackboards (`bb` = the SELECTED skill's one, `def.talents[i].bb`,
 // `def.traitBb`); the few constants are documented where they are used. The official wording (description + 备注) was
@@ -26,7 +27,7 @@
 // on `isSel(def, id)` or `skillOn(unit, id)`.
 // Tests: test/content/kits_freePicks.test.js.
 
-import { COLS, ROWS } from '../../constants.js';
+import { COLS } from '../../constants.js';
 import { absoluteRangeKeys, canTargetEnemy, sortEnemyTargets } from '../../targeting.js';
 import { bodyInKeys } from '../../body.js';
 import { genericKit } from '../generic.js';
@@ -123,62 +124,123 @@ function doubleHit(battle, unit, targets) {
 const AURA = 0.2;       // aura refresh period (s)
 const AURA_DUR = 0.25;  // aura buff lifetime (s)
 
+/** 天下劫 (望 S3): seconds per 棋子 round of the fallback that ends the skill while nothing spends its 20 发弹药 yet. */
+const WANG_S3_ROUND_SECONDS = 1;
+
 // ---------------------------------------------------------------------------------------------------------------
 // 剑气长龙 ("火龙") of 赤刃明霄陈 S3 赤霄·天喟 — user report 2026-10-03: "火陈的火龙现在也没有实现"
 
-/** PRTS 备注 of 赤霄·天喟: 剑气 "移动速度1.5" (tiles/s) — the data has no key for it. */
+/**
+ * 剑气's speed: `"_speed": 1.5` (tiles/s) of the projectile prefab `projectile_chr_chen3_s3` — the client DATA carries
+ * it (PRTS 备注's "移动速度1.5" agrees). 火陈's S3 GameObject `skchr_chen3_3` (`[uc]skills.ab`) holds
+ * `_projectileKey: "projectile_chr_chen3_s3"`; that projectile has `_moveType: 4` (= FIXED_DIRECTION, resolved over all
+ * 2177 movement components), `_useSourceDirection: 1`, `_speed: 1.5` and `_lifeTime: 10.0`.
+ */
 const SWORD_QI_SPEED = 1.5;
-/** PRTS 备注 of 赤霄·天喟: 剑气 "碰撞半径1.3" (tiles) — the data has no key for it either. */
+/**
+ * 剑气's 碰撞半径 1.3 (tiles) — PRTS 备注 is its ONLY public record: no component of the prefab carries a radius (the
+ * movement, the turn and the damage are all data keys, the radius is not), so this one stays a documented constant.
+ */
 const SWORD_QI_RADIUS = 1.3;
+/** The projectile's own time limit: `"_lifeTime": 10.0` (s) of `projectile_chr_chen3_s3` — see reading (d) below. */
+const SWORD_QI_LIFETIME = 10;
+/** Defensive bound of the state machine (the lifetime bound ends every flight long before this many tiles). */
+const SWORD_QI_MAX_STEPS = 128;
 
 /**
- * The sword-qi of S3 赤霄·天喟 (`skchr_chen3_3`): on activation she releases a qi straight ahead that damages **once**
- * every enemy its path passes through, for `max(hp_ratio × the victim's CURRENT HP, projectile_min_atk_scale × ATK)`
- * arts damage — both numbers are the skill's own blackboard keys (`hp_ratio` 0.06, `projectile_min_atk_scale` 5.3 at the
+ * Does the tile straight ahead (`nr`, `nc`) trip the 剑气's turn? The union of reading (a) below: the two tile specials
+ * of this engine (侵入点 `tile_start` / 保护目标 `tile_end` — the `_checkTileStart` / `_checkTileEnd` switches), 高地
+ * (`_checkHitHighland`) and the FIELD's edge (`_checkHitMapEdge`, `battle.rect`).
+ */
+function swordQiBlocks(battle, nr, nc) {
+  const R = battle.rect;
+  if (nr < R.r0 || nr > R.r1 || nc < R.c0 || nc > R.c1) return true;
+  const t = battle.grid ? battle.grid.tile(nr, nc) : null;
+  if (!t) return false;
+  return t.special === 'start' || t.special === 'end' || t.height === 'HIGH';
+}
+
+/**
+ * The sword-qi of S3 赤霄·天喟 (`skchr_chen3_3`): on activation she releases a qi that damages **once per segment** every
+ * enemy its path passes through, for `max(hp_ratio × the victim's CURRENT HP, projectile_min_atk_scale × ATK)` arts
+ * damage — both numbers are the skill's own blackboard keys (`hp_ratio` 0.06, `projectile_min_atk_scale` 5.3 at the
  * record's skill level). PRTS 备注 (the authority for what the data does not carry): "剑气可对空，碰撞半径1.3，移动速度
- * 1.5，每次转向前对每个敌人仅判定一次伤害；…"; "『至少造成』指的是『如果目标当前生命值的6%低于自己的攻击力*相应攻击力
- * 倍率』，则改为造成一次相应攻击力倍率的法术伤害（非伤害保底或无视法术抗性）"; "剑气的伤害为预计算的无途径法术普通伤害".
- * The qi therefore hits FLYING enemies too (`canHitFly: true`, unlike her own attacks — 地面敌人), flies to the field
- * edge at `SWORD_QI_SPEED` tiles/s (each step damages from where it has arrived, so a distant enemy is hit later),
- * and its ATK is the one cached at cast time (预计算 — a later ATK buff does not grow it).
+ * 1.5，**每次转向前对每个敌人仅判定一次伤害**；在距离前进方向上的**侵入点/保护目标/高度类型为高地的地块**的距离不低于0.25
+ * 时，**顺时针旋转90°**"; "『至少造成』指的是『如果目标当前生命值的6%低于自己的攻击力*相应攻击力倍率』，则改为造成一次相应
+ * 攻击力倍率的法术伤害（非伤害保底或无视法术抗性）"; "剑气的伤害为预计算的无途径法术普通伤害". The turn component of the
+ * prefab is `ChangeStateWithHighlandBehaviour` with `_changeDirectionWhenHit: 1, _hitDistance: 0.25, _hitEps: 0.02,
+ * _clearTargetsAlreadyHitListWhenHit: 1, _checkHitHighland: 1, _checkHitMapEdge: 1, _checkTileStart: 1,
+ * _checkTileEnd: 1` and the damage node is `DamageViaCurHpRatio` (`_damageType: "MAGICAL"`, `_atkScaleKey:
+ * "projectile_min_atk_scale"`, `_canHitSameTargetMultipleTimes: 0`).
  *
- * The 剑气 is a travelling projectile, not a tile sweep: its position is sampled once per tile of flight (0.667 s at
- * `SWORD_QI_SPEED`) and damages `battle.enemiesInRadius(x = its column, y = its row, SWORD_QI_RADIUS)` — the 1.3
- * 碰撞半径 of 备注, a body only has to touch that disc. `hit` keeps "每个敌人仅判定一次" per segment: a 巨型 enemy
- * (body.js `hitArea`) whose rectangle covers several samples, or one walking into the corridor between two steps, takes
- * ONE instance. The flight stops at the field edge (`battle.rect`), which for a normal battle is much narrower than the
- * 19×21 stage grid behind it.
+ * The qi therefore hits FLYING enemies too (`canHitFly: true`, unlike her own attacks — 地面敌人), its ATK is the one
+ * cached at cast time (预计算 — a later ATK buff does not grow it), and its flight is a TILE-GRID STATE MACHINE: one
+ * step per tile (0.667 s at `SWORD_QI_SPEED`), and at every tile boundary it looks at the tile straight ahead; when
+ * that tile trips the trigger it rotates 90° CLOCKWISE, **clears the already-hit set** and flies on from where it is —
+ * only ever clockwise. The damage is `battle.enemiesInRadius(the arrived tile, SWORD_QI_RADIUS)` (the 1.3 碰撞半径 of
+ * 备注: a body only has to touch that disc) and `hit` keeps "每次转向前对每个敌人仅判定一次伤害": an enemy the qi meets
+ * on several samples OF ONE SEGMENT (a 巨型 body covering several tiles, one walking into the corridor between two
+ * steps) takes ONE instance, while a turn opens a NEW segment in which everyone is judged again.
  *
- * Not modelled: the official 可转向 (the qi turns clockwise 90° when the way ahead is blocked — 侵入点 / 保护目标 / 高地
- * within 0.25; it never turns here, so the whole flight is one segment) and obstacles / 高地 do not stop it either. Its
- * damage cannot be dodged by enemies: the official damage is a projectile hit, not one of the caster's attacks.
+ * Readings taken (choices, none of them silent):
+ *   (a) TRIGGER SET — PRTS names three kinds (侵入点 / 保护目标 / 高地) while the binary's turn component also carries
+ *       `_checkHitMapEdge` / `_checkTileStart` / `_checkTileEnd`. Take the UNION: 侵入点 (`special === 'start'`),
+ *       保护目标 (`special === 'end'`), 高地 (`height === 'HIGH'`) and the FIELD edge (`battle.rect`). The edge is why
+ *       the observable path is a clockwise 盘旋 instead of a line that stops at the wall — the qi turns along the field
+ *       border and keeps flying. (`_checkTileStart` / `_checkTileEnd` are read as this engine's own tile_start /
+ *       tile_end specials; reading them as "check the tile it starts from too" would add nothing, because the check
+ *       runs at EVERY tile boundary — which is exactly what the per-tile stepping below is.)
+ *   (b) 「距离…不低于0.25」 — read as "the qi is within 0.25 tiles of the trigger tile when the turn fires", matching
+ *       `_hitDistance: 0.25` / `_hitEps: 0.02`: it turns as it ARRIVES at the tile short of the trigger. The per-tile
+ *       sampling below turns one tile early, i.e. that 0.25 window measured in steps.
+ *   (c) LOOKAHEAD = THE NEXT TILE ONLY — the client's fields are `_GetDistanceToNextTile` / `_CheckNextTile*`: no ray
+ *       cast past it and no diagonal check, the tile straight ahead decides.
+ *   (d) FLIGHT BOUND — the prefab's `_lifeTime: 10.0` s and the activation's own duration (the S3 record is 20 s) both
+ *       bound the flight; the SHORTER one wins, so the qi can outlive neither its projectile nor the skill that cast it
+ *       (a clockwise-only path inside the field rectangle never terminates by itself).
+ *
+ * Not modelled: obstacles (a crate / platform is not a trigger — only 高地 is) and sub-tile sampling (the 0.25 lookahead
+ * is applied at tile granularity). The damage cannot be dodged by enemies: the official hit is a projectile hit, not one
+ * of the caster's attacks. `battle.grid` is null in a grid-less sandbox — the edge bound alone then drives the turn.
  */
 function swordQi(battle, unit, bb) {
-  const [dr, dc] = Array.isArray(unit.fwd) ? unit.fwd : [0, 1];
+  let [dr, dc] = Array.isArray(unit.fwd) ? unit.fwd : [0, 1];
   if (!dr && !dc) return;
   const ratio = num(bb.hp_ratio, 0.06);
   const scale = num(bb.projectile_min_atk_scale, 5.3);
   const atk = unit.s.atk;                       // 预计算: the ATK at cast time
-  const R = battle.rect;                        // the qi flies over the FIELD, not the 19×21 grid behind it
-  const path = [];
-  for (let i = 1; i <= Math.max(ROWS, COLS); i++) {
-    const r = unit.tileR + dr * i, c = unit.tileC + dc * i;
-    if (r < R.r0 || r > R.r1 || c < R.c0 || c > R.c1) break;
-    path.push([r, c]);
-  }
-  if (!path.length) return;
-  const hit = new Set();                        // 每个敌人仅判定一次 (per segment)
-  let px = unit.x, py = unit.y;                 // the qi's continuous position: her spot at cast time
-  for (let i = 0; i < path.length; i++) {
-    const [r, c] = path[i];
-    const fx0 = px, fy0 = py;                   // the spot the qi comes from (fixed at cast: it does not follow her)
-    battle.after((i + 1) / SWORD_QI_SPEED, () => {
+  const dur = num(unit.skill?.duration, 0);     // reading (d): the activation bounds the flight too
+  const life = Math.min(dur > 0 ? dur : SWORD_QI_LIFETIME, SWORD_QI_LIFETIME);
+  const step = 1 / SWORD_QI_SPEED;              // one tile per step
+  let hit = new Set();                          // 每个敌人仅判定一次 PER SEGMENT (a turn opens a NEW set)
+  let r = unit.tileR, c = unit.tileC;
+  let px = unit.x, py = unit.y;                 // the qi's position: her spot at cast time (it does not follow her)
+  let t = 0;                                    // flight time (s); a turn costs none (the client's ChangeState is instant)
+  let turns = 0;
+  for (let guard = 0; guard < SWORD_QI_MAX_STEPS && t + step <= life + 1e-9; guard++) {
+    const nr = r + dr, nc = c + dc;
+    if (swordQiBlocks(battle, nr, nc)) {
+      [dr, dc] = [-dc, dr];                     // 顺时针90° (dir.js DIRS order: UP → RIGHT → DOWN → LEFT)
+      // "每次转向前对每个敌人仅判定一次" ⇒ a turn opens a new segment: a FRESH set, so the steps already scheduled
+      // for the segment that just ended keep judging against their own (the steps of a turn never share one)
+      hit = new Set();
+      // boxed in on all four sides: the client qi would spin in place until its lifetime runs out — stop instead
+      if (++turns >= 4) break;
+      continue;
+    }
+    turns = 0;
+    t += step;
+    r = nr; c = nc;
+    const tr = r, tc = c;                       // the arrived tile, captured for this step's callback
+    const seg = hit;                            // …and its segment's already-hit set
+    const fx0 = px, fy0 = py;                   // the spot the qi comes from
+    battle.after(t, () => {
       // one streak per step (`move` archetype: the client walks the event's tx / ty, see render/fx.js) — the old single
       // 'beam' for the whole flight resolved unit views only and drew a sparkle on the caster instead of a line
-      battle.fx('swordQi', { x: fx0, y: fy0, id: unit.id, tx: c, ty: r });
-      for (const e of battle.enemiesInRadius(c, r, SWORD_QI_RADIUS)) {
-        if (hit.has(e) || !canTargetEnemy(unit, e, { canHitFly: true })) continue;
-        hit.add(e);
+      battle.fx('swordQi', { x: fx0, y: fy0, id: unit.id, tx: tc, ty: tr });
+      for (const e of battle.enemiesInRadius(tc, tr, SWORD_QI_RADIUS)) {
+        if (seg.has(e) || !canTargetEnemy(unit, e, { canHitFly: true })) continue;
+        seg.add(e);
         const amount = Math.max(e.hp * ratio, atk * scale);
         battle.dealDamage(unit, e, { amount, type: 'arts', isSkill: true, canDodge: false, tags: ['skill', 'swordQi'] });
       }
@@ -971,6 +1033,66 @@ export default {
           onStart({ battle, unit }) { swordQi(battle, unit, bb); },
         }),
       }),
+    };
+  },
+
+  // ===============================================================================================================
+  // 2027_wang 望 (SPECIAL 陷阱师, char_2027_wang; the 棋子 summoner — `tokens.js wangStone`) — S3 天下劫, the reported
+  // "她还在攻击" / "2.9 加到了她自己身上"
+  //   铸子: 可以使用6枚棋子（最多拥有7枚），棋子相连时相互激活，敌人进入激活的棋子所在地块时触发其效果；手动部署棋子时，望在
+  //         相邻位置额外部署一枚棋子（最多9枚，可以且优先部署在有敌人的不可部署地块）
+  //   料敌机先: 棋子激活时所在的连续直线上每有一枚棋子，直线上所有棋子造成伤害提升13%并无视敌人12点法术抗性（最多叠加3次）
+  //   S1 取势 / S2 连星: 被动效果 (棋子触发时的伤害) + 主动效果「立即获得两枚棋子」
+  //   S3 天下劫 (default): 停止攻击但攻击范围扩大；立即获得8枚棋子，然后将超出上限的棋子优先部署在范围内敌人所在位置；在攻击
+  //       范围内手动部署棋子时可部署至敌人所在位置，且第一天赋额外至多部署3枚棋子并消耗等量弹药
+  //       装有20发弹药，手动停止或棋子耗尽后技能结束，剩余的弹药返还为棋子
+  //
+  // Only S3 is authored (the two reported wrongs). Why each line is here, and what is deliberately NOT here:
+  //   * `kind: 'ammo'` + `attack: { noAttack: true }` — "停止攻击". The generic kit only sets `noAttack` for `duration`
+  //     kinds (generic.js: `STOP_ATTACK` + `kind === 'duration'`), so her AMMO skill made her keep attacking.
+  //   * `targeting.rangeGrid` = the record's own S3 grid — "但攻击范围扩大" (the generic spec's line, kept).
+  //   * NO `attack.atkScale`: the skill's blackboard `atk_scale: 2.9` is the PASSIVE half's number — "棋子的触发和伤害范围
+  //     扩大，造成相当于攻击力290%的法术伤害" — and it lives on **棋子's own skill** (`data/tokens.json`
+  //     `variants.chess_free_char_2027_wang.skill` = `sktok_wang_3`, bb `atk_scale: 2.9`, already implemented in
+  //     tokens.js `wangStone`). The generic kit read it as HER attack scale (attack.atkScale 2.9), i.e. her own attacks
+  //     dealt 290 % — this entry is what stops that.
+  //   * the fallback `onTick` — nothing in this batch spends the 20 rounds (the 棋子 grant / ammo economy / mid-combat
+  //     placement is the next batch), so with `noAttack` the skill would stay open for ever: the engine ends an ammo
+  //     skill only when its ammo runs out (`skills.js onAttackPerformed`) or a kit spends it, and 天下劫's data has
+  //     `duration: -1` (no time limit either). The fallback spends one round per second with the existing idiom
+  //     (`skill.addAmmo(-1)` + `ammoUsed`; a public `skill.spendAmmo(n)` would be cleaner but is an engine change), so
+  //     the skill ends by the AMMO path after its 20 rounds — as 手动停止或棋子耗尽后技能结束 asks.
+  //   * 铸子 / 料敌机先 are SUMMON-side and stay where they already live: `tokens.js wangStone`/`fireWangStone` reads
+  //     料敌机先 off 望's own resolved def (`stoneTalent(unit)`) and applies it to every stone, so installing it here as
+  //     well would DOUBLE it; 铸子's piece counts (6 → 7, 跟子 → 9), its manual placement and the S3 「立即获得8枚棋子」 /
+  //     "手动部署棋子时可部署至敌人所在位置" are the prep / match side of the hand piece (`data/tokens.json` deployLimit 7)
+  //     and the next batch. The kit therefore installs no talent of its own.
+  chess_free_char_2027_wang: (bb, chess, def) => {
+    const S3 = 'skchr_wang_3';
+    const g = gridOf(def);
+    return {
+      skills: alt(def, {
+        [S3]: () => ({
+          kind: 'ammo',
+          ammo: Math.max(1, Math.floor(num(bb.trigger_time, 20))),   // 装有20发弹药
+          attack: { noAttack: true },                                // 停止攻击
+          ...(g ? { targeting: { rangeGrid: g } } : {}),             // 但攻击范围扩大
+          onStart({ unit }) { unit.mem.wangS3 = { acc: 0 }; },
+          onTick({ battle, unit, skill, dt }) {
+            const m = unit.mem.wangS3;
+            if (!m || !skill.active) return;
+            m.acc += dt;
+            while (skill.active && m.acc + 1e-9 >= WANG_S3_ROUND_SECONDS) {
+              m.acc -= WANG_S3_ROUND_SECONDS;
+              skill.addAmmo(-1);                                     // placeholder round (see the entry comment)
+              battle.emit('ammoUsed', { unit, left: skill.ammoLeft, skill });
+              if (skill.ammoLeft <= 0) { skill.end('ammo'); break; }
+            }
+          },
+          onEnd({ unit }) { unit.mem.wangS3 = null; },
+        }),
+      }),
+      talents: [],
     };
   },
 

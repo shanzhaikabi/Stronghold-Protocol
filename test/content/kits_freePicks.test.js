@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
+import { makeBattle, chessRec, enemyRec, checkInvariants, flatStage } from '../helpers/battleHarness.js';
 import { DataSource, getDefaultSource } from '../../server/sim/simdata.js';
 import { KITS, skillSpecSource } from '../../server/sim/content/index.js';
 import { bodyKeys } from '../../server/sim/body.js';
@@ -33,6 +33,8 @@ const STORM = 'chess_free_char_611_acnipe', PITH = 'chess_free_char_612_accast',
 const RAIDIAN = 'chess_free_char_614_acsupo', MISERY = 'chess_free_char_615_acspec', LORD = 'chess_free_char_617_sharp2';
 /** 赤刃明霄陈 火陈 (S3 剑气长龙 only — her S1/S2 and both talents are still the generic / no-talent path). */
 const CHEN = 'chess_free_char_1050_chen3';
+/** 望 (SPECIAL 陷阱师, the 棋子 summoner — `tokens.js wangStone`): S3 天下劫 only. */
+const WANG = 'chess_free_char_2027_wang';
 /** The nine operators of this batch (the six 4★ 预备干员 stay on the generic `skcom_…` skills). */
 const BATCH = [TULIP, SHARP, MECH, STORM, PITH, TOUCH, RAIDIAN, MISERY, LORD];
 
@@ -1023,10 +1025,10 @@ test('火陈 S3 剑气长龙: 沿朝向贯穿一条直线 —— max(当前生�
   h.run(0.6);
   const early = dealt(h, u, tagged('swordQi'));
   assert.equal(early.length, 1, 'the first enemy on the line is hit as the 剑气 reaches it');
-  h.run(2.0);
+  h.run(1.5);   // t ≈ 4.1 s: the qi has swept to the field edge (col 10 at t = 4.0), before its first 转向
   const qi = dealt(h, u, tagged('swordQi'));
   const byTarget = (key) => qi.filter((c) => c.target.defId === `enemy_${key}`);
-  assert.equal(qi.length, 3, 'exactly the three enemies of the line, once each (每个敌人仅判定一次)');
+  assert.equal(qi.length, 3, 'exactly the three enemies of the line, once each in this segment (每次转向前…仅判定一次)');
   for (const c of qi) { assert.equal(c.type, 'arts', '法术伤害'); assert.ok(!c.dmg.isAttack, 'not one of her attacks'); }
   approx(byTarget('e_fat')[0].amount, Math.max(FAT * b.hp_ratio, u.s.atk * b.projectile_min_atk_scale), '6 % of the CURRENT hp');
   approx(byTarget('e_thin')[0].amount, u.s.atk * b.projectile_min_atk_scale, 'below the floor ⇒ 530 % ATK instead');
@@ -1034,6 +1036,14 @@ test('火陈 S3 剑气长龙: 沿朝向贯穿一条直线 —— max(当前生�
   assert.equal(qi.indexOf(byTarget('e_thin')[0]) < qi.indexOf(byTarget('e_fly')[0]), true, 'then farther');
   assert.ok(byTarget('e_fly').length === 1, '可对空: the flying enemy is pierced too');
   assert.equal(byTarget('e_back').length, 0, 'the enemy BEHIND her is not touched (向前)');
+  // 转向: at the field edge the qi turns 90° clockwise — and the 侵入点 (9,10) one tile further turns it a second time —
+  // so it comes back along row 10. A turn CLEARS the per-segment 仅判定一次 set ("每次转向前对每个敌人仅判定一次伤害"),
+  // so the three enemies of the line are each judged once more on the reverse leg — the observable 盘旋 of the report.
+  h.run(0.8);   // t ≈ 4.9 s: the first reverse step (10,9) landed at t = 4.667
+  const back = dealt(h, u, tagged('swordQi'));
+  const backTarget = (key) => back.filter((c) => c.target.defId === `enemy_${key}`);
+  assert.equal(back.length, qi.length + 3, 'the reverse segment re-judges the three enemies it passes, once each');
+  assert.equal(backTarget('e_back').length, 0, 'the enemy behind her is still untouched (the reverse leg has not reached col 2)');
   done(h);
 });
 
@@ -1054,10 +1064,83 @@ test('火陈 S3 剑气长龙: 横跨两格的巨型敌人只判定一次 (每次
   assert.ok(bodyKeys(e).length >= 2, `fixture: the body covers ${bodyKeys(e).length} tiles of her row`);
   assert.equal(Math.round(e.y), u.tileR, 'fixture: the 巨型敌人 stands on the 剑气\'s line');
   assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
-  h.run(20);
+  assert.ok(h.runUntil(() => dealt(h, u, tagged('swordQi')).length >= 1, 10), 'the straight segment reaches the body');
+  h.run(1.5);   // the qi sweeps on over the whole body (cols 7–9) to the field edge — still the SAME segment
   const qi = dealt(h, u, tagged('swordQi'));
-  assert.equal(qi.length, 1, 'exactly ONE instance for a body the qi meets several steps in a row (once per segment)');
+  assert.equal(qi.length, 1, 'exactly ONE instance for a body the qi meets several steps in a row (每段仅判定一次)');
   assert.equal(qi[0].target, e, 'and it is the 巨型敌人');
+  // the field edge turns the qi clockwise (twice: the 侵入点 (9,10) is one tile further), so it comes back along row 10.
+  // A turn starts a NEW segment ⇒ the body is judged once more there — and exactly once for the whole reverse pass.
+  assert.ok(h.runUntil(() => dealt(h, u, tagged('swordQi')).length >= 2, 10), 'the reverse segment judges the body again');
+  h.run(2.0);
+  assert.equal(dealt(h, u, tagged('swordQi')).length, 2, 'one instance per segment, not one per tile of the body');
+  done(h);
+});
+
+// -----------------------------------------------------------------------------------------------------------------
+// 剑气's 转向 — the tile-grid state machine of `projectile_chr_chen3_s3` (see the swordQi doc comment)
+
+/** A clean LOW row (cols 2–18) for the 剑气 scenes (the qi flies over the FIELD: rows 9–12, cols 0–10 of the flat stage). */
+const LOW_ROW = '##' + 'r'.repeat(17) + '##';
+/** The 剑气 corridor: row 12 with `ch` at col 7 — a trigger tile straight ahead of 火陈 at (12,4) facing RIGHT. */
+const corridor = (ch) => '##' + 'rrrrr' + ch + 'r'.repeat(11) + '##';
+/** A battle whose 剑气 corridor is row 12 with `ch` at col 7 (`h` 高地 / `S` 侵入点 / `E` 保护目标). */
+function qiScene(ch, spawns, o = {}) {
+  return battle([{ chessId: CHEN, row: 12, col: 4, skillIndex: 2, carryState: READY }], {
+    ...o, spawns,
+    extra: { stage: flatStage({ rows: { 9: LOW_ROW, 10: LOW_ROW, 11: LOW_ROW, 12: corridor(ch) } }), ...(o.extra || {}) },
+  });
+}
+/** The tiles the 剑气 has swept ([row, col]; the fx streak draws from → to: x/y = the from tile's col/row, tx/ty the to). */
+const qiTrack = (h) => h.eventsOf('fx').filter((e) => e[1] === 'swordQi').map((e) => [e[4].ty, e[4].tx]);
+
+test('火陈 S3 剑气长龙: 前进方向上是高地 ⇒ 顺时针90°转向 (the qi is a tile state machine)', () => {
+  const h = qiScene('h', [{ key: 'e_still', pos: [12, 8] }, { key: 'e_still', pos: [10, 6] }]);
+  const u = h.unit(CHEN);
+  h.step();
+  assert.equal(h.b.grid.tile(12, 7).height, 'HIGH', 'fixture: a 高地 tile straight ahead');
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  h.run(3.5);
+  // one tile per 1/1.5 s: (12,5) at 0.67 s, (12,6) at 1.33 s — then the 高地 ahead turns it 90° clockwise (RIGHT → DOWN)
+  assert.deepEqual(qiTrack(h).slice(0, 5), [[12, 5], [12, 6], [11, 6], [10, 6], [9, 6]],
+    'the qi turns at the 高地 instead of entering it, and sweeps down the new heading');
+  const qi = dealt(h, u, tagged('swordQi'));
+  assert.equal(qi.filter((c) => c.target.tileC === 6).length, 1,
+    'the turned qi damages the enemy two rows below the corridor (a straight flight never reaches it)');
+  assert.equal(qi.filter((c) => c.target.tileC === 8).length, 0, 'the enemy BEYOND the 高地 is never touched');
+  done(h);
+});
+
+test('火陈 S3 剑气长龙: 前进方向上是 保护目标 / 侵入点 ⇒ 同样顺时针90°转向', () => {
+  for (const [ch, what] of [['E', '保护目标 (tile_end)'], ['S', '侵入点 (tile_start)']]) {
+    const h = qiScene(ch, [{ key: 'e_still', pos: [12, 8] }, { key: 'e_still', pos: [10, 6] }]);
+    const u = h.unit(CHEN);
+    h.step();
+    assert.equal(h.b.grid.tile(12, 7).special, ch === 'E' ? 'end' : 'start', `fixture: a ${what} straight ahead`);
+    assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+    h.run(3.5);
+    assert.deepEqual(qiTrack(h).slice(0, 5), [[12, 5], [12, 6], [11, 6], [10, 6], [9, 6]], `${what}: 顺时针转向`);
+    const qi = dealt(h, u, tagged('swordQi'));
+    assert.equal(qi.filter((c) => c.target.tileC === 6).length, 1, `${what}: the turned qi damages the enemy below it`);
+    assert.equal(qi.filter((c) => c.target.tileC === 8).length, 0, `${what}: the enemy beyond it is untouched`);
+    done(h);
+  }
+});
+
+test('火陈 S3 剑气长龙: 转向前后各判定一次 —— 每段对每个敌人仅判定一次伤害', () => {
+  const h = qiScene('h', [{ key: 'e_still', pos: [12, 6] }, { key: 'e_still', pos: [12, 3] }]);
+  const u = h.unit(CHEN);
+  h.step();
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  const onTurnTile = () => dealt(h, u, tagged('swordQi')).filter((c) => c.target.tileC === 6).length;
+  h.run(1.5);   // t = 1.5 s: the qi sits on the turn tile (12,6), where that enemy stands
+  assert.equal(onTurnTile(), 1, 'judged once while the straight segment runs');
+  h.run(0.6);   // t ≈ 2.1 s: after the turn the qi has stepped down to (11,6) — the enemy is within the 1.3 radius again
+  assert.equal(onTurnTile(), 2, 'exactly one more judgement in the new segment (每次转向前…仅判定一次伤害)');
+  h.run(1.0);   // t ≈ 3.1 s: the qi passed (10,6) and (9,6) — still the same segment
+  assert.equal(onTurnTile(), 2, 'and only once in that segment');
+  assert.equal(dealt(h, u, tagged('swordQi')).filter((c) => c.target.tileC === 3).length, 0,
+    'the enemy further down the corridor is beyond the 高地 and untouched');
   done(h);
 });
 
@@ -1088,5 +1171,65 @@ test('火陈 S3 天喟: 每次攻击对最多3名地面敌人 3 次 165% 法术 
   assert.equal(atk.length, 3 * 3, '3 enemies × 3 instances in ONE attack');
   for (const c of atk) { approx(c.amount, u.s.atk * b['attack@atk_scale'], '165 % ATK per instance'); assert.equal(c.type, 'arts', '法术伤害'); }
   assert.equal(all.some((c) => c.target.isFlying), false, '地面敌人: the flyer takes no attack (the 剑气 is what hits flyers)');
+  done(h);
+});
+
+// =================================================================================================================
+// 2027_wang 望 — S3 天下劫 (user report: "她还在攻击" + the 2.9 of 棋子's own skill applied to her own attacks)
+
+test('望 S3 天下劫: 停止攻击 —— an AMMO skill must set noAttack too (the generic kit only stops `duration` kinds)', () => {
+  const id = WANG, b = bbOf(id, 2);
+  assert.equal(KITS[id] !== undefined, true, 'the kit is registered (she ran the GENERIC kit before this fix)');
+  assert.equal(skillSpecSource(D(id, 2)), 'skills', 'S3 comes from the kit');
+  assert.equal(FREE[id].skills[2].durationType, 'AMMO', 'fixture: 装有20发弹药');
+  approx(b.trigger_time, 20, 'fixture: 20 发弹药');
+  approx(b.atk_scale, 2.9, "fixture: 天下劫's 2.9 — the damage scale of 棋子's own skill (data/tokens.json `sktok_wang_3`)");
+  // no `carryState: READY`: a MANUAL skill that is ready would auto-cast on the DEFAULT rule (the enemy in her range),
+  // and this test needs her to attack normally first (sp 38/57 at the start)
+  const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: 2 }], {
+    hooks: [...HOOKS, 'ammoUsed'],
+    spawns: [{ key: 'e_still', pos: [10, 7] }],
+  });
+  const u = h.unit(id);
+  h.step();
+  assert.ok(u.kit && !u.kit.generic, 'a hand-authored kit on the unit');
+  assert.equal(u.kit.skillSource, 'skills');
+  assert.equal(u.skill.spec.attack?.atkScale, undefined, 'her own attack does NOT carry the 2.9 (it belongs to 棋子)');
+  // before the skill she attacks normally: 1.0 × ATK — never 2.9 × ATK
+  assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length >= 1, 10), 'she attacks before the skill');
+  approx(dealt(h, u, (c) => c.dmg.isAttack)[0].amount, u.s.atk, 'a normal attack carries 1.0 × ATK');
+  const r0 = u.rangeKeys.length, n0 = dealt(h, u, (c) => c.dmg.isAttack).length;
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  assert.equal(u.skill.ammoLeft, 20, 'the skill starts with its 20 rounds');
+  assert.ok(u.rangeKeys.length > r0, `攻击范围扩大 (${r0} → ${u.rangeKeys.length} tiles)`);
+  h.run(5);
+  assert.equal(dealt(h, u, (c) => c.dmg.isAttack).length, n0, '停止攻击: not one attack while the skill runs');
+  // Nothing spends the rounds yet (the 棋子 grant / ammo economy / mid-combat placement is the next batch, so `noAttack`
+  // would hold for ever): the kit's fallback spends one round per second and the skill ends by the AMMO path.
+  assert.ok(h.runUntil(() => !u.skill.active, 30), 'the fallback ends the skill');
+  assert.equal(h.hooksOf('skillEnd').some((c) => c.unit === u && c.reason === 'ammo'), true, 'ended by the ammo path');
+  const ammo = h.hooksOf('ammoUsed');
+  assert.equal(ammo.length, 20, '20 rounds spent (one per second)');
+  assert.equal(ammo[ammo.length - 1].left, 0, 'the last one empties the magazine');
+  assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length > n0, 15), 'she attacks again after it');
+  approx(dealt(h, u, (c) => c.dmg.isAttack)[n0].amount, u.s.atk, 'and still 1.0 × ATK — the 2.9 was never hers');
+  done(h);
+});
+
+test('望 S3 天下劫: the GENERIC kit she used to run — attacking during the skill, at 2.9 × ATK (the report, for the record)', () => {
+  const id = WANG;
+  // `kits: { [id]: () => null }` = the generic fallback (the harness `kits` injection the loadout tests use)
+  const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: 2, carryState: READY }], {
+    spawns: [{ key: 'e_still', pos: [10, 7] }],
+    extra: { kits: { [WANG]: () => null } },
+  });
+  const u = h.unit(id);
+  h.step();
+  assert.equal(u.kit.generic, true, 'the injected kit leaves the generic spec');
+  assert.equal(u.skill.active, true, 'the ready skill auto-casts on the enemy in her range');
+  assert.equal(u.skill.kind, 'ammo', 'her S3 is an AMMO skill — the generic kit only sets noAttack for `duration` kinds');
+  approx(u.skill.spec.attack.atkScale, 2.9, "the skill's passive 2.9, read as HER attack scale");
+  assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length >= 1, 5), 'and she kept attacking while it runs');
+  approx(dealt(h, u, (c) => c.dmg.isAttack)[0].amount, u.s.atk * 2.9, '290 % of her ATK instead of 100 %');
   done(h);
 });
