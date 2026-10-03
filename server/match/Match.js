@@ -143,6 +143,8 @@ import { buildBattleSpec, createBattleFromSpec, resultDigest, compactResult as c
 import { CreditPool } from './finalAssault.js';
 import { buildResult } from './results.js';
 import { botPrepBeginSteps, botPrepEndSteps, botPickBand, botPickCard } from './bot.js';
+// TEMPORARY debug room (2026-10-03): remove with server/debugRoom.js (see its header).
+import { grantDebugChess } from '../debugRoom.js';
 
 const BOT_REHEARSAL_DEFAULT = 3;
 /** Wall-clock ms of bot layout rehearsal per scheduler callback (real time; virtual time runs it in one go). */
@@ -250,6 +252,8 @@ export class Match {
     /** wall-clock ms per slice of a server-run normal / 联防 field (virtual time: at once) */
     this.headlessSliceMs = Number.isFinite(opts.headlessSliceMs) && opts.headlessSliceMs > 0 ? opts.headlessSliceMs : this.sched.virtual ? Infinity : HEADLESS_SLICE_MS;
     this.verifyStats = { checked: 0, mismatches: 0, rejected: 0, takeovers: 0 };
+    // TEMPORARY debug room (server/debugRoom.js): chess handed to every human at round 1 (null = normal match).
+    this.debugGrants = Array.isArray(opts.debugGrants) && opts.debugGrants.length ? opts.debugGrants.slice() : null;
     this._battleSeq = 0;
     /** solo pause (g.pause, DESIGN §14): the field clocks / deadlines are frozen while true (m.public.paused) */
     this.paused = false;
@@ -1380,6 +1384,8 @@ export class Match {
       this.wave = buildNormalWave(this.gd, this.rngWaves, this.factions, r);
     }
     for (const ps of alive) ps.startRound(r);
+    // TEMPORARY debug room (server/debugRoom.js): the room created by /debug/room hands its chess out here
+    if (this.debugGrants && r === 1) grantDebugChess(this, this.debugGrants);
     for (const ps of alive) this.dispatch(ps, 'onRoundStart', { round: r });
     for (const ps of alive) ps.recompute();
     this.setDeadline(DELAYS.ROUND_START / 1000, () => this.afterRoundStart(), { silent: this.soloUntimed });

@@ -77,6 +77,8 @@ export function makeMatch(o = {}) {
     clientCombat: o.clientCombat ?? false,
     verify: o.verify ?? 'off',
     headlessSliceMs: o.headlessSliceMs,
+    // TEMPORARY debug room (server/debugRoom.js): chess handed to every human at round 1
+    debugGrants: o.debugGrants ?? null,
   });
   const m = h.m;
   if (m.clientCombat && o.clients !== false) {

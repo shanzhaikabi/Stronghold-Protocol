@@ -63,6 +63,8 @@ import { checkLoadout, checkFreePicks } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
 import { getData as defaultGetData, getChess, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
+// TEMPORARY debug room (2026-10-03): env-gated, remove with server/debugRoom.js (see its header).
+import { debugRoomSpec } from './debugRoom.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -342,6 +344,38 @@ export class Lobby {
     return OK;
   }
 
+  /**
+   * TEMPORARY debug room (2026-10-03, user verification of the 自选干员 battle fix; see server/debugRoom.js): create
+   * (or reuse) a room with a FIXED code whose matches hand every human the debug chess at round 1. Coop mode so the
+   * player can join it by code from the lobby. Nothing here runs unless `SP_DEBUG_ROOM` is set.
+   * @returns {{ ok: true, code: string, mode: string, difficulty: string, grants: string[], reused: boolean } | { error: string }}
+   */
+  createDebugRoom(spec = debugRoomSpec()) {
+    if (!spec) return fail(ERR.ROOM_NOT_FOUND, 'debug room disabled (set SP_DEBUG_ROOM)');
+    const code = String(spec.code || '').trim().toUpperCase();
+    if (code.length !== ROOM_CODE_LEN) return fail(ERR.BAD_MSG, `debug room code must be ${ROOM_CODE_LEN} letters`);
+    const grants = Array.isArray(spec.grants) ? spec.grants.filter(Boolean) : [];
+    const data = this.safeData();
+    for (const id of grants) {
+      if (!getChess(id, data)) return fail(ERR.BAD_TARGET, `unknown chess ${id}`);
+    }
+    const existing = this.rooms.get(code);
+    if (existing) {
+      existing.debugGrants = grants.slice();
+      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}`);
+      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true };
+    }
+    if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
+    const mode = 'coop';
+    const difficulty = spec.difficulty || 'NORMAL';
+    const room = new Room(code, mode, difficulty, this.now());
+    room.debugGrants = grants.slice();
+    this.rooms.set(code, room);
+    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}`);
+    this.broadcastState(room);
+    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false };
+  }
+
   join(session, { code }) {
     const norm = String(code).trim().toUpperCase();
     const room = norm.length === ROOM_CODE_LEN ? this.rooms.get(norm) : undefined;
@@ -532,6 +566,8 @@ export class Lobby {
         seed,
         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
         matchNo: room.matchCount + 1,
+        // TEMPORARY debug room (server/debugRoom.js): round-1 hand-out for the room created by /debug/room
+        debugGrants: Array.isArray(room.debugGrants) && room.debugGrants.length ? room.debugGrants.slice() : null,
         data: this.safeData(),
         log: this.log,
         now: this.now,

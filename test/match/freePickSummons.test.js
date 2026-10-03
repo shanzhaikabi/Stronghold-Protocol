@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DATA, makeMatch, give, legalTileFor } from './harness.js';
+import { FIELD, canPlace, positionClass, tileKey } from '../../server/match/board.js';
 
 const free = DATA.freePicks || {};
 const chessOf = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : (Object.hasOwn(free, id) ? free[id] : null));
@@ -66,4 +67,54 @@ test('自选干员 的召唤物 resolve as data, and the season\'s own summons a
     for (const tid of rec.tokens || []) assert.ok((TOK[tid]?.owners || []).includes(id), `${id}: ${tid} owned by it`);
   }
   assert.ok(chessOf(WANG).tokens.includes(STONE));
+});
+
+/** The first 高台 tile (a tile only a RANGED-position piece may stand on) of `ps`'s deploy map, or null. */
+function highGroundTile(ps) {
+  const map = ps.deployMap();
+  for (let r = FIELD.r1; r >= FIELD.r0; r--) for (let c = FIELD.c0; c <= FIELD.c1; c++) {
+    if (map.get(tileKey(r, c)) === 'ranged') return [r, c];
+  }
+  return null;
+}
+
+test('自选干员 的召唤物: 棋子 (望) 可部署在高台 —— PRTS 部署位置 全部位,而不是 character_table 的 近战位', () => {
+  // user report 2026-10-03: "他的棋子应该可以部署在高台". PRTS 棋子 gives 部署位置 全部位 and flags the game's own data
+  // as wrong ("游戏内召唤物信息与实际不符（显示为仅部署在近战位）"); 望's 铸子 talent agrees — the 跟子 it fires is placed
+  // with the priority 不可部署地块 > 可部署地面地块 > 可部署高台地块. tools/build-data.mjs TOKEN_POSITION carries the
+  // correction, because `character_table.position` is MELEE and would confine the trap to ground tiles.
+  assert.equal(DATA.tokens[STONE].position, 'ALL', 'data: the PRTS 部署位置 for 棋子');
+  assert.equal(positionClass(DATA.tokens[STONE]), 'all');
+  // it is a PER-TOKEN exception: every other trap / mine of the roster is genuinely 近战位 (PRTS agrees with the client
+  // data for all of them), so this must never become a `subProfessionId === 'traper'` rule
+  for (const id of ['token_10025_doroth_recttp', 'token_10031_swire2_gdtrap', 'token_10033_ela_grzmot',
+    'token_10065_demetr_dmtpos', 'token_10071_aglna2_agairp']) {
+    if (DATA.tokens[id]) assert.equal(DATA.tokens[id].position, 'MELEE', `${id}: still 近战位`);
+  }
+});
+
+test('自选干员 的召唤物: 棋子 放在高台格上被接受(近战位棋子在同一格被拒 —— 回归)', () => {
+  const h = start({ 5: [WANG] });
+  const m = h.m, ps = h.ps('p_0');
+  h.toPrep(1);
+  // a stage whose normal board has a 高台 tile at all (several do not: act2 m03/m04 have ground only)
+  const stageId = Object.keys(DATA.stages).find((id) => { h.setStage(id); return !!highGroundTile(ps); });
+  assert.ok(stageId, 'fixture: a stage with a 高台 deploy tile');
+  h.setStage(stageId);
+  const high = highGroundTile(ps);
+  const ground = legalTileFor(m, ps, WANG);
+  assert.ok(ground, 'a legal tile for 望');
+
+  // the old data (MELEE) could never reach the 高台 tile — that is exactly the reported bug, and the assertion below
+  // is what goes red if the TOKEN_POSITION correction is reverted
+  assert.equal(canPlace(ps.deployMap(), 'melee', high[0], high[1]), false, 'no MELEE-position piece may stand there');
+  assert.equal(canPlace(ps.deployMap(), 'all', high[0], high[1]), true, 'a 全部位 one may');
+
+  give(m, ps, WANG, 'board', ground);
+  const card = ps.hand.find((p) => p && p.kind === 'token' && p.id === STONE);
+  assert.ok(card, 'the summon joined the hand when 望 was deployed');
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: card.uid, to: { area: 'board', row: high[0], col: high[1] }, dir: 'RIGHT' }),
+    { ok: true }, '棋子 is placed on the 高台 tile');
+  assert.equal(ps.board.get(tileKey(high[0], high[1]))?.id, STONE);
+  h.m.dispose();
 });

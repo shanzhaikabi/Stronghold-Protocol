@@ -21,9 +21,10 @@ aklz4.py registers a decoder for it. This script pulls the art the web sources l
     roughness map in G (1 − smoothness; metalness B = 0), written next to the source as <name>_rgb.png / _rough.png
   - the art of the 自选干员 the free-pick roster adds (DESIGN §21), which the released bundle does not carry: the
     avatars and 半身像 portraits of every such operator (spritepack/ui_char_avatar_*.ab, spritepack/char_portrait_*.ab),
-    their battle Spine, both directions (chararts/<charId>.ab) and their skill icons (spritepack/skill_icons_*.ab) —
-    written into public/assets/char, public/assets/spine and public/assets/skill, i.e. the layout tools/assets/plan.mjs
-    expects, NOT under public/assets/local
+    their battle Spine, both directions (chararts/<charId>.ab), their skill icons (spritepack/skill_icons_*.ab) and
+    the avatars of their summons (spritepack/ui_char_avatar_*.ab, the object named `{tokenId}`) —
+    written into public/assets/char, public/assets/token, public/assets/spine and public/assets/skill, i.e. the layout
+    tools/assets/plan.mjs expects, NOT under public/assets/local
 
 Usage:
   python3 -m venv .venv && .venv/bin/pip install -r tools/local-extract/requirements.txt
@@ -109,6 +110,17 @@ def free_pick_chars():
     return sorted(ids - covered)
 
 
+def free_pick_tokens():
+    """tokenIds of data/tokens.json that docs/research/07-assets.json does not list — the summons the 自选干员 batch
+    adds (DESIGN §21.9: 26 of the 93 picks grant summons, 37 token records in all). The released bundle carries the
+    season's 20 pool tokens and nothing else, so these are exactly the tokens whose avatar has to come from the local
+    client. Research 07 is the reference (not data/assets.json, which is rebuilt from the extracted files)."""
+    toks = _read_json('data/tokens.json') or {}
+    covered = set((_read_json('docs/research/07-assets.json') or {}).get('tokens') or {})
+    return sorted(i for i in toks if isinstance(i, str) and re.fullmatch(r'token_\d+_[a-z0-9_]+', i, re.I)
+                  and i not in covered)
+
+
 def free_pick_skill_icons():
     """Skill iconIds of those operators — the `skills[]` of their data/freePicks.json records, which is what
     tools/assets/plan.mjs resolves as public/assets/skill/<iconId>.png for them (the season's own operators come from
@@ -139,6 +151,10 @@ SKILL_ICON_PREFIX = 'skill_icon_'
 OP_SKILL_ICONS = free_pick_skill_icons()
 OP_SKILL_KEEP = r'^' + SKILL_ICON_PREFIX + r'(' + '|'.join(re.escape(i) for i in OP_SKILL_ICONS) + r')$' \
     if OP_SKILL_ICONS else r'(?!)'
+# Only the summons of the 自选干员 are exported (the spritepack series carries every token of the game, and the season's
+# own 20 token avatars already ship). The client names the object exactly `{tokenId}` — plan.mjs's token/avatar path.
+OP_TOKENS = free_pick_tokens()
+OP_TOKEN_KEEP = r'^(' + '|'.join(re.escape(t) for t in OP_TOKENS) + r')$' if OP_TOKENS else r'(?!)'
 
 # (bundle path relative to the AB root, output subdir, which object types to export[, name regex to keep
 #  [, output root under --public[, extraction mode]]]). `bundle` may use `*` / `?` (not `[`: bundle names such as
@@ -157,6 +173,10 @@ JOBS = [
     # Skill icons of the 自选干员: spritepack/skill_icons_<n>.ab holds every operator's icon (128x128) as the Sprite
     # `skill_icon_<iconId>`, while the plan wants skill/<iconId>.png — hence the 'skill_icon' mode.
     ('spritepack/skill_icons_*.ab', 'skill', {'Sprite'}, OP_SKILL_KEEP, OP_ROOT, 'skill_icon'),
+    # Avatars of the summons of the 自选干员 (DESIGN §21.9): the same spritepack series, but the object is named exactly
+    # `{tokenId}` (Sprite, or its padded Texture2D) — which is the layout plan.mjs expects
+    # (token/avatar/{tokenId}.png). Run it with `--only token/avatar`.
+    ('spritepack/ui_char_avatar_*.ab', 'token/avatar', {'Sprite', 'Texture2D'}, OP_TOKEN_KEEP, OP_ROOT),
     # Battle Spine of each 自选干员: one chararts bundle per operator, holding BOTH directions. See export_spine for
     # why this needs its own mode (the Front and the Back skeleton are named identically inside the bundle).
     *[(f'chararts/{charId}.ab', f'spine/op/{charId}', {'TextAsset', 'Texture2D'}, None, OP_ROOT, 'spine') for charId in OP_CHARS],

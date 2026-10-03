@@ -1367,8 +1367,28 @@ const TOKEN_ABNORMAL = Object.freeze({
 });
 
 /**
+ * Deployment position (部署位置) of a summon where the official `character_table.position` contradicts the actual
+ * rule — the PRTS 召唤物 pages carry the authoritative value, and where the two disagree the game's own display is
+ * documented as wrong. Keyed by tokenId; a token without an entry keeps the client's own `position`.
+ *
+ *   token_10064_wang_stone1 — 棋子 (望, 陷阱师): `character_table.position` is **MELEE**, which would confine the
+ *     trap to ground tiles. PRTS 棋子 gives 部署位置 **全部位** and notes "游戏内召唤物信息与实际不符（显示为仅部署在
+ *     近战位）", i.e. the in-game text is a known data/UI error. 望's 铸子 talent agrees: the extra 棋子 it fires
+ *     (跟子) is generated with the priority 不可部署地块 > 可部署地面地块 > **可部署高台地块** — a deployable 高台 tile
+ *     is a legal tile for it. User report 2026-10-03: "他的棋子应该可以部署在高台".
+ *     This is a **per-token exception, not a traper-wide rule**: every other 陷阱师/地雷 summon is genuinely 近战位
+ *     (迎宾踏垫 霜华, 共振装置 多萝西, 雷鸣地雷 艾拉, 牵绊 贝洛内, “一会儿见！” 予愿安洁莉娜, 香槟炸弹 琳琅诗怀雅,
+ *     “夹子” 罗宾 — all MELEE in character_table AND 近战位 on PRTS), so do NOT generalise this to `subProfessionId
+ *     === 'traper'`.
+ */
+const TOKEN_POSITION = Object.freeze({
+  token_10064_wang_stone1: 'ALL',   // 棋子 (望): PRTS 部署位置 全部位 (in-game data wrongly says 近战位)
+});
+
+/**
  * Build data/tokens.json: summons of chess (per-owner variants), bond summons (炎佑) and band map
- * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = TOKEN_ABNORMAL (PRTS).
+ * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = TOKEN_ABNORMAL (PRTS), `position` = TOKEN_POSITION
+ * (PRTS) with the client's own `character_table.position` as the fallback.
  */
 /**
  * Cache of token usage per owner: `token id → { sources: Set('display'|'skill'|'talent'), count(id) }` for one selected
@@ -1446,7 +1466,8 @@ function buildTokens(ctx, chess, tokenOwners, enemies) {
     out[tokenId] = {
       tokenId, kind: 'summon', name: char.name, appellation: char.appellation || null,
       desc: stripRich(first.trait.desc), descRaw: first.trait.descRaw,
-      profession: char.profession, subProfessionId: char.subProfessionId, position: char.position,
+      profession: char.profession, subProfessionId: char.subProfessionId,
+      position: TOKEN_POSITION[tokenId] ?? char.position,
       displayType: displayType(tokenId), placeable: displayType(tokenId) !== 'HIDDEN' && produced,
       owners: owners.map((o) => o.chessId),
       // Defaults = first owner's variant; per-owner data in variants[chessId].
