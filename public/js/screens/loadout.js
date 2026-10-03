@@ -247,7 +247,7 @@ function Detail({ m, chess, golden, entries, onChange, onReset, locked }) {
           <h3>技能<${MicroLabel}>SKILL<//></h3>
           <div class="lo-seg" role="tablist" aria-label="技能等级">
             <button type="button" role="tab" aria-selected=${level === 'normal' ? 'true' : 'false'} class=${cx(level === 'normal' && 'is-on')} onClick=${() => setLevel('normal')}>普通 <span class="num">Lv.${lv(chess)}</span></button>
-            <button type="button" role="tab" aria-selected=${level === 'elite' ? 'true' : 'false'} class=${cx(level === 'elite' && 'is-on')} disabled=${!golden} onClick=${() => setLevel('elite')}>精锐 <span class="num">Lv.${lv(golden)}</span></button>
+            <button type="button" role="tab" aria-selected=${level === 'elite' ? 'true' : 'false'} class=${cx(level === 'elite' && 'is-on')} disabled=${!golden || golden.chessId === chess.chessId} onClick=${() => setLevel('elite')}>精锐 <span class="num">Lv.${lv(golden)}</span></button>
           </div>
         </header>
         <div class="lo-skills" role="radiogroup" aria-label="选择技能">
@@ -258,7 +258,7 @@ function Detail({ m, chess, golden, entries, onChange, onReset, locked }) {
       ${golden ? html`<section class="lo-sec lo-sec--mod">
         <header class="lo-sec__head">
           <h3>模组<${MicroLabel}>MODULE<//></h3>
-          <span class="lo-sec__note">仅精锐干员装备 · 模组等级 <b class="num">${golden.status?.equipLevel ?? 1}</b></span>
+          <span class="lo-sec__note">${golden.chessId === chess.chessId ? '自选干员自带模组' : '仅精锐干员装备'} · 模组等级 <b class="num">${golden.status?.equipLevel ?? 1}</b></span>
         </header>
         <div class="lo-mods" role="radiogroup" aria-label="选择模组">
           ${opt.moduleOptions.map((mo) => html`<button key=${mo.id} type="button" role="radio" aria-checked=${mo.id === choice.module ? 'true' : 'false'}
@@ -599,7 +599,7 @@ function LoadoutScreen({ st }) {
       <section class="lo-roster">
         <${Filters} m=${m} filters=${st.filters} bonds=${bonds} onFilters=${(filters) => loadoutStore.set({ filters })} />
         <div class="lo-grid" role="listbox" aria-label="干员列表" ref=${gridRef}>
-          ${list.length ? list.map((c) => html`<${RosterCard} key=${c.chessId} m=${m} chess=${c} golden=${c.goldenId ? getChess(c.goldenId) : null}
+          ${list.length ? list.map((c) => html`<${RosterCard} key=${c.chessId} m=${m} chess=${c} golden=${recordsOf(c.chessId, getChess).golden}
             entries=${st.entries} selected=${c.chessId === selId} onPick=${pick} />`) : html`<p class="lo-empty t-dim">没有符合条件的干员</p>`}
         </div>
       </section>

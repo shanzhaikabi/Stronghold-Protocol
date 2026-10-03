@@ -121,6 +121,52 @@ function doubleHit(battle, unit, targets) {
 const AURA = 0.2;       // aura refresh period (s)
 const AURA_DUR = 0.25;  // aura buff lifetime (s)
 
+// ---------------------------------------------------------------------------------------------------------------
+// 模组 helpers (a 自选候选 is its own elite: its record carries `modules[]` + the module-applied trait / talents, so the
+// module parts are read from the resolved def exactly as the season kits read them — 模组相关规则和普通干员一致)
+
+/** Merged blackboard of the hidden module talents (data index −1) of the resolved record (tier1's moduleBb). */
+function moduleTalentBb(def) {
+  const o = {};
+  for (const t of def?.raw?.talents ?? []) if (t && t.index === -1 && t.bb) Object.assign(o, t.bb);
+  return o;
+}
+/** Module "攻击范围扩大" (SPC-X …): the active module's range-only talent change (index −1 grid) replaces the range. */
+function applyModuleRange(battle, unit, def) {
+  const m = def?.raw?.module;
+  if (!m || !m.active || !m.id) return;
+  const rec = (def.raw.modules || []).find((x) => x && x.uniEquipId === m.id);
+  for (const t of rec?.talentChanges || []) {
+    const g = t?.rangeGrid;
+    if (Array.isArray(g) && g.length) { unit.rangeGrid = g; battle.refreshRange(unit); return; }
+  }
+}
+/** Physician module trait (PHY-X): heals on allies below `hp_ratio` are ×`heal_scale` (tier4 installLowHpHealBonus). */
+function installLowHpHealBonus(battle, unit, tb) {
+  const s = num(tb.heal_scale, 0), r = num(tb.hp_ratio, 0);
+  if (!(s > 0) || !(r > 0)) return;
+  battle.on('heal', (c) => { if (c.source === unit && c.target !== unit && c.target.hpRatio < r) c.amount *= s; }, { owner: unit });
+}
+/** "周围四格" without another ally operator / summon (tier4 lonely): EXE-X's "周围四格没有友方干员时". */
+function lonely(battle, unit) {
+  for (const [dr, dc] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const r = unit.tileR + dr, c = unit.tileC + dc;
+    if (battle.grid && !battle.grid.inBounds(r, c)) continue;
+    const a = battle.unitAt(r, c);
+    if (a && a !== unit && a.side === 'ally' && a.kind !== 'device') return false;
+  }
+  return true;
+}
+/** Module SP tick: +`perSec` SP/s while `cond` holds, folded into the engine's own time recovery (tier1 spTimeBonus). */
+function spTimeBonus(battle, unit, perSec, cond) {
+  if (!(perSec > 0)) return;
+  battle.on('spGain', (ctx) => {
+    if (ctx.unit === unit && ctx.reason === 'time' && cond()) ctx.amount += perSec * battle.dt;
+  }, { owner: unit });
+}
+/** Any targetable enemy in the unit's current range (tier1's enemyInRange). */
+const enemyInRange = (battle, unit) => battle.enemiesInKeys(unit.rangeKeys || [], unit, { canHitFly: true }).length > 0;
+
 /**
  * 4★ 预备干员 (chess_free_char_601…606): the shared generic skills (`skcom_atk_up[…]`, `skcom_def_up[…]`,
  * `skcom_magic_rage[…]`, `skcom_heal_up[…]`) are reproduced exactly by the generic kit — but that kit installs no
@@ -229,6 +275,11 @@ export default {
           if (n > 0) battle.on('kill', (c) => { if (c.killer === unit && c.victim.side === 'enemy') gainDp(battle, unit, n); }, { owner: unit });
         } },
       ],
+      // 模组 SOL-X 郁金香证章: "阻挡敌人时攻击力和防御力各+8%" (trait bb atk/def; 忍冬 / 焰尾 SOL-X read it the same way)
+      install(battle, unit) {
+        const ma = num(def.traitBb?.atk, 0), md = num(def.traitBb?.def, 0);
+        if (ma || md) whileDeployed(battle, unit, 0.1, () => toggleBuff(battle, unit, 'acpion:module', unit.blocking.length > 0, { atkPct: ma, defPct: md }));
+      },
     };
   },
 
@@ -252,6 +303,9 @@ export default {
       else battle.removeBuff(unit, 'acguad:stacks');
     }
     return {
+      // 模组 DRE-X Sharp证章: "攻击被阻挡的敌人时攻击力提升至115%" (trait bb atk_scale; 耀骑士临光 DRE-X reads it the
+      // same way — blocked by ANY operator counts, "被阻挡的敌人")
+      trait: num(def.traitBb?.atk_scale, 1) > 1 ? { dmgMul: (b, u, t) => (t.blockedBy ? num(def.traitBb.atk_scale, 1) : 1) } : null,
       skills: alt(def, {
         skchr_acguad_1: () => ({ kind: 'duration', mods: { atkPct: num(bb.atk) } }),
         // 亮剑: "防御力降至0" = a final multiplier of 0 on DEF (defMul), so nothing can raise it back
@@ -368,6 +422,11 @@ export default {
           });
         } },
       ],
+      // 模组 PRO-X Mechanist证章: "阻挡敌人时防御力+20%" (trait bb def; 泡泡 / 蛇屠箱 / 星熊 PRO-X read it the same way)
+      install(battle, unit) {
+        const bd = num(def.traitBb?.def, 0);
+        if (bd) whileDeployed(battle, unit, 0.1, () => toggleBuff(battle, unit, 'acfend:module', unit.blocking.length > 0, { defPct: bd }));
+      },
     };
   },
 
@@ -375,6 +434,8 @@ export default {
   // 611_acnipe Stormeye (SNIPER 速射手, char_611_acnipe; 优先攻击空中单位)
   //   风坠: 攻击时有25%的概率攻击力提升至180%
   //   风雨欲来: 自身未进行攻击时，技力回复速度+0.2/秒
+  //   模组 MAR-X Stormeye证章: "攻击空中单位时攻击力提升至110%" — the 速射手 (fastshot) profile reads the trait bb
+  //      `atk_scale` as its fly bonus (professions.js TUNE.fastshot → flyScale), so the module needs no kit code
   //   S1 破空: 20 s — 攻击力+15%，攻击速度+30，无视攻击目标100防御力
   //   S2 心手合一 (AUTO, 持续时间无限): 攻击力+5%，每次攻击额外攻击1个目标
   //   S3 旋臂 (default): 30 s — 可以同时攻击3个目标，第一天赋的触发概率提高至30%，攻击变为二连击；攻击目标生命值
@@ -498,6 +559,9 @@ export default {
           });
         } },
       ],
+      // 模组 SPC-X Pith证章: "攻击范围扩大" — the module's range-only talent change (index −1 grid, 莫斯提马 / 莱恩哈特 /
+      // 夕 SPC-X): it replaces the unit's own range from the deployment on
+      install(battle, unit) { applyModuleRange(battle, unit, def); },
     };
   },
 
@@ -550,6 +614,9 @@ export default {
         }),
       }),
       install(battle, unit) {
+        // 模组 PHY-X Touch证章: "治疗生命值低于50%的友方单位时治疗量提升15%" (trait bb heal_scale / hp_ratio;
+        // 录武官 / 华法琳 PHY-X use the same helper). It multiplies with S3's own ≤ hp_ratio boost, as both do.
+        installLowHpHealBonus(battle, unit, def.traitBb || {});
         if (isSel(def, S3)) {
           // the ≤ hp_ratio boost, and the main heal's amount the extra heal is a share of
           battle.on('heal', (c) => {
@@ -677,6 +744,11 @@ export default {
           }, { owner: unit });
         } },
       ],
+      // 模组 DEC-X Raidian证章: "攻击范围内存在敌人时技力自然恢复速度+0.2/秒" — the value lives in the module's hidden
+      // talent (index −1), the condition in its trait text (tier1 波登可 / tier2 小满 DEC-X use the same pair)
+      install(battle, unit) {
+        spTimeBonus(battle, unit, num(moduleTalentBb(def).sp_recovery_per_sec), () => enemyInRange(battle, unit));
+      },
     };
   },
 
@@ -693,7 +765,9 @@ export default {
     const g = gridOf(def);
     const S1 = 'skchr_acspec_1';
     const dur = Math.max(0.1, num(def?.skill?.duration, 10));
-    const p0 = num(t0.prob);
+    // 二象命末's proc chance: the data key is `attack@prob` (the module's X-3 raises it to 15 %), `prob` only as a
+    // fallback; S1 物理的服从 raises it for its 10 s
+    const p0 = num(t0['attack@prob'], num(t0.prob));
     const pS1 = isSel(def, S1) ? num(bb['attack@prob'], p0) : p0;
     return {
       skills: alt(def, {
@@ -727,7 +801,9 @@ export default {
         }),
       }),
       talents: [
-        { install(battle, unit) { // 二象命末 (S1 raises the proc to 25 % for its 10 s)
+        { install(battle, unit) { // 二象命末 (S1 raises the proc to 25 % for its 10 s; the module X-3 adds ATK `atk`)
+          const atk = num(t0.atk);
+          if (atk > 0) statBuff(battle, unit, 'acspec:t1-atk', { atkPct: atk });
           battle.on('attack', (c) => {
             if (c.attacker !== unit || !c.targets.length) return;
             const p = unit.findBuff('acspec:s1') ? pS1 : p0;
@@ -744,6 +820,11 @@ export default {
           });
         } },
       ],
+      // 模组 EXE-X Misery证章: "周围四格没有友方干员时攻击力+10%" (trait bb atk; 缄默德克萨斯 EXE-X uses the same rule)
+      install(battle, unit) {
+        const a = num(def.traitBb?.atk, 0);
+        if (a) whileDeployed(battle, unit, AURA, () => toggleBuff(battle, unit, 'acspec:module', lonely(battle, unit), { atkPct: a }));
+      },
     };
   },
 
@@ -777,6 +858,16 @@ export default {
           });
         } },
       ],
+      // 模组 LOR-X 领主·Sharp证章: "攻击附带10%攻击力的法术伤害" — the value is the module's hidden talent (index −1,
+      // key `magic_atk_scale`), one extra arts instance per attack hit (拉普兰德 / 银灰 LOR-X `atk_scale_m` reading)
+      install(battle, unit) {
+        const m = num(moduleTalentBb(def).magic_atk_scale, 0);
+        if (!(m > 0)) return;
+        battle.on('damaged', (c) => {
+          if (c.source !== unit || !c.dmg?.isAttack || c.dmg.cancel || !c.target || c.target.side !== 'enemy' || !c.target.alive) return;
+          battle.dealDamage(unit, c.target, { amount: unit.s.atk * m, type: 'arts', tags: ['module'] });
+        }, { owner: unit });
+      },
     };
   },
 

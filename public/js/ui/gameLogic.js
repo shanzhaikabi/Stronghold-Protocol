@@ -1371,13 +1371,15 @@ export function chessLoadout(chess, loadout, getChess = () => null) {
   const skills = Array.isArray(chess.skills) && chess.skills.length ? chess.skills.filter(isObj) : (isObj(chess.skill) ? [chess.skill] : []);
   const skill = skills.find((s) => s.index === r.skillIndex) || (isObj(chess.skill) ? chess.skill : null) || skills[0] || null;
   const base = chess.isGolden ? (getChess(chess.baseId) || chess) : chess;
+  // who owns the module choice: a golden chess, or a 自选候选 (DESIGN §21: no `_b` sibling, its record is its own elite)
+  const elite = chess.isGolden || (Array.isArray(chess.modules) && chess.modules.length > 0);
   let opt = { defaultSkill: null, defaultModule: null, skills: [] };
-  try { opt = loadoutOptions(base, chess.isGolden ? chess : null); } catch { /* defaults */ }
+  try { opt = loadoutOptions(base, elite ? chess : null); } catch { /* defaults */ }
   const defIdx = opt.defaultSkill ?? chess.skill?.index ?? null;
   const defaultSkill = !skill || skill.index == null || defIdx == null || skill.index === defIdx;
   let module = null;
   let defaultModule = true;
-  if (chess.isGolden) {
+  if (elite) {
     const id = r.moduleId ?? (chess.module?.active ? chess.module.id : MODULE_NONE);
     if (id === MODULE_NONE) module = { id: MODULE_NONE, name: '未装备模组', typeName: '', none: true };
     else {
@@ -1410,7 +1412,9 @@ export function unitLoadout(chess, unit) {
   if (typeof baseId !== 'string' || !baseId) return null;
   const e = {};
   if (Number.isInteger(unit.skillIndex) && unit.skillIndex >= 0) e.skill = unit.skillIndex;
-  if (chess.isGolden && typeof unit.moduleId === 'string' && unit.moduleId) e.module = unit.moduleId;
+  // elite only (a normal chess fights without a module) — a 自选候选 is its own elite, so its moduleId counts too
+  const elite = chess.isGolden || (Array.isArray(chess.modules) && chess.modules.length > 0);
+  if (elite && typeof unit.moduleId === 'string' && unit.moduleId) e.module = unit.moduleId;
   return Object.keys(e).length ? { [baseId]: e } : null;
 }
 
