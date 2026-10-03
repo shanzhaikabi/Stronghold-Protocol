@@ -18,9 +18,9 @@ import { DataSource } from '../../server/sim/simdata.js';
 import { createBattleFromSpec } from '../../server/sim/spec.js';
 import { SharedBossPool } from '../../server/match/finalAssault.js';
 
-/** 4 AI seats, co-op, LP 400 (they reach R14), +`layers` on every active bond at the boss round's prep. */
-function toFinalAssault({ difficulty, seed, bossId, layers = 0 }) {
-  const seats = [0, 1, 2, 3].map((i) => ({ seat: i, playerId: `ai_${i}`, name: `AI${i}`, isBot: true, connected: true }));
+/** AI seats (`seats` of them), co-op, LP 400 (they reach R14), +`layers` on every active bond at the boss round's prep. */
+function toFinalAssault({ difficulty, seed, bossId, layers = 0, seats: seatCount = 4 }) {
+  const seats = Array.from({ length: seatCount }, (_, i) => ({ seat: i, playerId: `ai_${i}`, name: `AI${i}`, isBot: true, connected: true }));
   // instant: false — the boss fields wait for the test to step them (server-run, real sim)
   const h = makeMatch({ mode: 'coop', difficulty, seats, seed, captureFrames: false, instant: false });
   const m = h.m;
@@ -64,6 +64,32 @@ test('leader HP data = the current official bossInfoDict for every leader and di
   }
 });
 
+test('co-op leader pool scales with the players the match runs with — and never shrinks mid-run (eliminations)', () => {
+  // user report: "in co-op the boss's HP should drop with fewer players" — the pool is sized from the seats the match
+  // runs with (a bot seat counts), × players / 4; an elimination does not shrink it (§20.9 "保持固定血量": that would
+  // be `bossHpScale.aliveScaling`, off).
+  const bp = DATA.bosses.boss_5.bloodPoint.HARD;
+  const two = toFinalAssault({ difficulty: 'HARD', seed: 3, bossId: 'boss_5', seats: 2 });
+  const m = two.m;
+  assert.equal(m.players.size, 2, 'a two-seat co-op match');
+  assert.equal(m.bossPool.maxHp, Math.round((bp * 2) / 4), 'two players: half the bloodPoint pool');
+  assert.equal(m.gd.bossPoolHp('boss_5', 4), bp, 'four players: the data value');
+  assert.equal(m.gd.bossPoolHp('boss_5', 3), Math.round((bp * 3) / 4), 'three players');
+  assert.equal(m.gd.bossPoolHp('boss_5', 1), Math.round(bp / 4), 'one player: a quarter — the solo value by the same rule');
+  assert.equal(m.gd.bossPoolHp('boss_5'), bp, 'no count ⇒ a full team');
+  // the pool is created once, so a later elimination leaves its max untouched (the alive factor is off)
+  const max = m.bossPool.maxHp;
+  m.players.get('ai_1').alive = false;
+  assert.equal(m.bossPool.maxHp, max, 'an eliminated player does not shrink the pool mid-run');
+  assert.equal(m.gd.bossPoolShare(2, 1), 0.5, 'the room size, not the alive count');
+  m.dispose();
+  for (const seats of [3, 4]) {
+    const h = toFinalAssault({ difficulty: 'ABYSS', seed: 5, bossId: 'boss_1', seats });
+    assert.equal(h.m.bossPool.maxHp, Math.round((DATA.bosses.boss_1.bloodPoint.ABYSS * seats) / 4), `${seats} seats`);
+    h.m.dispose();
+  }
+});
+
 const SYSTEM_KEY = /^(bond|item|band|choice):/;
 const MUL_STATS = ['atkMul', 'defMul', 'hpMul'];
 
@@ -100,7 +126,8 @@ test('绝境 Final Assault: both pair fields drain the one pool, every hit exact
   const h = toFinalAssault({ difficulty: 'HARD', seed: 3, bossId: 'boss_5' });
   const m = h.m;
   assert.equal(m.bossPool.maxHp, DATA.bosses.boss_5.bloodPoint.HARD, 'four alive: the data value');
-  assert.equal(m.gd.bossPoolHp('boss_5', 2), DATA.bosses.boss_5.bloodPoint.HARD, 'two alive: the same pool (aliveScaling off)');
+  assert.equal(m.gd.bossPoolHp('boss_5', 4), DATA.bosses.boss_5.bloodPoint.HARD, 'four players: the data value');
+  assert.equal(m.gd.bossPoolHp('boss_5', 2), Math.round(DATA.bosses.boss_5.bloodPoint.HARD / 2), 'two players: half (see the pool-scaling test)');
   const pool = m.bossPool;
   const fields = m.fields.filter((f) => f.battle);
   assert.equal(fields.length, 2);

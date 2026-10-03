@@ -112,39 +112,48 @@ export class GameData {
    * Official shared leader HP pool (DESIGN §20.10): ONE pool for every boss field of the match (official tip "最终攻势中，
    * 所有人将一起对敌方领袖造成伤害"; the mirrored copies of a pair field share it — notice 5114 "两侧的敌方领袖共享生命值
    * （敌方领袖的总生命值不变）", which is about those copies, not about the number of players). Co-op = bloodPoint
-   * [difficulty]; with config bossHpScale.aliveScaling (default false) × alive / aliveFull (4) — 巴哈姆特 12294 "聯機隊友
-   * (撤退/死掉)變少，最後boss血條也會變少" is one community note without a proportion, kept off until confirmed (it would
-   * shorten fights after eliminations, the opposite of the playtest report); `aliveCount` omitted ⇒ a full team. Solo = bloodPoint ×
-   * bossHpScale.solo (0.25 = one player of four, [ASSUMED]). Leaders are never scaled by enemyScale ("领袖单位于服务器的
-   * 生命值加成不受上述加成影响").
+   * [difficulty] × `bossPoolShare`; solo = bloodPoint × bossHpScale.solo (0.25 = one player of four, [ASSUMED]).
+   * Leaders are never scaled by enemyScale ("领袖单位于服务器的生命值加成不受上述加成影响").
    * @param {string} bossId
-   * @param {number} [aliveCount] alive players at the Final Assault / Hidden Core start (co-op)
+   * @param {number} [playerCount] players of the match (seats, bots and eliminated players included — §20.9: the pool
+   *   never shrinks mid-run); omitted ⇒ a full team
+   * @param {number} [aliveCount] alive players, only read when `aliveScaling` is on (off, §20.9)
    * @returns {number}
    */
-  bossPoolHp(bossId, aliveCount) {
+  bossPoolHp(bossId, playerCount, aliveCount) {
     const boss = this.boss(bossId);
     const diff = this.difficulty;
     let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
     if (base == null && boss && boss.bloodPoint) base = Object.values(boss.bloodPoint).find((v) => Number.isFinite(v)) ?? null;
     if (base == null) base = 500000;
-    return Math.max(1, Math.round(base * this.bossPoolShare(aliveCount)));
+    return Math.max(1, Math.round(base * this.bossPoolShare(playerCount, aliveCount)));
   }
 
   /**
-   * Multiplier of bloodPoint for the leader pool (see bossPoolHp): solo = bossHpScale.solo (0.25); co-op = coop (1) ×
-   * min(alive, aliveFull) / aliveFull when bossHpScale.aliveScaling (mode entry first, then the global one).
+   * Multiplier of bloodPoint for the leader pool (see bossPoolHp):
+   *   solo  = bossHpScale.solo (0.25) [ASSUMED]
+   *   co-op = coop (1) × players / aliveFull
+   * `players` = the number of players the match runs with (seats — bot seats included; eliminated players still count,
+   * so the pool never shrinks mid-run: §20.9 "保持固定血量"). The user's playtest report "in co-op the boss's HP should
+   * drop with fewer players" is the factor; the proportion players / 4 is the [ASSUMED] one the solo value already uses
+   * (0.25 = one player of four — a one-player match is the same rule at n = 1).
+   * - `bossHpScale.playerScaling: false` (mode entry first, then the global one) turns the factor off: the data value
+   *   whatever the number of players.
+   * - `bossHpScale.aliveScaling: true` scales by the ALIVE players instead (the elimination factor, off since §20.9;
+   *   巴哈姆特 12294 "聯機隊友(撤退/死掉)變少，最後boss血條也會變少"), and takes precedence when it is on.
+   * @param {number} [playerCount]
    * @param {number} [aliveCount]
    */
-  bossPoolShare(aliveCount) {
+  bossPoolShare(playerCount, aliveCount = playerCount) {
     const ms = this.mode.bossHpScale && typeof this.mode.bossHpScale === 'object' ? this.mode.bossHpScale : {};
     const cs = this.config.bossHpScale && typeof this.config.bossHpScale === 'object' ? this.config.bossHpScale : {};
     const pick = (k, d) => (Number.isFinite(ms[k]) && ms[k] > 0 ? ms[k] : Number.isFinite(cs[k]) && cs[k] > 0 ? cs[k] : d);
+    const flag = (k, d) => (typeof ms[k] === 'boolean' ? ms[k] : typeof cs[k] === 'boolean' ? cs[k] : d);
     if (this.isSolo) return pick('solo', 0.25);
-    const scaling = typeof ms.aliveScaling === 'boolean' ? ms.aliveScaling : cs.aliveScaling === true;
     const full = Math.max(1, Math.floor(pick('aliveFull', 4)));
-    const n = Number(aliveCount);
-    const alive = scaling && Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
-    return pick('coop', 1) * (alive / full);
+    const n = Number(flag('aliveScaling', false) ? aliveCount : flag('playerScaling', true) ? playerCount : NaN);
+    const players = Number.isFinite(n) && n >= 1 ? Math.min(full, Math.floor(n)) : full;
+    return pick('coop', 1) * (players / full);
   }
 
   /** config.titles with the tuning overrides (stat / rule per title id) merged in. */

@@ -9,12 +9,14 @@
 //     LEFT, UP / DOWN unchanged (DESIGN §3, research 09 §1.2 ConvertChessPositionInfoToBossMap); board rows 9–12 →
 //     boss rows 2–5, sim/constants BOSS_ROW_OFFSET). `bossFieldPlacement` gives that mapping for UIs / tools.
 //   * Shared boss HP pool (DESIGN §20.10, GameData.bossPoolShare): one pool shared by every boss field (official tip
-//     "所有人将一起对敌方领袖造成伤害"); co-op = bloodPoint[difficulty] whatever the number of alive players (notice 5114's
-//     "敌方领袖的总生命值不变" is about the mirrored copies of a pair field sharing it, not about that number); config
-//     bossHpScale.aliveScaling true scales it × alive / 4 (巴哈姆特 12294 "聯機隊友(撤退/死掉)變少，最後boss血條也會變少" — one
-//     community note, no proportion; off until the user confirms it); solo = bloodPoint × config bossHpScale.solo (0.25,
-//     flagged unknown); × the tuning bossHpMul when data/tuning.json still has one (docs/BALANCE.md); bosses are never
-//     scaled by enemyScale.
+//     "所有人将一起对敌方领袖造成伤害"); notice 5114's "敌方领袖的总生命值不变" is about the mirrored copies of a pair
+//     field sharing it. Co-op = bloodPoint[difficulty] × players / 4, `players` = the seats the match runs with (user
+//     report "in co-op the boss's HP should drop with fewer players"; a bot seat counts, an eliminated player still
+//     counts, so the pool is fixed for the run — §20.9 "保持固定血量"; `bossHpScale.playerScaling: false` turns it off).
+//     `bossHpScale.aliveScaling: true` would scale by the ALIVE players instead (the elimination factor, off: 巴哈姆特
+//     12294 "聯機隊友(撤退/死掉)變少，最後boss血條也會變少", one community note without a proportion). Solo =
+//     bloodPoint × config bossHpScale.solo (0.25 = one player of four, flagged unknown); × the tuning bossHpMul when
+//     data/tuning.json still has one (docs/BALANCE.md); bosses are never scaled by enemyScale.
 //   * Overtime: bossTurnHpReduceTime counts REAL seconds like the level's 120 s maxPlayTime (which runs out first; the
 //     battle goes on): from 150 real s (300 game s on the 2× field clock) the team loses bossOvertimeDrainPerSec (1) LP
 //     per real second (gamedata.js bossOvertimeDue); m.public.deadline = the 120 s countdown, m.public.overtimeAt = the
@@ -54,8 +56,12 @@ export function pairPlayers(alive) {
   return groups;
 }
 
-/** Shared boss HP for a boss id with `aliveCount` alive players (GameData.bossPoolShare; omitted ⇒ a full team). */
-export function bossPoolHp(gd, bossId, aliveCount) {
+/**
+ * Shared boss HP for a boss id (`playerCount` = the players the match runs with, seats — bot seats and eliminated
+ * players included, so the pool is fixed for the run; `aliveCount` only matters with `aliveScaling`, off). Both omitted
+ * ⇒ a full team.
+ */
+export function bossPoolHp(gd, bossId, playerCount, aliveCount) {
   const boss = gd.boss(bossId);
   const diff = gd.difficulty;
   let base = boss && boss.bloodPoint && Number.isFinite(boss.bloodPoint[diff]) ? boss.bloodPoint[diff] : null;
@@ -63,7 +69,7 @@ export function bossPoolHp(gd, bossId, aliveCount) {
   if (base == null) base = 500000;
   const tune = typeof gd.bossHpMul === 'function' ? gd.bossHpMul(bossId) : 1;
   let share;
-  if (typeof gd.bossPoolShare === 'function') share = gd.bossPoolShare(aliveCount);
+  if (typeof gd.bossPoolShare === 'function') share = gd.bossPoolShare(playerCount, aliveCount);
   else {
     const scale = gd.mode.bossHpScale && typeof gd.mode.bossHpScale === 'object' ? gd.mode.bossHpScale : {};
     const cfg = gd.config.bossHpScale && typeof gd.config.bossHpScale === 'object' ? gd.config.bossHpScale : {};
