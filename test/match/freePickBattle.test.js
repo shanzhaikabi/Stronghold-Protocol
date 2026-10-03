@@ -1,4 +1,4 @@
-// test/match/freePickBattle.test.js — the reported end-to-end flow of a 自选干员 (DESIGN §21): a pick on the board →
+// test/match/freePickBattle.test.js — the reported end-to-end flow of a 自选干员 (DESIGN §22): a pick on the board →
 // battle start → the unit (and its summon) really fight, on BOTH sides of client-side combat.
 //
 // User report 2026-10-03: "自选干员能部署到棋盘上，但开战时干员和它的召唤物一起消失，也不阻挡" — i.e. the piece was

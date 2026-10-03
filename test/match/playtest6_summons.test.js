@@ -38,8 +38,14 @@ const stackOf = (ps, id) => ps.hand.find((p) => p && p.kind === 'token' && p.id 
 const move = (m, uid, to, dir) => m.handle('p_0', { t: 'g.move', uid, to, ...(dir ? { dir } : {}) });
 
 test('tokens.json: the manually deployable summons are hand pieces — 医疗探机, 诅咒娃娃, 爬行号·防护单元 with the talent ones', () => {
-  const placeable = Object.values(DATA.tokens).filter((t) => t.placeable).map((t) => t.tokenId).sort();
+  // a token of the 自选干员 roster (DESIGN §22) is owned by `chess_free_*` chess only; the season's own hand summons
+  // are the six below (the free-pick roster brings ~30 more of its own, checked separately).
+  const isFreePick = (t) => (t.owners || []).length > 0 && t.owners.every((o) => String(o).startsWith('chess_free_'));
+  const placeable = Object.values(DATA.tokens).filter((t) => t.placeable && !isFreePick(t)).map((t) => t.tokenId).sort();
   assert.deepEqual(placeable, [DRONE, DOLL, 'token_10017_skadi2_dedant', 'token_10028_vigil_wolf', 'token_10030_mlyss_wtrman', DEVICE].sort());
+  const freePlaceable = Object.values(DATA.tokens).filter((t) => t.placeable && isFreePick(t));
+  assert.ok(freePlaceable.length >= 30, `${freePlaceable.length} 自选干员 hand summons`);
+  assert.ok(freePlaceable.every((t) => t.ownerRange || !t.ownerRange), 'every one resolves');
   // HIDDEN shop-state tokens stay battle-only (PRTS: 新约能天使 with 使命必达！ provides no 投递坐标 card)
   for (const t of Object.values(DATA.tokens)) if (t.displayType === 'HIDDEN') assert.equal(t.placeable, false, t.name);
   assert.equal(DATA.tokens.token_10056_angel2_target.placeable, false);

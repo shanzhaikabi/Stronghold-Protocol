@@ -119,7 +119,7 @@ test('resolveLoadout: normal chess → moduleId null; elite → the chosen modul
   assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 7, module: 'gone' } }, g, chess), { skillIndex: 1, moduleId: 'uniequip_002_inside' });
 });
 
-// ---- 自选干员 模组 (DESIGN §21): a 自选候选 is its own elite, so 模组相关规则和普通干员一致 ---------------------------
+// ---- 自选干员 模组 (DESIGN §22): a 自选候选 is its own elite, so 模组相关规则和普通干员一致 ---------------------------
 
 /** A 自选候选 record by id (data/freePicks.json). */
 const freePick = (id) => (DATA.freePicks && Object.hasOwn(DATA.freePicks, id) ? DATA.freePicks[id] : null);
@@ -361,7 +361,7 @@ test('a skill summon is a hand card only with that skill (user playtest #6): 赫
   }
 });
 
-// ---- 自选干员 / 自由位置 (DESIGN §21) -------------------------------------------------------------------------------
+// ---- 自选干员 / 自由位置 (DESIGN §22) -------------------------------------------------------------------------------
 //
 // `room.loadout.picks` rides along with the loadout: `{ [调度中心 level]: chessId[] }`, at most 2 per level. The ids
 // come from data/freePicks.json (`freePick: true`, each with its own `freePickLevels`) — a separate file on purpose, so

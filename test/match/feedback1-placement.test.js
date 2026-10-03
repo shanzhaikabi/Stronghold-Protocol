@@ -129,7 +129,13 @@ test('#3 bots never put a piece into the water (layout planner and full bot prep
 test('#9 data: 狼群 and 流形 are owner-range summons (token text "只能部署在召唤者攻击范围内"), no other hand summon is', () => {
   assert.equal(DATA.tokens[WOLF].ownerRange, true);
   assert.equal(DATA.tokens[MANIFOLD].ownerRange, true);
-  for (const t of Object.values(DATA.tokens)) if (t.placeable && t.tokenId !== WOLF && t.tokenId !== MANIFOLD) assert.ok(!t.ownerRange, t.name);
+  // [port] the 自选干员 roster (DESIGN §22) adds two more summons whose own text carries the same clause — 沙地兽
+  // (莱伊) and 指挥中心 (可露希尔). Every other hand summon must still be unrestricted.
+  const OWNER_RANGE = new Set([WOLF, MANIFOLD, 'token_10034_ray_sndbst', 'token_10066_closur_ourbase']);
+  for (const t of Object.values(DATA.tokens)) {
+    if (!t.placeable) continue;
+    assert.equal(!!t.ownerRange, OWNER_RANGE.has(t.tokenId), `${t.name} (${t.tokenId})`);
+  }
 });
 
 test('#9 g.move: 伺夜\'s 狼群 only on a tile of her attack range (rotated grid of her tile + facing); outside → BAD_TILE', () => {

@@ -1,4 +1,4 @@
-// test/match/freePickSummons.test.js — the summons of the 自选干员 (DESIGN §21).
+// test/match/freePickSummons.test.js — the summons of the 自选干员 (DESIGN §22).
 //
 // The free-pick batch shipped with `tokens: []` ("their summons belong to that step"), so a picked operator like 望
 // (陷阱师, `token_10064_wang_stone1` 棋子) could never hand its summon to the player — user report 2026-10-03:

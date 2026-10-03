@@ -568,8 +568,7 @@ test('#18 圣聆初雪\'s 保护目标（冻结状态） holds 禁疗 (PRTS 备�
   assert.ok(!h.hooksOf('heal').some((c) => c.target === ice && c.source !== ice));
 });
 
-test('#18 安洁莉娜 兼职工作 is an HP-regen attribute (PRTS 备注 "不受治疗加成和禁疗影响"): the 禁疗 狼群 gets it; 炎佑 (孤立) is never selected', REAL, () => {
-  const h = makeBattle({
+test('#18 安洁莉娜 兼职工作 is an HP-regen attribute (PRTS 备注 "不受治疗加成和禁疗影响"): the 禁疗 狼群 gets it; 炎佑 (孤立) is never selected', REAL, () => {  const h = makeBattle({
     units: [{ chessId: 'chess_char_3_19_a', row: 12, col: 3 }, { chessId: 'chess_char_5_20_a', row: 11, col: 3, carryState: { sp: 0 } },
       { kind: 'token', tokenId: 'token_10028_vigil_wolf', row: 10, col: 5, ownerUid: 1 }],
     autoFinish: false, timeLimit: 60,
@@ -603,5 +602,33 @@ test('#18 孤立 in every ally selection: 刺玫\'s 荆藤庇荫 picks the opera
   assert.ok(!y.buffs.some((b) => b.key.startsWith('vendla')), '炎佑 not taunted');
   assert.equal(h.b.allySelectable(y, cm), false);
   assert.equal(h.b.allySelectable(y, y), true, 'its own effects still reach it');
+  checkInvariants(h.b);
+});
+
+test('#18 the 自选干员 summons that hold 禁疗 / 孤立 are not healed either (PRTS 13-token-abnormal: 龙腾.F 禁疗, 牵绊 孤立)', REAL, () => {
+  const ds = getDefaultSource();
+  // data first: 龙腾.F = 麦哲伦's skill drone (its whole job is to be spent), 牵绊 = 贝洛内's 无敌 + 孤立 marker
+  assert.deepEqual(ds.rawToken('token_10005_mgllan_drone1').abnormal, ['healFree']);
+  assert.deepEqual(ds.rawToken('token_10065_demetr_dmtpos').abnormal, ['isolated']);
+  const h = makeBattle({ defs: { chess: { test_medic_a: medic() } },
+    units: [{ chessId: 'chess_free_char_248_mgllan', row: 12, col: 3 }, { chessId: 'test_medic_a', row: 11, col: 3 }],
+    autoFinish: false, timeLimit: 60, hooks: ['heal'], captureNoisy: true });
+  h.step();
+  const owner = h.unit('chess_free_char_248_mgllan'), m = h.unit('test_medic_a');
+  // 龙腾.F is a SKILL summon: its board piece is docked until the skill gives one (content/tokens.js dockSkillSummons),
+  // so spawn it on its tile as the skill would — the flags still come from the data record
+  const d = h.b.spawnToken(owner, 'token_10005_mgllan_drone1', 10, 5);
+  assert.ok(d && d.alive && d.s.flags.noHeal, '龙腾.F 禁疗');
+  assert.ok(h.b.allySelectable(d, m), '禁疗 alone does not block selection — only healing');
+  d.hp = d.s.maxHp * 0.5;
+  h.run(4);
+  approx(d.hp, d.s.maxHp * 0.5, 1e-6, '龙腾.F not healed');
+  assert.ok(!h.hooksOf('heal').some((c) => c.target === d && c.source !== d));
+  // 牵绊 is 孤立: not even an ally selection (an ally aura or a heal pick) may reach it
+  const dj = h.b.spawnToken(owner, 'token_10065_demetr_dmtpos', 11, 4);
+  assert.ok(dj && dj.alive && dj.s.flags.isolated && dj.s.flags.noHeal, '牵绊 孤立');
+  assert.ok(!h.b.alliesInGrid(m).includes(dj), 'no ally selection picks it');
+  assert.equal(h.b.allySelectable(dj, m), false);
+  assert.equal(h.b.heal(m, dj, 1000), 0, 'the heal pipeline refuses it');
   checkInvariants(h.b);
 });

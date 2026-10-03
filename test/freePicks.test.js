@@ -1,4 +1,4 @@
-// test/freePicks.test.js — the 自选干员 (自由位置) data contract (DESIGN §21).
+// test/freePicks.test.js — the 自选干员 (自由位置) data contract (DESIGN §22).
 //
 // data/freePicks.json carries the operators a 自由位置 may bring into a player's OWN shop pool. They are deliberately
 // NOT season chess: they live in their own file (so the shop pool, the loadout slots and the season's counts cannot

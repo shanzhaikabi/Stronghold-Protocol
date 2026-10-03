@@ -82,7 +82,7 @@ describe('room.loadout (lobby, stub match)', () => {
     assert.deepEqual(cap.errors, []);
   });
 
-  test('自选干员 (DESIGN §21): picks ride along with room.loadout and reach the seat', async () => {
+  test('自选干员 (DESIGN §22): picks ride along with room.loadout and reach the seat', async () => {
     const a = await pool.player('A');
     const FREE = DATA.freePicks;
     const proto6 = Object.keys(FREE).find((id) => FREE[id].rarity === 6);

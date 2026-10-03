@@ -8,13 +8,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { checkLoadout, MODULE_NONE } from '../../shared/protocol.js';
+import { checkLoadout, loadoutOptions, MODULE_NONE } from '../../shared/protocol.js';
 import { PHASE } from '../../shared/constants.js';
 import {
   parseStored, toStored, chessOptions, effectiveChoice, setChoice, resetChoice, sanitizeEntries, rosterOf, filterRoster,
   changedCount, moduleBadge, attrRows, skillTags, skillLabel, selectedSkill, selectedModule, recordsOf,
+  exportPayload, serializeExport, parseImport, LOADOUT_EXPORT_KIND, LOADOUT_VERSION,
+  parseStoredPicks, sanitizePicks, pickedIds, setPick, clearPick, freePickSlots, pickedCount,
+  FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../../public/js/ui/loadoutModel.js';
-import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS } from '../../public/js/ui/loadoutSync.js';
+import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS, applyLoadoutEntries, setEntries, setPicks, loadoutStore } from '../../public/js/ui/loadoutSync.js';
 import { createStore } from '../../public/js/store.js';
 import { shouldAutoClose } from '../../public/js/screens/loadout.js';
 
@@ -37,6 +40,56 @@ test('parseStored: tolerant of junk, keeps structurally valid entries; toStored 
   assert.deepEqual(parseStored({ [INSIDE]: { skill: 1 } }), { [INSIDE]: { skill: 1 } }, 'bare map (older build)');
   const e = { [INSIDE]: { skill: 0 } };
   assert.deepEqual(parseStored(JSON.parse(JSON.stringify(toStored(e)))), e);
+});
+
+test('exportPayload / serializeExport: versioned envelope, entries copied; parseImport round trip', () => {
+  const entries = { [INSIDE]: { skill: 0 }, [SWIRE]: { module: SWIRE_ALT } };
+  const p = exportPayload(entries, { now: Date.UTC(2026, 9, 3, 4, 5, 6), name: '我的调配' });
+  assert.equal(p.kind, LOADOUT_EXPORT_KIND);
+  assert.equal(p.v, LOADOUT_VERSION);
+  assert.equal(p.count, 2);
+  assert.equal(p.exportedAt, '2026-10-03T04:05:06.000Z');
+  assert.equal(p.name, '我的调配');
+  assert.deepEqual(p.entries, entries);
+  assert.notEqual(p.entries, entries, 'a copy — later edits must not mutate an already-built payload');
+  assert.notEqual(p.entries[INSIDE], entries[INSIDE]);
+  assert.equal(exportPayload(entries).name, null, 'no name by default');
+  assert.equal(exportPayload(null).count, 0);
+
+  const back = parseImport(serializeExport(entries, { now: 0 }));
+  assert.equal(back.ok, true);
+  assert.deepEqual(back.entries, entries);
+  assert.equal(back.meta.kind, LOADOUT_EXPORT_KIND);
+  assert.equal(back.meta.v, LOADOUT_VERSION);
+});
+
+test('parseImport: accepts the envelope, the stored form, a bare map and JSON text; refuses junk and newer data', () => {
+  const entries = { [INSIDE]: { skill: 0 } };
+  assert.deepEqual(parseImport(exportPayload(entries)).entries, entries, 'envelope');
+  assert.deepEqual(parseImport(toStored(entries)).entries, entries, 'stored { v, entries }');
+  assert.deepEqual(parseImport(entries).entries, entries, 'bare map (hand-written / older build)');
+  assert.deepEqual(parseImport(JSON.stringify(exportPayload(entries))).entries, entries, 'JSON text');
+  assert.deepEqual(parseImport(`\n  ${JSON.stringify(entries)}  \n`).entries, entries, 'padded JSON text');
+
+  for (const junk of ['', '   ', 'not json', '{', 42, null, undefined, [], true]) {
+    assert.equal(parseImport(junk).ok, false, `${JSON.stringify(junk)} is refused`);
+  }
+  assert.equal(parseImport({ v: LOADOUT_VERSION + 1, entries }).ok, false, 'a NEWER payload is refused, never mis-read');
+  assert.match(parseImport({ v: LOADOUT_VERSION + 1, entries }).error, new RegExp(`v${LOADOUT_VERSION}`));
+  assert.equal(parseImport({ kind: 'some.other.tool', entries }).ok, false, "another tool's payload");
+  assert.equal(parseImport({ v: LOADOUT_VERSION, entries: {} }).ok, false, 'nothing to import');
+  assert.equal(parseImport({ v: LOADOUT_VERSION, entries: { 'bad id': { skill: 0 } } }).ok, false, 'no structurally valid entry');
+});
+
+test('applyLoadoutEntries: sanitises against the loaded data and reports what was dropped', () => {
+  const before = loadoutStore.get().entries;
+  try {
+    const res = applyLoadoutEntries({ [INSIDE]: { skill: 0 }, chess_nope_999: { skill: 0 } }, get);
+    assert.deepEqual(res, { applied: 1, dropped: 1 }, 'the unknown chess is dropped, the real one applied');
+    assert.deepEqual(loadoutStore.get().entries, { [INSIDE]: { skill: 0 } }, 'the store got the sanitised entries');
+  } finally {
+    setEntries(before);
+  }
 });
 
 test('options: skill records at Lv4 (normal) and Lv7 (elite); modules + 不装备 with defaults flagged', () => {
@@ -181,7 +234,7 @@ function fakeTimers() {
     },
   };
 }
-const syncStore = (entries = {}) => createStore({ entries, open: false, from: null, sel: null, filters: {}, sync: 'idle' });
+const syncStore = (entries = {}, picks = {}) => createStore({ entries, picks, open: false, from: null, sel: null, filters: {}, sync: 'idle' });
 
 test('sync: welcome sends the sanitised loadout; edits are debounced; identical content is not resent', async () => {
   const net = fakeNet();
@@ -190,7 +243,7 @@ test('sync: welcome sends the sanitised loadout; edits are debounced; identical 
   const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => CHESS, lookupChess: get });
   net.emit('welcome', {});
   await T.advance(100);
-  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } } }], 'stale entry dropped');
+  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: {} }], 'stale entry dropped');
   assert.equal(target.get().sync, 'synced');
   target.set({ entries: { [INSIDE]: { skill: 0 }, [SWIRE]: { module: SWIRE_ALT } } });
   target.set({ entries: { [INSIDE]: { skill: 0 }, [SWIRE]: { module: MODULE_NONE } } });
@@ -305,10 +358,13 @@ test('the background layer (.lo__bg: mint glow + grid) keeps position: absolute 
   assert.match(css, /\.lo__bg\s*\{[^}]*position:\s*absolute;/);
   // `.lo > *` (one class, after .lo__bg) used to set position: relative on it, a 0-px flex item that never drew
   assert.ok(!/\.lo\s*>\s*\*\s*\{[^}]*position/.test(css), 'no universal child rule setting position');
-  assert.match(css, /\.lo > :where\(:not\(\.lo__bg\)\) \{ position: relative; \}/, 'the other layers still stack above it, at one class of specificity');
+  // [port] the child rule carries BOTH exclusions, inside :where() so its specificity stays one class: .lo__bg keeps
+  // position: absolute, and a modal opened from this screen keeps position: fixed from components.css .modal (which a
+  // later rule of the same specificity would otherwise beat).
+  assert.match(css, /\.lo > :where\(:not\(\.lo__bg, \.modal\)\) \{ position: relative; \}/, 'the other layers still stack above it, at one class of specificity');
   const after = css.slice(css.indexOf('.lo__bg'));
   for (const m of after.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    if (!/\.lo__bg\b/.test(m[1]) || /:not\(\.lo__bg\)/.test(m[1])) continue;
+    if (!/\.lo__bg\b/.test(m[1]) || /:not\(\.lo__bg/.test(m[1])) continue;
     for (const v of m[2].matchAll(/position:\s*([a-z-]+)/g)) assert.equal(v[1], 'absolute', `${m[1].trim()} changes the layer's position`);
   }
 });
@@ -408,7 +464,7 @@ test('sync: an empty loadout is sent without loading chess.json (no 1.6 MB downl
   const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => { loads++; return CHESS; }, lookupChess: get, notify: () => {} });
   net.emit('welcome', {});
   await T.advance(100);
-  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: {} }]);
+  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: {}, picks: {} }]);
   assert.equal(loads, 0);
   await net.reply();
   target.set({ entries: { [INSIDE]: { skill: 0 } } });
@@ -427,4 +483,133 @@ test('entry badge (review fix): counts like the screen once chess.json is loaded
   assert.equal(badgeCount(entries, get), 1, 'with the data: only chess the screen shows as 已调整');
   assert.equal(badgeCount(entries, get), changedCount(entries, get));
   assert.equal(badgeCount({}, get), 0);
+});
+
+// ---- 自由位置 picks (DESIGN §22) ------------------------------------------------------------------------------------
+
+const FREE = JSON.parse(readFileSync(path.join(ROOT, 'data/freePicks.json'), 'utf8'));
+/** Chess lookup that also resolves 自选候选 — what the app's `data.lookup('chess', …)` does (data.js fallback). */
+const getAny = (id) => (Object.hasOwn(CHESS, id) ? CHESS[id] : Object.hasOwn(FREE, id) ? FREE[id] : null);
+const FREE6 = Object.keys(FREE).filter((id) => FREE[id].rarity === 6).sort();
+const FREE4 = Object.keys(FREE).filter((id) => FREE[id].rarity === 4).sort();
+const SEASON6 = 'chess_char_3_01_a'; // 能天使: a season 6★ NORMAL — already in the pool, so NEVER pickable [user]
+const PRESET6 = 'chess_char_3_19_a'; // 伺夜: a season 6★ PRESET — 预设干员, never selectable
+
+test('自选干员: parseStoredPicks 容错(等级键/每级上限/重复/id 形状);toStored 往返', () => {
+  assert.deepEqual(parseStoredPicks(null), {});
+  assert.deepEqual(parseStoredPicks('x'), {});
+  assert.deepEqual(parseStoredPicks({ 5: [FREE6[0], FREE6[1], FREE6[2]] }), { 5: [FREE6[0], FREE6[1]] }, 'at most 2 per level');
+  assert.deepEqual(parseStoredPicks({ 5: [FREE6[0], FREE6[0]] }), { 5: [FREE6[0]] }, 'no duplicate');
+  assert.deepEqual(parseStoredPicks({ 4: [FREE6[0]], 7: [FREE6[1]], 5: [FREE6[2]] }), { 5: [FREE6[2]] }, 'only 5 / 6');
+  assert.deepEqual(parseStoredPicks({ 6: [FREE6[0], 'bad id', 7] }), { 6: [FREE6[0]] }, 'id-shaped entries');
+  const picks = { 5: [FREE4[0]], 6: [FREE6[0]] };
+  assert.deepEqual(parseStoredPicks(JSON.parse(JSON.stringify(toStored({}, picks))).picks), picks, 'toStored round trip');
+});
+
+test('自选干员: setPick 校验可选身份 / 等级 / 重复 / 槽位上限;clearPick 移除', () => {
+  assert.equal(FREE_PICK_PER_LEVEL, 2);
+  assert.deepEqual([...FREE_PICK_LEVELS], [5, 6]);
+  assert.equal(setPick({}, 5, SEASON6, getAny), null, 'a season chess is already in the pool — never pickable [user]');
+  assert.deepEqual(setPick({}, 6, FREE6[0], getAny), { 6: [FREE6[0]] }, 'a 六星 自选候选 at 6 级');
+  assert.deepEqual(setPick({}, 5, FREE6[0], getAny), { 5: [FREE6[0]] },
+    'the SAME 六星 is placeable in the 5 阶 row too — either row is legal for it (user report 2026-10-03)');
+  assert.deepEqual(setPick({}, 5, FREE6[1], getAny), { 5: [FREE6[1]] }, 'and a second one fills the other 5 阶 slot');
+  assert.deepEqual(setPick({ 5: [FREE6[0]] }, 5, FREE6[1], getAny), { 5: [FREE6[0], FREE6[1]] }, 'two at 5 阶');
+  assert.deepEqual(setPick({}, 5, FREE4[0], getAny), { 5: [FREE4[0]] }, 'a 四星 自选候选 at 5 级');
+  assert.equal(setPick({}, 6, FREE4[0], getAny), null, 'the same 四星 is not selectable at 6 级');
+  assert.equal(setPick({}, 5, PRESET6, getAny), null, '预设干员 are not selectable');
+  assert.equal(setPick({}, 4, FREE6[0], getAny), null, 'unknown level');
+  assert.equal(setPick({ 5: [FREE6[0]] }, 6, FREE6[0], getAny), null, 'an operator may not be picked twice [user]');
+  assert.equal(setPick({ 5: [FREE6[0], FREE6[1]] }, 5, FREE6[2], getAny), null, 'the level slots are full');
+  assert.equal(setPick({}, 5, 'chess_nope_999', getAny), null, 'unknown id');
+
+  const picks = { 5: [FREE4[0]], 6: [FREE6[0]] };
+  assert.deepEqual(clearPick(picks, 5, FREE4[0]), { 6: [FREE6[0]] }, 'an emptied level disappears');
+  assert.deepEqual(clearPick(picks, 5, FREE6[0]), picks, 'an id from another level changes nothing');
+  assert.deepEqual([...pickedIds(picks)].sort(), [FREE4[0], FREE6[0]].sort());
+  assert.equal(pickedCount(picks), 2);
+});
+
+test('自选干员: freePickSlots 补空槽(界面直接渲染);sanitizePicks 丢掉已不可选的', () => {
+  assert.deepEqual(freePickSlots({}), { 5: [null, null], 6: [null, null] });
+  assert.deepEqual(freePickSlots({ 5: [FREE4[0]] }), { 5: [FREE4[0], null], 6: [null, null] });
+  const picks = { 5: [FREE6[0]], 6: [FREE6[1]] };
+  assert.deepEqual(sanitizePicks(picks, getAny), picks, 'selectable picks survive');
+  assert.deepEqual(sanitizePicks({ 5: [SEASON6] }, getAny), {}, 'a stale season-chess pick is dropped [user rule]');
+  assert.deepEqual(sanitizePicks({ 5: [PRESET6] }, getAny), {}, 'a PRESET pick is dropped');
+  assert.deepEqual(sanitizePicks({ 6: [FREE4[0]] }, getAny), {}, 'a 四星 filed at 6 级 is dropped');
+  assert.deepEqual(sanitizePicks({ 5: ['gone'] }, getAny), {}, 'an unknown id is dropped');
+  assert.deepEqual(sanitizePicks(picks, () => null), {}, 'without data nothing is kept (never send junk)');
+});
+
+test('自选干员 模组: 记录自带 modules[](自成一档精锐),详情面板因此渲染 模组 选项;赛季干员不受影响', () => {
+  const withMod = FREE6.find((id) => (FREE[id].modules || []).length);
+  const rec = FREE[withMod];
+  const mod = rec.modules.find((m) => m.isDefault);
+  // recordsOf: a 自选候选 has goldenId null and no `_b` sibling ⇒ the record IS the elite
+  assert.equal(rec.goldenId, null);
+  const { base, golden } = recordsOf(withMod, getAny);
+  assert.equal(base, rec);
+  assert.equal(golden, rec, 'the record is its own elite');
+  // chessOptions: the module options the screen renders (模组 区), plus 不装备 and the default
+  const opt = chessOptions(base, golden);
+  assert.deepEqual(opt.modules, [...rec.modules.map((m) => m.uniEquipId), MODULE_NONE]);
+  assert.equal(opt.defaultModule, mod.uniEquipId);
+  assert.deepEqual(opt.moduleOptions.map((o) => o.id), opt.modules);
+  assert.equal(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).rec.typeName, mod.typeName);
+  assert.equal(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).isDefault, true);
+  assert.equal(opt.moduleOptions.find((o) => o.id === MODULE_NONE).rec, null);
+  // effectiveChoice / setChoice round trip: 不装备 is a change, and setChoice stores it
+  assert.deepEqual(effectiveChoice({}, base, golden), { skill: opt.defaultSkill, module: opt.defaultModule, changed: false });
+  const none = setChoice({}, base, golden, { module: MODULE_NONE });
+  assert.deepEqual(none, { [withMod]: { module: MODULE_NONE } }, 'only the changed half is stored');
+  assert.deepEqual(effectiveChoice(none, base, golden), { skill: opt.defaultSkill, module: MODULE_NONE, changed: true });
+  assert.equal(changedCount(none, getAny), 1, 'the 干员调配 screen counts it');
+  assert.equal(moduleBadge(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).rec), moduleBadge(mod), 'the badge the card shows');
+  // a 自选候选 without modules stays module-less (the 4★ 预备干员)
+  const four = FREE4.find((id) => !(FREE[id].modules || []).length);
+  const f = recordsOf(four, getAny);
+  assert.equal(f.golden, null, 'no modules ⇒ not an elite');
+  assert.deepEqual(chessOptions(f.base, f.golden).modules, []);
+  // …and a season operator keeps its own golden record
+  const season = recordsOf(INSIDE, get);
+  assert.equal(season.base.chessId, INSIDE);
+  assert.equal(season.golden.chessId, CHESS[INSIDE].goldenId);
+  assert.deepEqual(chessOptions(season.base, season.golden).modules,
+    loadoutOptions(season.base, season.golden).modules, 'the golden module list, unchanged');
+});
+
+test('自选干员: setPicks 进 store,setEntries 不会洗掉选取,反之亦然', () => {
+  const beforeE = loadoutStore.get().entries;
+  const beforeP = loadoutStore.get().picks;
+  try {
+    setPicks({ 5: [FREE4[0]] });
+    assert.deepEqual(loadoutStore.get().picks, { 5: [FREE4[0]] });
+    setEntries({ [INSIDE]: { skill: 0 } });
+    assert.deepEqual(loadoutStore.get().picks, { 5: [FREE4[0]] }, 'an entries edit keeps the picks');
+    setPicks({});
+    assert.deepEqual(loadoutStore.get().picks, {});
+    assert.deepEqual(loadoutStore.get().entries, { [INSIDE]: { skill: 0 } }, 'a picks edit keeps the entries');
+  } finally {
+    setEntries(beforeE);
+    setPicks(beforeP);
+  }
+});
+
+test('自选干员: 同步随 room.loadout 一起发送 picks;只改选取也会触发同步', async () => {
+  const net = deferredNet();
+  const T = fakeTimers();
+  const target = syncStore({ [INSIDE]: { skill: 0 } }, { 5: [FREE4[0]] });
+  const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => CHESS, lookupChess: getAny, notify: () => {} });
+  net.emit('welcome', {});
+  await T.advance(100);
+  assert.deepEqual(net.sent[0], { t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: { 5: [FREE4[0]] } }, 'both halves');
+  await net.reply();
+  // a picks-only edit must sync too (the player changing 自由位置 without touching any skill)
+  target.set({ picks: { 5: [FREE4[0]], 6: [FREE6[0]] } });
+  await T.advance(SYNC_DEBOUNCE_MS + 10);
+  assert.equal(net.sent.length, 2, 'a picks-only edit syncs');
+  assert.deepEqual(net.sent[1].picks, { 5: [FREE4[0]], 6: [FREE6[0]] });
+  assert.deepEqual(net.sent[1].entries, { [INSIDE]: { skill: 0 } }, 'and keeps the entries');
+  s.dispose();
 });

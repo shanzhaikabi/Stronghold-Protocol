@@ -1,4 +1,4 @@
-// test/match/freePicks.test.js — 自选干员 / 自由位置 on the MATCH side (DESIGN §21).
+// test/match/freePicks.test.js — 自选干员 / 自由位置 on the MATCH side (DESIGN §22).
 //
 // seats[].picks → PlayerState.freePicks (re-checked against this match's data), and freePickIds(): the picks that
 // actually join THIS player's shop pool. A pick whose 主盟约 is in the match's drawn disabled set is dropped entirely
@@ -91,7 +91,7 @@ test('自选干员: 进入本人池 —— 出现在该玩家的抽卡候选里,
 
   // the shared pool alone never lists it — a prototype is not a season chess
   assert.ok(!h.m.pool._eligible({ maxTier: 6 }).some(([id]) => id === proto6[0]), 'absent from the shared list');
-  // …and this player's draw obeys the same gate as any operator of that tier (DESIGN §21; research 01 §6
+  // …and this player's draw obeys the same gate as any operator of that tier (DESIGN §22; research 01 §6
   // "shop level L offers operators of tier ≤ L"): a 等阶-5 pick is drawable from 调度中心 5 级, a 等阶-6 one from 6 级
   const lists = (maxTier, id = proto6[0]) => h.m.pool._eligible({ maxTier, extra: entries }).some(([x]) => x === id);
   const shared6 = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 6).chessId;
