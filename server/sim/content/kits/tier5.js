@@ -1686,8 +1686,8 @@ const KITS = {
             unit.mem.ghostHeavy = new Map(c.targets.filter(Boolean).map((t) => [t, t.hpRatio >= unit.hpRatio - 1e-9]));
           }, { owner: unit, priority: -100 });
         }
-        const hpUp = num(tb.max_hp); // PUM-Y: 替身…生命值提升
-        if (hpUp) whileOn(battle, unit, 0.2, () => { if (unit.trait.doll) battle.addBuff(unit, { key: 'ghost2:moduleY', duration: 0.3, mods: { hpPct: hpUp } }); });
+        // PUM-Y 替身生命值 +20 % is the trait blackboard `max_hp`, applied by the profession trait itself
+        // (`professions.js` dollHpMul) — applying it here too would multiply it in twice.
         const atk = num(tb.atk);
         if (atk) {
           whileOn(battle, unit, 0.2, () => {

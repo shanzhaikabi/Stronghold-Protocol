@@ -940,7 +940,7 @@ table: `hitSleep` (targets and damages sleeping enemies — "可以攻击沉睡�
 | agent / hookmaster | can hit FLY (ranged reach); hook displacement comes from skills (generic: `force`) |
 | bearer | block 0 while the skill is active |
 | alchemist | ranged lob, can hit FLY |
-| dollkeeper | fatal damage ⇒ substitute for 20 s (bb duration): block 0, doll HP (its own substitute token's stats, else 50 % max HP: 归溟幽灵鲨); swaps back at full HP; dies if the doll dies |
+| dollkeeper | fatal damage ⇒ substitute for 20 s (bb duration): block 0, doll max HP = the operator's own × (1 + bb `max_hp`, the module bonus: PUM-Y / 结城理 +20 %) — a substitute token of its own loadout (风丸 纸偶) carries the same max HP; swaps back at full HP; dies if the doll dies |
 | geek | loses 1–3 % max HP per second (bb hp_ratio), never lethal on its own |
 | merchant | −3 DP every 3 s (bb cost/interval); retreats when DP runs out |
 | skywalker | can block FLY enemies |

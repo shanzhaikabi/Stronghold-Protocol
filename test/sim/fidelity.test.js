@@ -253,14 +253,33 @@ test('librator module (玛恩纳 elite init_atk): +100 % ATK right after deploym
   approx(n.unit('chess_char_5_19_a').s.atk, n.unit('chess_char_5_19_a').base.atk, 1e-6);
 });
 
-test('dollkeeper without a substitute token (归溟幽灵鲨) uses half its own HP, not 风丸\'s 纸偶', { skip: !hasGeneratedData() }, () => {
+test('dollkeeper substitute keeps the operator\'s own max HP (归溟幽灵鲨, no substitute token)', { skip: !hasGeneratedData() }, () => {
+  // Rule (data): the trait blackboard `max_hp` / `atk` are percentage IMPROVEMENTS of the <替身> over the operator
+  // (module PUM-Y `uniequip_003_ghost2`: "替身阻挡数为0但生命值提升(+20%)" ⇒ blackboard `max_hp: 0.2`; PUM-X the same
+  // for `atk: 0.15`, which the 风丸 kit applies as +15 % of her OWN ATK). With no such module every dollkeeper carries
+  // `max_hp: 0` ⇒ the substitute fights at 100 % of the operator's max HP — the old 50 % fallback (upstream #44
+  // "归鲨死了没替身") spawned it at half health, so it died to the next hit.
   const h = makeBattle({ defs: { enemies: { enemy_dummy: dummy() } }, units: [{ chessId: 'chess_char_5_13_a', row: 9, col: 5 }], content: 'none', autoFinish: false, timeLimit: 30 });
   h.step();
   const u = h.unit('chess_char_5_13_a');
   const full = u.s.maxHp;
   h.b.dealDamage(null, u, { amount: 1e7, type: 'true' });
   assert.ok(u.alive && u.hasBuff('trait:substitute'));
-  approx(u.s.maxHp, full * 0.5, 1e-6);
+  approx(u.s.maxHp, full, 1e-6);
+  // and it must not borrow 风丸's 纸偶 stats (an operator-specific token of another record)
+  assert.ok(!u.findBuff('kazema:doll'), 'no 纸偶 stats on a dollkeeper that has no substitute token');
+});
+
+test('dollkeeper substitute applies the trait blackboard max_hp (module PUM-Y / 结城理 +20 %)', { skip: !hasGeneratedData() }, () => {
+  // 结城理's own record carries the module's `max_hp: 0.2` (its trait says "…（替身阻挡数为0但生命值提升）")
+  const h = makeBattle({ defs: { enemies: { enemy_dummy: dummy() } }, units: [{ chessId: 'chess_free_char_4217_makoto', row: 9, col: 5 }], content: 'none', autoFinish: false, timeLimit: 30 });
+  h.step();
+  const u = h.unit('chess_free_char_4217_makoto');
+  const full = u.s.maxHp;
+  assert.equal(u.profile.dollHpMul, 0.2, 'trait bb max_hp → dollHpMul');
+  h.b.dealDamage(null, u, { amount: 1e7, type: 'true' });
+  assert.ok(u.alive && u.hasBuff('trait:substitute'));
+  approx(u.s.maxHp, full * 1.2, 1e-6);
 });
 
 // ---------------------------------------------------------------------------------------------------------------
