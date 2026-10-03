@@ -495,6 +495,10 @@ test('自选干员: setPick 校验可选身份 / 等级 / 重复 / 槽位上限;
   assert.deepEqual([...FREE_PICK_LEVELS], [5, 6]);
   assert.equal(setPick({}, 5, SEASON6, getAny), null, 'a season chess is already in the pool — never pickable [user]');
   assert.deepEqual(setPick({}, 6, FREE6[0], getAny), { 6: [FREE6[0]] }, 'a 六星 自选候选 at 6 级');
+  assert.deepEqual(setPick({}, 5, FREE6[0], getAny), { 5: [FREE6[0]] },
+    'the SAME 六星 is placeable in the 5 阶 row too — either row is legal for it (user report 2026-10-03)');
+  assert.deepEqual(setPick({}, 5, FREE6[1], getAny), { 5: [FREE6[1]] }, 'and a second one fills the other 5 阶 slot');
+  assert.deepEqual(setPick({ 5: [FREE6[0]] }, 5, FREE6[1], getAny), { 5: [FREE6[0], FREE6[1]] }, 'two at 5 阶');
   assert.deepEqual(setPick({}, 5, FREE4[0], getAny), { 5: [FREE4[0]] }, 'a 四星 自选候选 at 5 级');
   assert.equal(setPick({}, 6, FREE4[0], getAny), null, 'the same 四星 is not selectable at 6 级');
   assert.equal(setPick({}, 5, PRESET6, getAny), null, '预设干员 are not selectable');

@@ -280,39 +280,60 @@ export class PlayerState {
   }
 
   /**
-   * The 自选干员 that actually join this player's pool: a pick whose 主盟约 is in the match's drawn disabled set is
-   * dropped entirely (it never appears in this player's shop — "如果对应的主盟约被ban，该干员也不会出现在池子内"
-   * [user]). 协防干员 can never be banned (its bond has weight 0, so the ban draw cannot pick it).
-   * @returns {string[]} chess ids, in pick order
+   * The 自选干员 that actually join this player's pool, each with the 自由位置 slot it was filed at: a pick whose 主盟约
+   * is in the match's drawn disabled set is dropped entirely (it never appears in this player's shop — "如果对应的主盟约
+   * 被ban，该干员也不会出现在池子内" [user]). 协防干员 can never be banned (its bond has weight 0, so the ban draw
+   * cannot pick it). The slot level is the operator's **等阶 for this match** — see freePickEntries().
+   * @returns {Array<{ id: string, level: number }>} in pick order (调度中心 5 级 before 6 级)
    */
-  freePickIds() {
+  freePickJoined() {
     const banned = Array.isArray(this.m.disabledBonds) ? this.m.disabledBonds : [];
     const out = [];
-    for (const list of Object.values(this.freePicks)) {
+    const seen = new Set();
+    for (const [level, list] of Object.entries(this.freePicks)) {
+      const lv = Number(level);
+      if (!Number.isInteger(lv)) continue;   // freePicks is validated (checkFreePicks): 5 / 6 only — never trust a NaN tier
       for (const id of list) {
+        if (seen.has(id)) continue;
+        seen.add(id);
         const rec = this.gd.chess(id);
-        if (rec && !banned.includes(this.freePickMainBond(rec))) out.push(id);
+        if (rec && !banned.includes(this.freePickMainBond(rec))) out.push({ id, level: lv });
       }
     }
     return out;
   }
 
   /**
+   * The 自选干员 that actually join this player's pool (a pick whose 主盟约 is banned is absent).
+   * @returns {string[]} chess ids, in pick order
+   */
+  freePickIds() {
+    return this.freePickJoined().map((p) => p.id);
+  }
+
+  /**
    * This player's 自选干员 as pool-roll entries (DESIGN §21, `SharedPool._eligible` `extra`): `{ id, tier, left }` per
    * pick that joins the pool and can still yield copies.
    *
+   * **`tier` is the 自由位置 slot the pick was filed at, not the record's rarity** (user report 2026-10-03: "自选干员都
+   * 进了6级"). The slots are the 甄选干员 slots of the official 物资调配处 — two at 等阶 5 and two at 等阶 6 (biligame
+   * 卫戍协议: "对于五六阶干员…还各共开放了2个甄选干员名额"; "5阶甄选干员可以选择精英化2 Lv.1/Lv.70") — and the slot IS the
+   * operator's 等阶 in the match, which the shop rule gates on ("※仅在调度中心等级 ≥ 干员所在等阶时，该干员才有可能出现在
+   * 栏位中"). So a 6★ record filed at the 等阶-5 slot is drawable from 调度中心 5 级 and one filed at the 等阶-6 slot from
+   * 6 级 — using `gd.tierOf(id)` here made every 6★ pick (87 of the 93 candidates) a 等阶-6 operator, so a level-5 pick
+   * never appeared before 调度中心 6 级 and the level-5 row did nothing at all.
+   *
    * A 自选干员 is NOT part of the shared copy economy — its pieces hold `poolCopies: 0` like any effect-granted chess —
    * so its budget is "how many more copies of this base the player may own": the base's ordinary pool cap minus what is
-   * already owned (an elite counts as `goldenCopies`). Buying, merging and selling therefore behave exactly as for any
-   * operator, a pick already owned in full simply stops appearing, and selling copies back frees the budget again.
+   * already owned (an elite counts as `goldenCopies`). The cap still follows the RECORD's tier (the price table gives
+   * tier 5 and 6 the same 4 资金, and an operator's copy cap is a balance number the user has not asked to move); only
+   * the shop gate reads the slot. Buying, merging and selling therefore behave exactly as for any operator, a pick
+   * already owned in full simply stops appearing, and selling copies back frees the budget again.
    * @returns {Array<{ id: string, tier: number, left: number }>}
    */
   freePickEntries() {
     const out = [];
-    const seen = new Set();
-    for (const id of this.freePickIds()) {
-      if (seen.has(id)) continue;
-      seen.add(id);
+    for (const { id, level } of this.freePickJoined()) {
       const cap = this.gd.poolCopies(id);
       if (!(cap > 0)) continue;
       let owned = 0;
@@ -321,7 +342,7 @@ export class PlayerState {
         owned += this.gd.isGolden(p.id) ? this.gd.goldenCopies : 1;
       }
       const left = Math.max(0, cap - owned);
-      if (left > 0) out.push({ id, tier: this.gd.tierOf(id), left });
+      if (left > 0) out.push({ id, tier: level, left });
     }
     return out;
   }

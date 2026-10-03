@@ -80,7 +80,9 @@ test('rolls are copy-weighted: an exhausted chess never rolls; tier/filter optio
   assert.equal(f, chessOfTier(5)[2]);
 });
 
-test('自选干员 (extra entries) honour the same shop tier gate as any operator: level L ⇒ tier ≤ L (user report 2026-10-03)', () => {
+test('_eligible 的 extra entries(自选干员)服从与普通棋子同一道商店等阶门槛: level L ⇒ tier ≤ L', () => {
+  // `tier` is whatever the caller put in the entry — for a 自选干员 that is the 自由位置/甄选 slot level, i.e. the
+  // operator's 等阶 for this match (PlayerState.freePickEntries). The pool never looks at the record itself.
   const pool = new SharedPool(gdOf());
   const extra = [
     { id: 'free_4', tier: 4, left: 3 }, { id: 'free_5', tier: 5, left: 3 }, { id: 'free_6', tier: 6, left: 3 },
