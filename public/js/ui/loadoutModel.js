@@ -375,13 +375,30 @@ export function selectedModule(loadout, chess, getChess) {
  * Visible normal chess (the loadout slots), in shop order: tier, then shopSortId.
  * @param {any[]} list data.list('chess')
  */
-/** Whether a chess record is a loadout slot (a visible normal chess — what the server's checkLoadout accepts). */
-export const isLoadoutSlot = (c) => !!c && !c.isGolden && c.visible !== false && !c.isHidden && !c.isDiy && (!c.baseId || c.baseId === c.chessId);
+/**
+ * Whether a chess record is a loadout slot (what the server's `checkLoadout` accepts): a visible season chess, or a
+ * 自选候选 of the free-pick roster (DESIGN §21 — invisible + hidden by design so the shop pool never offers it, yet its
+ * owner picks it and configures its skill like any other operator).
+ */
+export const isLoadoutSlot = (c) => !!c && !c.isGolden && !c.isDiy && (!c.baseId || c.baseId === c.chessId)
+  && (c.freePick === true || (c.visible !== false && !c.isHidden));
 
 export function rosterOf(list) {
   return (Array.isArray(list) ? list : [])
     .filter(isLoadoutSlot)
     .sort((a, b) => (a.tier ?? 0) - (b.tier ?? 0) || (a.shopSortId ?? 0) - (b.shopSortId ?? 0) || String(a.chessId).localeCompare(String(b.chessId)));
+}
+
+/**
+ * The 自由位置 candidates a 调度中心 level may draw from (DESIGN §21): the 自选候选 records of `data/freePicks.json`.
+ * The season pool never appears — a candidate is by definition an operator it does NOT offer [user] — and the level gate
+ * is `freePickLevelsOf`, the same function the server checks with. Sorted 6★ first (the 4★ 预备干员 last).
+ * @param {any[]} list data.list('freePicks') @param {number} level 5 or 6
+ */
+export function freePickRosterOf(list, level) {
+  return (Array.isArray(list) ? list : [])
+    .filter((c) => isLoadoutSlot(c) && freePickLevelsOf(c).includes(Number(level)))
+    .sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0) || (a.tier ?? 0) - (b.tier ?? 0) || String(a.name).localeCompare(String(b.name), 'zh'));
 }
 
 /**

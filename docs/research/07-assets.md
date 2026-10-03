@@ -59,6 +59,15 @@ Probe artifacts are in the scratchpad at `…/scratchpad/gd/extra/assets/`:
 
 Newest operators in the pool, all verified present in every class: `char_4211_snhunt` 雪猎, `char_4207_branch` 折桠, `char_4196_reckpr` 录武官, `char_4194_rmixer` 信仰搅拌机, `char_4193_lemuen` 蕾缪安, `char_4191_tippi` 蒂比, `char_1047_halo2` 溯光星源, `char_1046_sbell2` 圣聆初雪, `char_1045_svash2` 凛御银灰, and the activity-only `char_616_pithst` 盟约·辅助干员 and `char_617_sharp2` 领主·Sharp.
 
+**自选干员 (DESIGN §21) are added on top, without a research pass.** The 自由位置 roster (`data/freePicks.json`,
+derived from `character_table`) brings operators outside `act2autochess` — 78 more charIds at the time of writing, so the
+plan covers **216** characters. Their locations are **derived from the patterns above** instead of inventoried by hand:
+`tools/assets/plan.mjs` `syntheticOperator()` builds `avatar/{charId}.png` + `_2`, `portrait/{charId}_1.png` + `_2`
+(yuanyan), the Front/Back battle Spine folder (fexli) and the skill icons from the built records
+(`data/freePicks.json` → `iconId`, brackets percent-encoded). `tools/fetch-assets.mjs` feeds it those records; a URL
+that turns out not to exist costs one reported miss and the client falls back to its letter glyph, so the derivation can
+never break the pipeline. Nothing else about the pipeline changes.
+
 ---
 
 ## 2. Sources evaluated
