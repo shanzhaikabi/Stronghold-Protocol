@@ -7,14 +7,16 @@
 // piece alike.
 //
 // This batch = the nine 6★ 原型干员 of the season, 赤刃明霄陈 火陈 (the "火龙" / 剑气长龙 report, S3 only), 望 (the "她还
-// 在攻击 / 2.9 加到她自己身上" report, S3 only), plus a small wrapper for the six 4★ 预备干员 (their shared generic
+// 在攻击 / 棋子's damage scale 加到了她自己身上" report — all three skills: S3 天下劫's `atk_scale` 2.9 stopping her
+// attacks, and S1 取势 / S2 连星 keeping 棋子's `attack@atk_scale` 1.05 / 4.2 off her own attacks; the piece grant stays
+// deferred), plus a small wrapper for the six 4★ 预备干员 (their shared generic
 // skills `skcom_atk_up[…]` / … are reproduced exactly by the generic kit, which however installs no talent — theirs is
 // a plain stat talent that the wrapper below adds):
 //   608_acpion 郁金香 (PIONEER 尖兵)        609_acguad Sharp (WARRIOR 无畏者)   610_acfend Mechanist (TANK 铁卫)
 //   611_acnipe Stormeye (SNIPER 速射手)     612_accast Pith (CASTER 扩散术师)  613_acmedc Touch (MEDIC 医师)
 //   614_acsupo Raidian (SUPPORT 凝滞师)     615_acspec Misery (SPECIAL 处决者) 617_sharp2 领主·Sharp (WARRIOR 领主)
 //   1050_chen3 赤刃明霄陈 (WARRIOR 术战者, S3 剑气长龙)
-//   2027_wang 望 (SPECIAL 陷阱师, S3 天下劫 — 棋子 is `tokens.js wangStone`)
+//   2027_wang 望 (SPECIAL 陷阱师, 取势 / 连星 / 天下劫 — 棋子 is `tokens.js wangStone`)
 //   601_cguard / 602_cdfend / 603_csnipe / 604_ccast / 605_cmedic / 606_csuppo (4★ 预备干员, `reserveKit`)
 // Every number comes from the record's own blackboards (`bb` = the SELECTED skill's one, `def.talents[i].bb`,
 // `def.traitBb`); the few constants are documented where they are used. The official wording (description + 备注) was
@@ -1037,8 +1039,8 @@ export default {
   },
 
   // ===============================================================================================================
-  // 2027_wang 望 (SPECIAL 陷阱师, char_2027_wang; the 棋子 summoner — `tokens.js wangStone`) — S3 天下劫, the reported
-  // "她还在攻击" / "2.9 加到了她自己身上"
+  // 2027_wang 望 (SPECIAL 陷阱师, char_2027_wang; the 棋子 summoner — `tokens.js wangStone`) — S1 取势 / S2 连星 / S3
+  // 天下劫, the reported "她还在攻击" and "棋子's damage scale landed on her own attacks" (2.9 first, then 1.05 / 4.2)
   //   铸子: 可以使用6枚棋子（最多拥有7枚），棋子相连时相互激活，敌人进入激活的棋子所在地块时触发其效果；手动部署棋子时，望在
   //         相邻位置额外部署一枚棋子（最多9枚，可以且优先部署在有敌人的不可部署地块）
   //   料敌机先: 棋子激活时所在的连续直线上每有一枚棋子，直线上所有棋子造成伤害提升13%并无视敌人12点法术抗性（最多叠加3次）
@@ -1047,31 +1049,70 @@ export default {
   //       范围内手动部署棋子时可部署至敌人所在位置，且第一天赋额外至多部署3枚棋子并消耗等量弹药
   //       装有20发弹药，手动停止或棋子耗尽后技能结束，剩余的弹药返还为棋子
   //
-  // Only S3 is authored (the two reported wrongs). Why each line is here, and what is deliberately NOT here:
-  //   * `kind: 'ammo'` + `attack: { noAttack: true }` — "停止攻击". The generic kit only sets `noAttack` for `duration`
-  //     kinds (generic.js: `STOP_ATTACK` + `kind === 'duration'`), so her AMMO skill made her keep attacking.
-  //   * `targeting.rangeGrid` = the record's own S3 grid — "但攻击范围扩大" (the generic spec's line, kept).
-  //   * NO `attack.atkScale`: the skill's blackboard `atk_scale: 2.9` is the PASSIVE half's number — "棋子的触发和伤害范围
-  //     扩大，造成相当于攻击力290%的法术伤害" — and it lives on **棋子's own skill** (`data/tokens.json`
-  //     `variants.chess_free_char_2027_wang.skill` = `sktok_wang_3`, bb `atk_scale: 2.9`, already implemented in
-  //     tokens.js `wangStone`). The generic kit read it as HER attack scale (attack.atkScale 2.9), i.e. her own attacks
-  //     dealt 290 % — this entry is what stops that.
-  //   * the fallback `onTick` — nothing in this batch spends the 20 rounds (the 棋子 grant / ammo economy / mid-combat
+  // WHOSE attack each damage scale belongs to — 棋子's, never hers. All three of her skills carry the PASSIVE half's
+  // numbers ("棋子触发时…"), and each one is the scale 棋子 deals when it fires, on **望's ATK** as the base:
+  //   * the number is on 棋子's own skill as well, and THAT is the copy the client reads: `data/tokens.json`
+  //     `variants.chess_free_char_2027_wang.bySkill` → `sktok_wang_1` bb `{atk_scale 1.05, sluggish 6.5}`,
+  //     `sktok_wang_2` bb `{atk_scale 4.2, move_speed −0.35, duration 6}`, `sktok_wang_3` bb `{atk_scale 2.9}` — the same
+  //     numbers as her own skill's `attack@atk_scale` 1.05 / 4.2 and `atk_scale` 2.9 (`.cache/gamedata/excel/
+  //     skill_table.json`), unprefixed because there the ATTACK is 棋子's (tokens.js `wangStone` reads exactly these,
+  //     and `test/content/tokens_devices.test.js` pins 取势/连星/天下劫 through them).
+  //   * `buff_template_data.json` `wang_stone{1,2,3}_s` (the buffs `sktok_wang_*`'s prefab attaches) create
+  //     `wang_stone*_t[damage]` with templateKey `…[damage][token]`, whose `Nodes.AdvancedApplyDamage` has
+  //     `_atkScaleVar: "final_atk_scale"`, `_damageType: "MAGICAL"`, `_modifierKey: "WANG_STONE"` and
+  //     `_baseOnHostAtk: true` — the damage is dealt by the stone, based on the HOST's (望's) ATK.
+  //   * `battle/prefabs/[uc]skills.ab` confirms the split: `skchr_wang_1` / `_2` contain no attack or damage node at all
+  //     (only the skill controller + a `trigger_charge_token` ability — "立即获得两枚棋子"), while `sktok_wang_1/2/3`
+  //     (`Ability.Metadata.namedAsAlias = 'Explode'`) carry the action nodes that build
+  //     `final_atk_scale = (base_atk_scale 1.0 + cnt × per_atk_scale) × atk_scale`, i.e. 料敌机先's stacks times the
+  //     scale (the same prefab's `AssignAbilityBlackboardFromOthers` node maps 望's talent keys `attack@per_atk_scale` /
+  //     `attack@per_magic_resist_penetrate_fixed` / `attack@max_trigger_cnt` onto the stone's plain `per_*` ones). None
+  //     of her six prefabs declares an `Ability.Metadata.blackboardPrefix` (the only `attack@` consumer in the whole
+  //     2942-GameObject skill bundle is a prefab named `S2SecondShot`).
+  //   * so NO `attack.atkScale` anywhere below: `generic.js` reads `attack@atk_scale` as the operator's own per-attack
+  //     scale (right for 薄绿's "攻击变为…", wrong for a summoner whose skill only charges a piece). S3 also stops her
+  //     attacking, so 2.9 never showed; S1 / S2 do NOT stop her, and both numbers landed on her normal attacks.
+  //
+  // What is authored, and what is deliberately NOT (each entry only overrides what it must):
+  //   * S3 — the two reported wrongs: `kind: 'ammo'` + `attack: { noAttack: true }` for "停止攻击" (the generic kit only
+  //     sets `noAttack` for `duration` kinds, generic.js `STOP_ATTACK` + `kind === 'duration'`, so her AMMO skill made her
+  //     keep attacking), `targeting.rangeGrid` = the record's own S3 grid for "但攻击范围扩大" (the generic spec's line,
+  //     kept), and NO `attack.atkScale` — the 2.9 is 棋子's (`sktok_wang_3`, tokens.js `wangStone`).
+  //   * S3's fallback `onTick` — nothing in this batch spends the 20 rounds (the 棋子 grant / ammo economy / mid-combat
   //     placement is the next batch), so with `noAttack` the skill would stay open for ever: the engine ends an ammo
   //     skill only when its ammo runs out (`skills.js onAttackPerformed`) or a kit spends it, and 天下劫's data has
   //     `duration: -1` (no time limit either). The fallback spends one round per second with the existing idiom
   //     (`skill.addAmmo(-1)` + `ammoUsed`; a public `skill.spendAmmo(n)` would be cleaner but is an engine change), so
   //     the skill ends by the AMMO path after its 20 rounds — as 手动停止或棋子耗尽后技能结束 asks.
+  //   * S1 / S2 — the same removal, and nothing else: `kind: 'instant'` (what the generic kit derived from
+  //     `durationType NONE` + `duration −1` + `spCost` 21 / 17; the SP cost / type and the skill's own range keep coming
+  //     from the record, the kit never sets them) with an EMPTY `attack: {}`. The empty override is kept on purpose: it
+  //     is what the generic spec had (`pending` = "the next attack is the skill's attack", so the cast ends on the next
+  //     one — `skills.js onAttackPerformed`), and it now carries neither `atkScale` nor the `onHit` that used to re-apply
+  //     取势's `attack@sluggish` 6.5 from her own attacks. 连星's `attack@move_speed` / `attack@duration` never reached
+  //     the generic spec (not status keys) and stay unimplemented here for the same reason as the scales: they are 棋子's.
   //   * 铸子 / 料敌机先 are SUMMON-side and stay where they already live: `tokens.js wangStone`/`fireWangStone` reads
   //     料敌机先 off 望's own resolved def (`stoneTalent(unit)`) and applies it to every stone, so installing it here as
   //     well would DOUBLE it; 铸子's piece counts (6 → 7, 跟子 → 9), its manual placement and the S3 「立即获得8枚棋子」 /
   //     "手动部署棋子时可部署至敌人所在位置" are the prep / match side of the hand piece (`data/tokens.json` deployLimit 7)
   //     and the next batch. The kit therefore installs no talent of its own.
+  //   * DEFERRED for S1 / S2, exactly: the ACTIVE half "立即获得两枚棋子" — the blackboard key `cnt` (2 on each of S1 and
+  //     S2) is the only key of those two skills still unrepresented, and it is the piece grant of the later batch
+  //     (prep-side piece economy + mid-combat placement, the same batch as 铸子's counts and S3's 「立即获得8枚棋子」).
+  //     The passive halves need no work here: `attack@atk_scale` (+ `attack@sluggish` for 取势,
+  //     `attack@move_speed` / `attack@duration` for 连星) are already implemented in `tokens.js wangStone` from 棋子's own
+  //     record, where the numbers are unprefixed. `display_move_speed` 0.35 is only the description's rendering of the
+  //     same 35 % slow — no mechanic of its own, so nothing to represent.
   chess_free_char_2027_wang: (bb, chess, def) => {
-    const S3 = 'skchr_wang_3';
+    const S1 = 'skchr_wang_1', S2 = 'skchr_wang_2', S3 = 'skchr_wang_3';
     const g = gridOf(def);
+    // 取势 / 连星: a plain instant cast. Their visible numbers are 棋子's trigger damage (above), so the spec installs
+    // nothing on her own attack; the piece grant ("立即获得两枚棋子", `cnt`) is the next batch.
+    const castOnly = () => ({ kind: 'instant', attack: {} });
     return {
       skills: alt(def, {
+        [S1]: castOnly,
+        [S2]: castOnly,
         [S3]: () => ({
           kind: 'ammo',
           ammo: Math.max(1, Math.floor(num(bb.trigger_time, 20))),   // 装有20发弹药

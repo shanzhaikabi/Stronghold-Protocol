@@ -1175,7 +1175,76 @@ test('火陈 S3 天喟: 每次攻击对最多3名地面敌人 3 次 165% 法术 
 });
 
 // =================================================================================================================
-// 2027_wang 望 — S3 天下劫 (user report: "她还在攻击" + the 2.9 of 棋子's own skill applied to her own attacks)
+// 2027_wang 望 — S1 取势 / S2 连星 / S3 天下劫. Two user reports, one class of bug: 棋子's own damage scales appearing
+// on 望's own attacks — first the 2.9 of S3 天下劫 (`atk_scale`, reported as "2.9 加到了她自己身上"), then the 1.05 /
+// 4.2 of S1 / S2 (`attack@atk_scale`), which stayed on the generic fallback because only S3 was authored.
+
+test('望 S1 取势 / S2 连星: 棋子\'s passive scale (attack@atk_scale) never lands on HER own attack', () => {
+  const id = WANG;
+  for (const si of [0, 1]) {
+    const rec = FREE[id].skills[si];
+    // both numbers are the 棋子's trigger damage, read off 望's own ATK ("棋子触发时…相当于望攻击力的N%") and carried a
+    // second time, unprefixed, on 棋子's own skill (data/tokens.json `sktok_wang_1` / `sktok_wang_2`, tokens.js wangStone)
+    const scale = rec.bb['attack@atk_scale'];
+    assert.ok(scale > 1, `fixture: S${si + 1} ${rec.name} attack@atk_scale = ${scale} — 棋子's trigger scale`);
+    assert.equal(rec.durationType, 'NONE', `fixture: S${si + 1} 立即获得两枚棋子, no duration`);
+    const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: si, carryState: READY }], {
+      spawns: [{ key: 'e_still', pos: [10, 7] }],
+    });
+    const u = h.unit(id);
+    h.step();
+    assert.ok(u.kit && !u.kit.generic, 'a hand-authored kit on the unit');
+    assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length >= 3, 20), 'she attacks');
+    // the ready skill auto-casts in the same tick as her first attack (an instant spec's override is pending for
+    // exactly that attack) — the window the generic spec put 棋子's scale into
+    assert.equal(h.hooksOf('skillStart').some((c) => c.unit === u), true, `S${si + 1} casts while she attacks`);
+    for (const c of dealt(h, u, (c) => c.dmg.isAttack)) approx(c.amount, u.s.atk, `${scale} × ATK must not be hers`);
+    assert.equal(u.skill.spec.attack?.atkScale, undefined, `her own attack does NOT carry the ${scale} (it belongs to 棋子)`);
+    // 取势's `attack@sluggish` 6.5 is 棋子's 停顿 on the enemy that stepped on it, not a status her attacks inflict
+    if (rec.bb['attack@sluggish']) assert.equal(h.enemies()[0].findBuff('sluggish'), null, "棋子's 停顿 is not hers either");
+    // kept from the generic path (only the leak is gone): the instant cast its own metadata derives, the data's SP
+    assert.equal(u.skill.kind, 'instant', 'an instant cast, as the generic spec derived');
+    assert.equal(u.skill.duration, 0, 'no duration');
+    assert.equal(u.skill.ammo, 0, 'no ammo');
+    assert.equal(u.skill.spCost, rec.spCost, `SP cost from the record (S${si + 1})`);
+    assert.equal(rec.spType, 'INCREASE_WITH_TIME', `fixture: S${si + 1} SP type`);
+    assert.equal(u.skill.spType, 'time', 'SP type from the record');
+    assert.equal(u.skill.spec.targeting, undefined, 'no targeting override (neither S1 nor S2 has a skill range)');
+    assert.equal(h.hooksOf('skillEnd').some((c) => c.unit === u && c.reason === 'instant'), true, 'the instant cast ends on its attack, as with the generic spec');
+    done(h);
+  }
+});
+
+test('望 S1 取势 / S2 连星: the GENERIC kit she used to run — both scales on her own attacks (the report, for the record)', () => {
+  const id = WANG;
+  for (const si of [0, 1]) {
+    const scale = FREE[id].skills[si].bb['attack@atk_scale'];
+    // `kits: { [id]: () => null }` = the generic fallback (the harness `kits` injection the loadout tests use)
+    const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: si, carryState: READY }], {
+      spawns: [{ key: 'e_still', pos: [10, 7] }],
+      extra: { kits: { [WANG]: () => null } },
+    });
+    const u = h.unit(id);
+    h.step();
+    assert.equal(u.skill.spec.attack?.atkScale, scale, `the generic kit reads attack@atk_scale as HER attack scale (${scale})`);
+    assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length >= 1, 5), 'and she attacks with it');
+    approx(dealt(h, u, (c) => c.dmg.isAttack)[0].amount, u.s.atk * scale, `${scale * 100} % of her ATK instead of 100 %`);
+    done(h);
+  }
+});
+
+test('望: all three skills (S1 取势 / S2 连星 / S3 天下劫) come from the kit, never the generic fallback', () => {
+  const id = WANG;
+  assert.equal(KITS[id] !== undefined, true, 'the kit is registered');
+  for (const s of FREE[id].skills) assert.equal(skillSpecSource(D(id, s.index)), 'skills', `${id} ${s.skillId}`);
+  for (const s of FREE[id].skills) {
+    const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: s.index }]);
+    h.step();
+    const u = h.unit(id);
+    assert.equal(u.kit.skillSource, 'skills', `${s.skillId} runs the kit's own spec`);
+    done(h);
+  }
+});
 
 test('望 S3 天下劫: 停止攻击 —— an AMMO skill must set noAttack too (the generic kit only stops `duration` kinds)', () => {
   const id = WANG, b = bbOf(id, 2);
