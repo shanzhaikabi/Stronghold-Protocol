@@ -45,6 +45,7 @@ import { GuideHost } from './ui/guide.js';
 import { installDeviceSupport } from './ui/device.js';
 import { LoadoutHost } from './screens/loadout.js';
 import { installLoadoutSync } from './ui/loadoutSync.js';
+import { startBuildGuard, isBattlePhase } from './ui/buildGuard.js';
 
 const RESTORE_GRACE_MS = 1500;
 const JOIN_DELAY_MS = 350;
@@ -345,6 +346,14 @@ async function boot() {
     setTimeout(() => splash.remove(), 300);
   }
   globalThis.__SP__ = { store, net, data, version: 1 };
+  // A page keeps the modules it imported at load time for its whole lifetime, so a deploy cannot reach an open tab
+  // (ui/buildGuard.js): watch `/healthz.build` and reload once when the server's runtime changes — waiting while a
+  // battle is on screen, so a live field is never thrown away.
+  try {
+    startBuildGuard({ isBusy: () => isBattlePhase(store.get()?.match?.public?.phase) });
+  } catch (err) {
+    console.warn('[app] build guard failed to start', err);
+  }
 }
 
 boot().catch((err) => {
