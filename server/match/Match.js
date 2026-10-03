@@ -421,6 +421,26 @@ export class Match {
     return res;
   }
 
+  /**
+   * 自由位置 picks (DESIGN §21), accepted with room.loadout: only while INFO_CHECK runs, like the loadout itself (the
+   * briefing's 干员调配 entry). The lobby already checked them structurally/semantically; PlayerState.setFreePicks
+   * re-checks against this match's data. Ban filtering is not done here — freePickIds() applies it on demand.
+   * @param {string} playerId
+   * @param {Record<string, string[]> | null} picks `{ [level]: chessId[] }`
+   * @returns {{ ok: true } | { error: string, detail?: string }}
+   */
+  setFreePicks(playerId, picks) {
+    const ps = this.players.get(playerId);
+    if (!ps || ps.isBot || ps.left) return fail(ERR.NOT_IN_ROOM);
+    if (this.disposed || this.ended || this.phase !== PHASE.INFO_CHECK) return fail(ERR.WRONG_PHASE, '自选干员 locked for this match');
+    let res = OK;
+    this.guard(() => {
+      if (!ps.setFreePicks(picks)) { res = fail(ERR.BAD_TARGET, '自选干员 do not match the game data'); return; }
+      this.markPrivate(ps);
+    });
+    return res;
+  }
+
   onDisconnect(playerId) {
     const ps = this.players.get(playerId);
     if (!ps || ps.isBot || this.disposed) return;
@@ -1528,7 +1548,7 @@ export class Match {
    * pool filtered by `tier` / `minTier` / `maxTier` (number or 'shopLevel') / `bond`; `golden: true` yields the elite id.
    * @returns {{ kind: 'item'|'chess', id: string, golden?: boolean } | null}
    */
-  rollPool(poolId, { shopLevel = 6 } = {}) {
+  rollPool(poolId, { shopLevel = 6, extra = null } = {}) {
     const pools = this.gd.choices.pools && typeof this.gd.choices.pools === 'object' ? this.gd.choices.pools : {};
     const p = typeof poolId === 'string' && Object.hasOwn(pools, poolId) ? pools[poolId] : null;
     if (!p || typeof p !== 'object') return null;
@@ -1559,6 +1579,8 @@ export class Match {
         tier: Number.isInteger(p.tier) ? p.tier : null,
         maxTier,
         filter: (cid, e) => e.tier >= minTier && (!bond || (Array.isArray(this.gd.chess(cid)?.bonds) && this.gd.chess(cid).bonds.includes(bond))),
+        // DESIGN §21: the rolling player's 自选干员 join the draw too (they are part of that player's pool)
+        extra,
       });
     }
     if (!id) return null;

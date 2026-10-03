@@ -19,11 +19,13 @@ import { chessAvatarUrl, chessPortraitUrl, subProfIconUrl, bondIconUrl, moduleTy
 import { data, useData, localAsset } from '../data.js';
 import { useStore } from '../store.js';
 import { PHASE } from '../../../shared/constants.js';
+import { freePickLevelsOf } from '../../../shared/protocol.js';
 import {
   MODULE_NONE, PROF_ORDER, PROF_NAME, rosterOf, filterRoster, recordsOf, chessOptions, effectiveChoice, setChoice, resetChoice,
   changedCount, skillLabel, moduleBadge, attrRows, skillTags, serializeExport, parseImport,
+  freePickSlots, setPick, clearPick, pickedIds, pickedCount, FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../ui/loadoutModel.js';
-import { loadoutStore, openLoadout, closeLoadout, setEntries, applyLoadoutEntries } from '../ui/loadoutSync.js';
+import { loadoutStore, openLoadout, closeLoadout, setEntries, setPicks, applyLoadoutEntries } from '../ui/loadoutSync.js';
 import { copyText } from '../ui/clipboard.js';
 import { toast } from '../ui/toasts.js';
 
@@ -310,6 +312,75 @@ function Filters({ m, filters, onFilters, bonds }) {
   </div>`;
 }
 
+// ---- 自由位置 (DESIGN §21) -------------------------------------------------------------------------------------------
+//
+// 调度中心 5 级 and 6 级 each hold two 自由位置 slots: the player picks an operator BEFORE the match and it joins their OWN
+// shop pool — drawn at random like any other operator, never gifted away by 信标, and its pool is private (server:
+// PlayerState.freePickIds / freePickEntries). The roster is the season's 6★ NORMAL chess plus the 自选候选 records of
+// data/freePicks.json; the level a record may be picked at comes from shared/protocol.js `freePickLevelsOf`, the very
+// function the server checks with — so the picker can never offer something the server would refuse. An operator may
+// not be picked twice (user rule), so already-picked ones are greyed out.
+
+/** Every operator the 自由位置 can draw from (season 6★ NORMAL chess + the 自选候选 records). */
+function freePickRoster() {
+  const all = [...(data.list('chess') || []), ...(data.list('freePicks') || [])];
+  const out = [];
+  const seen = new Set();
+  for (const c of all) {
+    if (!c || seen.has(c.chessId) || !freePickLevelsOf(c).length) continue;
+    seen.add(c.chessId);
+    out.push(c);
+  }
+  // 六星 first (the 5 级 四星 预备干员 last), then by tier/name for a stable list
+  return out.sort((a, b) => (b.rarity || 0) - (a.rarity || 0) || (a.tier || 0) - (b.tier || 0) || String(a.name).localeCompare(String(b.name), 'zh'));
+}
+
+/** One filled 自由位置 slot: the operator, a 原型 marker, and a remove button. */
+function FreeSlot({ m, rec, level, locked, banned, onClear }) {
+  const isProto = rec.freePick === true;
+  return html`<span class=${cx('lo-free__slot', 'is-full', banned && 'is-banned')} data-testid=${`free-slot-${level}`}
+      title=${banned ? `${rec.name}：主盟约在本局被禁用，不会进入你的干员池` : `${rec.name}${isProto ? '（原型干员）' : ''} · 进入你的干员池`}>
+    <span class="lo-free__art">
+      <${Img} src=${chessAvatarUrl(m, rec)} fallback=${html`<span class="lo-free__glyph">${[...(rec.name || '?')][0]}</span>`} />
+    </span>
+    <span class="lo-free__name">${rec.name}</span>
+    ${isProto ? html`<span class="lo-free__tag">原型</span>` : null}
+    ${banned ? html`<span class="lo-free__ban" aria-label="本局被禁用"><${Icon} name="info" /></span>` : null}
+    <button type="button" class="lo-free__x tapx" data-testid=${`free-clear-${level}-${rec.chessId}`} disabled=${locked}
+      aria-label="移除" title="移除" onClick=${() => onClear(rec.chessId)}><${Icon} name="close" /></button>
+  </span>`;
+}
+
+/** The 自由位置 strip: two level rows of `FREE_PICK_PER_LEVEL` slots (click an empty one to open the picker). */
+function FreePicks({ m, picks, locked, bannedIds, onOpen, onClear }) {
+  const slots = freePickSlots(picks);
+  const getChess = (id) => data.lookup('chess', id);
+  const total = pickedCount(picks);
+  return html`<section class="lo-free" data-testid="loadout-free">
+    <div class="lo-free__head">
+      <span class="lo-free__title"><${MicroLabel} tone="mint">FREE PICK<//>自由位置</span>
+      <span class="lo-free__hint t-dim">调度中心 5 / 6 级各 2 名，从六星干员与原型干员中自选；他们只进入<b>你自己</b>的干员池，仍需随机抽取</span>
+      <span class="lo-free__count">已选 <b class="num">${total}</b><span class="num t-dim">/${FREE_PICK_LEVELS.length * FREE_PICK_PER_LEVEL}</span></span>
+    </div>
+    ${FREE_PICK_LEVELS.map((level) => html`<div class="lo-free__row" key=${level} data-testid=${`free-row-${level}`}>
+      <span class="lo-free__lvl"><b class="num">${ROMAN[level]}</b> 级</span>
+      <div class="lo-free__slots">
+        ${slots[String(level)].map((id, i) => {
+          const rec = id ? getChess(id) : null;
+          if (!rec) {
+            return html`<button type="button" key=${`e${i}`} class="lo-free__slot is-empty tapx" data-testid=${`free-slot-${level}-${i}`}
+              disabled=${locked} title=${`选择调度中心 ${ROMAN[level]} 级的自选干员`} onClick=${() => onOpen(level)}>
+              <${Icon} name="plus" /><span class="lo-free__empty">自选</span>
+            </button>`;
+          }
+          return html`<${FreeSlot} key=${id} m=${m} rec=${rec} level=${level} locked=${locked}
+            banned=${bannedIds ? bannedIds.has(id) : false} onClear=${onClear} />`;
+        })}
+      </div>
+    </div>`)}
+  </section>`;
+}
+
 // ---- screen -------------------------------------------------------------------------------------------------------------
 
 const SYNC_TEXT = {
@@ -343,6 +414,26 @@ function LoadoutScreen({ st }) {
   const fileRef = useRef(null);                            // hidden <input type=file> of the 导入 dialog
   const [narrowDetail, setNarrowDetail] = useState(false); // phones: the detail slides over the roster
   const [io, setIo] = useState(null);                      // 导出 / 导入 dialog: { mode, text } | null
+  const [freeFor, setFreeFor] = useState(null);            // 自由位置 picker: the 调度中心 level it is open for
+
+  // 自由位置 (DESIGN §21). `m.private.freePicks` is what the server actually let into the pool: a pick missing from it was
+  // dropped because its 主盟约 is banned this match, and the strip marks it instead of silently doing nothing.
+  const freePicks = st.picks || {};
+  const freeRoster = useMemo(() => freePickRoster(), [ready]);
+  const freeTaken = pickedIds(freePicks);
+  const allowedFree = useStore((s) => s.match?.private?.freePicks || null);
+  const freeBanned = allowedFree ? new Set([...freeTaken].filter((id) => !allowedFree.includes(id))) : null;
+  const freeLocked = locked || !ready;
+  const freeAdd = (level, id) => {
+    const next = setPick(freePicks, level, id, getChess);
+    if (!next) { toast('该干员不能选入这个等级的自由位置', 'warn'); return; }
+    setPicks(next);
+    setFreeFor(null);
+  };
+  const freeRemove = (id) => {
+    const level = FREE_PICK_LEVELS.find((lv) => (freePicks[String(lv)] || []).includes(id));
+    if (level != null) setPicks(clearPick(freePicks, level, id));
+  };
 
   const pick = (id) => { loadoutStore.set({ sel: id }); setNarrowDetail(true); };
   const change = (patch) => { if (base) setEntries(setChoice(loadoutStore.get().entries, base, golden, patch)); };
@@ -433,6 +524,8 @@ function LoadoutScreen({ st }) {
       </div>
     </header>
     <p class=${cx('lo-note', locked && 'is-locked')}><${Icon} name="info" />${locked ? '本局的调配已锁定（确认本局信息后无法修改），修改将在下一局生效' : fromText}</p>
+    ${ready ? html`<${FreePicks} m=${m} picks=${freePicks} locked=${freeLocked} bannedIds=${freeBanned}
+      onOpen=${setFreeFor} onClear=${freeRemove} />` : null}
     ${!ready ? html`<div class="lo-loading"><${Spinner} size="sm" />正在载入干员数据（打开页面后仅载入一次）…</div>` : html`<main class=${cx('lo-body', narrowDetail && 'is-detail')}>
       <section class="lo-roster">
         <${Filters} m=${m} filters=${st.filters} bonds=${bonds} onFilters=${(filters) => loadoutStore.set({ filters })} />
@@ -462,6 +555,29 @@ function LoadoutScreen({ st }) {
         placeholder=${io.mode === 'export' ? '' : '在此粘贴干员调配的 JSON…'}
         onInput=${(e) => setIo({ mode: io.mode, text: e.currentTarget.value })}></textarea>
       <input type="file" accept=".json,application/json,text/plain" class="lo-io__file" ref=${fileRef} onChange=${ioFile} />
+    <//>` : null}
+    ${freeFor != null ? html`<${Modal} open=${true} onClose=${() => setFreeFor(null)}
+      title=${`自由位置 · 调度中心 ${ROMAN[freeFor]} 级`} micro="FREE PICK"
+      actions=${html`<${Button} variant="ghost" onClick=${() => setFreeFor(null)}>关闭<//>`}>
+      <p class="lo-free__hint">选一名干员编入<b>你自己</b>的干员池：本局他会像其他干员一样被随机抽出，且不能被信标送走。
+        ${freeFor === 5 ? '5 级还可以选四星原型干员（先锋 / 特种除外）。' : ''}已选过的干员不能重复选取。</p>
+      <div class="lo-free__grid" data-testid="free-picker">
+        ${(() => {
+          const list = freeRoster.filter((c) => freePickLevelsOf(c).includes(freeFor));
+          if (!list.length) return html`<p class="lo-free__hint t-dim">没有可选的干员</p>`;
+          return list.map((c) => {
+            const taken = freeTaken.has(c.chessId);
+            return html`<button type="button" key=${c.chessId} class=${cx('lo-free__pick', taken && 'is-taken')}
+              data-testid=${`free-pick-${c.chessId}`} disabled=${taken}
+              title=${taken ? `${c.name}：已在自由位置中，不能重复选取` : `${c.name}${c.freePick ? '（原型干员）' : ''}`}
+              onClick=${() => freeAdd(freeFor, c.chessId)}>
+              <span class="lo-free__art"><${Img} src=${chessAvatarUrl(m, c)} fallback=${html`<span class="lo-free__glyph">${[...(c.name || '?')][0]}</span>`} /></span>
+              <span class="lo-free__name">${c.name}</span>
+              <span class="lo-free__meta">${c.rarity ? `${c.rarity}★` : ''}${c.freePick ? ' 原型' : ''}</span>
+            </button>`;
+          });
+        })()}
+      </div>
     <//>` : null}
   </div>`;
 }

@@ -231,6 +231,32 @@ everything needed to resolve a unit for `(chessId, skillIndex, moduleId)` (`simd
 
 ---
 
+### 2.3 自选干员 (DESIGN §21) — `data/freePicks.json`
+
+The operators a 自由位置 may bring into a player's **own** shop pool. A separate file on purpose: they are NOT season
+chess, so nothing that reads `chess.json` — the shared pool, the loadout slots, the season's counts and docs — can pick
+them up by accident. Records carry the same shape as §2 plus:
+
+| Field | Example | Meaning |
+|---|---|---|
+| `chessId` | `chess_free_char_608_acpion` | synthetic id (`chess_free_<charId>`) |
+| `freePick` | `true` | the 自由位置 flag (the picker filters on it) |
+| `freePickLevels` | `[5,6]` / `[5]` | 调度中心 levels it may be selected at: every 6★ at 5 **and** 6, the 4★ 预备干员 at 5 only (and never 先锋 / 特种) |
+| `chessType` | `PROTOTYPE` | the 原型干员 family — never `PRESET` / `NORMAL` / `DIY` |
+| `visible` / `isHidden` | `false` / `true` | the shop never offers them on its own |
+| `bonds` | `["emptyShip"]` | 协防干员 only: the official records of the 原型干员 carry no faction (`nationId` / `groupId` / `teamId` are all null) |
+| `garrisonIds` | `[]` | 自选干员 不拥有特质 |
+| `charId`, `assets` | `char_608_acpion`, … | the operator's own art (avatar / portrait / spine / skill icon) |
+| `tier` | `6` / `4` | **provisional** (= rarity); the 自由位置 shop-tier gate is settled together with the pool work |
+| `tokens` | `[]` | empty until these operators' skills get kits — their summons belong to that step |
+
+Built from `FREE_PICK_CHARS` in `tools/build-data.mjs` (the 原型干员 the season's `backupCharId` data points at).
+**Extensible by design**: append charIds there to offer further Arknights operators — each addition needs assets
+(`docs/research/07-assets.md` §0 lists the sources and hit rates per class) and a kit spec for every skill it exposes.
+`test/freePicks.test.js` locks the invariants (not in the season pool, 协防 only, no 特质, art present).
+
+---
+
 ## 3. `bonds.json` — `{ [bondId]: Bond }` (23 bonds, 8 core)
 
 | Field | Example (`deputShip`) | Meaning |
@@ -531,7 +557,7 @@ Glyph legend (`rows`):
 
 `chess 266 (112 visible; 283 selectable skills over the visible chess, 184 module choices over 129 goldens)`, `bonds 23`, `garrisons 249 (43 effect keys)`, `items 115`, `bands 40`, `effects 361`,
 `enemies 249`, `factions 67 entries`, `waves 38`, `stages 11 (8 active)`, `bosses 10`, `tokens 22`, `choice events 109`,
-`bounty cards 129`, `tactic cards 43`.
+`bounty cards 129`, `tactic cards 43`, `自选干员 15` (§2.3 — outside `chess.json` on purpose).
 
 ## 17. Integrity guarantees (checked by the builder and `test/data.test.js`)
 
@@ -543,7 +569,10 @@ carry the bond; items/bands/bonds reference existing effects; wave spawn keys an
 `enemies.json`, route indices exist; every mode round has a template (or boss templates) present in `waves.json`;
 stages are 19 × 21 with known glyphs and contiguous helper paths; bosses/factions/tokens/choice pools resolve; token
 variants carry `sources`; enemies have `maxHp`/`bat` > 0, `aspd`/`moveSpeed`/`lpr` ≥ 0 and `rangeRadius` ≥ 0 (0 for
-MELEE); no non-finite numbers; total size < 6 MB. `test/data.test.js` additionally re-derives every chess/enemy stat
+MELEE); no non-finite numbers; total size < 6 MB. 自选干员 (§2.3) are checked too: every `FREE_PICK_CHARS` entry builds
+a record that is **not** a season chess, stays `visible:false` / `chessType 'PROTOTYPE'` / `freePick:true`, carries stats,
+exactly one default skill, an attack range and a 自由位置 level, is 协防干员 only (`bonds:["emptyShip"]`) and owns no 特质
+(`garrisonIds:[]`). `test/data.test.js` additionally re-derives every chess/enemy stat
 from the raw official tables (incl. the float32 `attrPower`) and rebuilds offline to prove `data/` is not stale (both
 skipped without the cache); faction entries carry no `k` copies and share one movement class; every device's
 `active` = `!hidden`; the helper lanes of act1 m02 / m04 / act2 m02 are the official ones (research 08 §3.2).

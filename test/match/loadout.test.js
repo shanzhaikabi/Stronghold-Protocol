@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ERR, PHASE } from '../../shared/constants.js';
-import { validateC2S, checkLoadout, loadoutOptions, resolveLoadout, isLoadoutEntries, MODULE_NONE, LOADOUT_LIMITS } from '../../shared/protocol.js';
+import { validateC2S, checkLoadout, loadoutOptions, resolveLoadout, isLoadoutEntries, MODULE_NONE, LOADOUT_LIMITS, isFreePicks, checkFreePicks, freePickLevelsOf, FREE_PICK_LIMITS } from '../../shared/protocol.js';
 import { buildBattleSpec } from '../../server/sim/spec.js';
 import { DATA, makeMatch } from './harness.js';
 
@@ -301,3 +301,77 @@ test('a skill summon is a hand card only with that skill (user playtest #6): 赫
     h.m.dispose();
   }
 });
+
+// ---- 自选干员 / 自由位置 (DESIGN §21) -------------------------------------------------------------------------------
+//
+// `room.loadout.picks` rides along with the loadout: `{ [调度中心 level]: chessId[] }`, at most 2 per level. The ids
+// come from data/freePicks.json (`freePick: true`, each with its own `freePickLevels`) — a separate file on purpose, so
+// a season chess id is a valid SHAPE but not a valid pick.
+
+const free = DATA.freePicks || {};
+const freeIds = Object.keys(free).sort();
+const free6 = freeIds.filter((id) => free[id].rarity === 6);
+const free4 = freeIds.filter((id) => free[id].rarity === 4);
+/** Lookup over the season chess AND the 自选候选 (what GameData.chess does). */
+const getAny = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : (Object.hasOwn(free, id) ? free[id] : null));
+
+test('自选干员: 候选数据齐备(六星与四星各若干) — 后续测试的前置条件', () => {
+  assert.ok(free6.length >= 2, `need at least 2 六星 自选候选, got ${free6.length}`);
+  assert.ok(free4.length >= 1, `need at least 1 四星 自选候选, got ${free4.length}`);
+  assert.ok(!freeIds.includes(INSIDE) && Object.hasOwn(DATA.chess, INSIDE), 'the season fixture is a season chess');
+});
+
+test('自选干员: isFreePicks 只做结构校验(等级键 / 每级 ≤2 / id 形状)', () => {
+  assert.ok(isFreePicks({}));
+  assert.ok(isFreePicks({ 5: [free6[0]], 6: [free6[1]] }));
+  assert.ok(isFreePicks({ '5': [free6[0]] }), 'string level keys (a JSON round trip)');
+  assert.ok(!isFreePicks({ 4: [free6[0]] }), 'only 调度中心 5 / 6');
+  assert.ok(!isFreePicks({ 5: [free6[0], free6[1], free6[0]] }), 'at most 2 per level');
+  assert.ok(!isFreePicks({ 5: free6[0] }), 'arrays only');
+  assert.ok(!isFreePicks({ 5: ['bad id!'] }), 'id-shaped entries');
+  assert.ok(!isFreePicks(null));
+  assert.equal(FREE_PICK_LIMITS.perLevel, 2);
+  assert.deepEqual([...FREE_PICK_LIMITS.levels], [5, 6]);
+});
+
+test('自选干员: checkFreePicks 校验候选身份、自身等级门槛与重复选取', () => {
+  assert.deepEqual(checkFreePicks({ 5: [free6[0]], 6: [free6[1]] }, getAny),
+    { ok: true, picks: { 5: [free6[0]], 6: [free6[1]] } });
+  assert.deepEqual(checkFreePicks({ 5: [free4[0]] }, getAny), { ok: true, picks: { 5: [free4[0]] } }, '4★ 预备干员 at 5 级');
+  assert.deepEqual(checkFreePicks({ '5': [free6[0]] }, getAny).picks, { 5: [free6[0]] }, 'keys normalise to strings');
+  assert.deepEqual(checkFreePicks({}, getAny), { ok: true, picks: {} }, 'nothing picked is valid');
+  assert.equal(checkFreePicks({ 6: [free4[0]] }, getAny).error, ERR.BAD_TARGET, 'a 4★ is not selectable at 6 级');
+  assert.equal(checkFreePicks({ 5: [INSIDE] }, getAny).error, ERR.BAD_TARGET, 'a season chess is not a 自选候选');
+  assert.equal(checkFreePicks({ 5: [free6[0]], 6: [free6[0]] }, getAny).error, ERR.BAD_TARGET, 'no duplicate across levels');
+  assert.equal(checkFreePicks({ 5: [free6[0], free6[0]] }, getAny).error, ERR.BAD_TARGET, 'no duplicate within a level');
+  assert.equal(checkFreePicks({ 7: [free6[0]] }, getAny).error, ERR.BAD_MSG, 'structural problems stay BAD_MSG');
+});
+
+test('room.loadout: picks 随调配一起发送,可缺省(老客户端),结构非法即拒', () => {
+  const picks = { 5: [free6[0]], 6: [free6[1]] };
+  assert.equal(validateC2S({ t: 'room.loadout', entries: {}, picks }), null);
+  assert.equal(validateC2S({ t: 'room.loadout', entries: {} }), null, 'picks is optional');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 7: [free6[0]] } }), null, 'unknown level');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 5: free6[0] } }), null, 'not an array');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 5: [free6[0], free6[1], free6[0]] } }), null, '3 picks');
+});
+
+test('自选干员: 可选范围 = 六星 NORMAL 棋子 + 自选候选;预设干员与非六星一律不可选', () => {
+  const normal6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'NORMAL' && c.rarity === 6 && c.visible);
+  const preset6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 6);
+  const preset5 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 5 && c.visible);
+  assert.ok(normal6 && preset6 && preset5, 'fixtures exist');
+
+  assert.deepEqual(freePickLevelsOf(normal6), [5, 6], 'a season 六星 NORMAL chess — "玩家拥有的六星干员" — is pickable at 5 and 6');
+  assert.deepEqual(freePickLevelsOf(free[free6[0]]), [5, 6], 'a 六星 prototype');
+  assert.deepEqual(freePickLevelsOf(free[free4[0]]), [5], 'a 四星 prototype: 5 级 only');
+  assert.deepEqual(freePickLevelsOf(preset6), [], '预设干员 are excluded from the 自由位置 roster, even at 6★');
+  assert.deepEqual(freePickLevelsOf(preset5), [], 'a non-6★ season operator is not pickable');
+  assert.deepEqual(freePickLevelsOf(null), []);
+
+  assert.equal(checkFreePicks({ 5: [normal6.chessId] }, getAny).ok, true, 'a season 六星 NORMAL is a valid pick');
+  assert.equal(checkFreePicks({ 6: [normal6.chessId] }, getAny).ok, true, 'at either level');
+  assert.equal(checkFreePicks({ 5: [preset6.chessId] }, getAny).error, ERR.BAD_TARGET, 'a PRESET is not');
+  assert.equal(checkFreePicks({ 5: [preset5.chessId] }, getAny).error, ERR.BAD_TARGET, 'a 5★ season operator is not');
+});
+

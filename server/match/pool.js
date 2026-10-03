@@ -90,14 +90,31 @@ export class SharedPool {
     return k;
   }
 
-  /** Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`). */
-  _eligible({ maxTier = 6, tier = null, filter = null } = {}) {
+  /**
+   * Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`), PLUS the caller's `extra` entries — the
+   * player's 自选干员 (DESIGN §21, PlayerState.freePickEntries).
+   *
+   * `extra` ids are eligible REGARDLESS of the `maxTier` gate: they were explicitly brought into this player's pool,
+   * so a 6★ picked at 调度中心 5 级 is drawable at 5 级 too (a 自由位置 is "编入作战", not a shop-tier purchase). An
+   * exact-`tier` request (the reward / effect rolls) and the caller's `filter` still apply to them, and they never
+   * appear in `this.entries` — they are outside the shared copy economy, so a weight here is "copies this pick may
+   * still yield", not a shared pool count.
+   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean,
+   *   extra?: Array<{ id: string, tier: number, left: number }>|null }} [opts]
+   */
+  _eligible({ maxTier = 6, tier = null, filter = null, extra = null } = {}) {
     const out = [];
     for (const [id, e] of this.entries) {
       if (e.left <= 0) continue;
       if (tier != null ? e.tier !== tier : e.tier > maxTier) continue;
       if (filter && !filter(id, e)) continue;
       out.push([id, e.left]);
+    }
+    for (const x of extra || []) {
+      if (!x || !(x.left > 0)) continue;
+      if (tier != null && x.tier !== tier) continue;
+      if (filter && !filter(x.id, x)) continue;
+      out.push([x.id, x.left]);
     }
     return out;
   }
