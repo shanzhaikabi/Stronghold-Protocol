@@ -372,7 +372,8 @@ A `rangeExtend` on a `persist` never-expiring buff is **permanent**: it also wid
 untargetable blockFly noMove noSp burstLock hidden attract float noDisplace isolated camou` (`float` = 近地悬浮 (an air
 unit, `Unit.isFlying`), `noDisplace` = 失衡免疫 (`displace()` moves nothing), `isolated` = 孤立 ("无法被同阵营选中": no ally
 ability selects it — no heal, buff, aura or talent pick from another ally (`battle.allySelectable` / `alliesFor`,
-`alliesInGrid`; PRTS 选择器 可选判定), enemies still target it; a summon's tokens.json `abnormal` 'isolated' also sets
+`alliesInGrid`; PRTS 选择器 可选判定), enemies still target it; a summon's tokens.json `abnormal` (docs/research/13-token-abnormal.json,
+the only two effects this field carries) 'isolated' also sets
 `noHeal`, 'healFree' (禁疗) sets `noHeal` — Battle._setupUnit, DATA.md tokens.json; 禁疗 keeps heals off only — an HP-regen
 attribute such as 安洁莉娜's 兼职工作 still applies, PRTS 异常效果), `camou` = 迷彩 (below)). `taunt: true` as a flag counts
 as +1 taunt level (DESIGN §5.3).

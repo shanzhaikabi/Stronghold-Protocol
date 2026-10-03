@@ -1,0 +1,638 @@
+{
+ "source": "prts.wiki MediaWiki API (action=query&list=categorymembers&cmtitle=Category:召唤物 for the 71 summon pages, then prop=revisions&rvslots=main for the wikitext; the {{召唤物信息}} template's 备注 field). 炎佑 is not a summon page: its 天赋 line on the page “炎佑” (an enemy page of the season) carries 孤立.",
+ "checkedAt": "2026-10-04",
+ "how": {
+  "page_to_token": "the page's own {{SpineId|id=…}} (56 of the 71 pages) / exact 中文名称 for the 13 without one (龙腾.L, 龙腾.A, 镜中虚影, 沙之碑, “耀阳”, 纸偶, 从不混淆的方向, 迷狂牢笼, 风雪之眼 ×3, 保护目标（冻结状态）, 牵绊, “一会儿见！”)",
+  "holds": "the 备注 segments (split on newlines and <br>) that say 持有 / 常态持有 {{异常效果|…}}, with HTML comments stripped — 龙腾.F's 缴械 is commented out on PRTS",
+  "names": "{{异常效果|X}} → X, {{异常效果|X|免疫}} → X·免疫, {{异常效果|X|反制}} → X·反制",
+  "applied": "only the effects in `effects` become tokens.json `abnormal` flags; every other PRTS effect is listed per token in `unexpressed` (form not modelled / no channel) or `mentions` (named but not held), each with a reason in `unexpressible`",
+  "re_verify": "node tools/build-data.mjs re-checks the whole table (unknown effect, unknown id, fallback drift → build error)"
+ },
+ "effects": {
+  "禁疗": "healFree",
+  "孤立": "isolated"
+ },
+ "unexpressible": {
+  "无敌": "no channel: the engine HAS an `invulnerable` buff flag (buffs.js flags, e.g. 泥岩 S3 / 敌人 kits use it), but `abnormal` has no mapping for it and Battle._setupUnit reads only healFree / isolated — wiring it is an engine change, not a data one. For several tokens it is also conditional on a form the sim does not model.",
+  "不可阻挡": "no channel: the engine HAS an `unblockable` flag (buffs.js) but Battle._setupUnit does not read it from `abnormal` (an ENEMY-side concept: an ally unit is blocked by nothing — its blocker releases it through `noBlock`).",
+  "阻回": "conditional everywhere on PRTS (满血 / 持有者技能开启期间 / 战术点形态); the engine HAS 阻回 as the `noSp` flag (skills.js gainSp), but a from-the-start data flag would be wrong for all of them.",
+  "静默": "conditional on PRTS (same clause as 阻回, and the 应急承重小组 / 监工专员 常态持有); the engine has a `silence` flag but no from-the-start `abnormal` mapping for it.",
+  "沉默": "conditional on PRTS (悲叹的仆役: 自身不是特殊形态召唤物时); 沉默 is the engine `silence` status (buffs.js STATUS), reachable only through a status application — `abnormal` has no mapping for it.",
+  "强制缴械": "战术点形态 only; the engine has a `disarm` flag but no `abnormal` mapping.",
+  "不死": "no engine concept (a unit at 0 HP that stays alive); only appears in the 战术点形态 of 磐蟹护卫队 / 眠兽 / 狼群 / 樱桃三号 / 指挥中心, which the sim does not model.",
+  "晕眩·反制": "战术点形态 only; 反制 is not a status the engine models.",
+  "沉默·反制": "战术点形态 only; 反制 is not a status the engine models.",
+  "冻结·反制": "战术点形态 only; 反制 is not a status the engine models.",
+  "失衡免疫": "no channel: `variants[].immunities` (simdata.js → def.immune → Battle.applyStatus) carries only stun/silence/sleep/frozen/levitate, and the client data reports every one of them `false` for this token.",
+  "元素免疫": "no channel: 元素损伤 has its own gauge in the engine (elem.*), and neither `abnormal` nor `immunities` maps to it.",
+  "无法撤退": "no channel: retreat is a player/match action (PlayerState), not a per-unit battle flag.",
+  "晕眩·免疫": "immunity channel: `variants[].immunities.stun` exists (simdata.js:306 → def.immune → Battle.applyStatus) but the client tables report `stunImmune: false` for these tokens, so PRTS is the only source; populating it is a separate data change.",
+  "冻结·免疫": "immunity channel: `variants[].immunities.frozen`, same as 晕眩·免疫 (client `frozenImmune: false`).",
+  "寒冷·免疫": "no channel: 寒冷 has no `immunities` key (only stun/silence/sleep/frozen/levitate) — the engine immunity set has no `cold`.",
+  "沉睡·免疫": "immunity channel: `variants[].immunities.sleep`, same as 晕眩·免疫 (client `sleepImmune: false`).",
+  "沉默·免疫": "immunity channel: `variants[].immunities.silence`, same as 晕眩·免疫 (client `silenceImmune: false`); note 沉默·反制 (a different effect) is also unmodelled.",
+  "浮空·免疫": "immunity channel: `variants[].immunities.levitate`, same as 晕眩·免疫 (client `levitateImmune: false`).",
+  "战栗·免疫": "no channel: 战栗 (`tremble`) has no `immunities` key.",
+  "恐惧·免疫": "no channel: 恐惧 has no `immunities` key (`feared` exists internally for enemies but is not part of the token immunity set).",
+  "麻痹·免疫": "no channel: 麻痹 (`palsy`) has no `immunities` key.",
+  "麻痹震颤·免疫": "no channel: 麻痹震颤 is not a status the engine models at all.",
+  "束缚·免疫": "no channel: 束缚 (`bind`) has no `immunities` key."
+ },
+ "tokens": {
+  "token_10000_silent_healrb": {
+   "page": "医疗探机",
+   "owner": "赫默",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10006_vodfox_doll": {
+   "page": "诅咒娃娃",
+   "owner": "巫恋",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10011_beewax_oblisk": {
+   "page": "沙之碑",
+   "owner": "蜜蜡",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10012_rosmon_shield": {
+   "page": "迷迭香的战术装备",
+   "owner": "迷迭香",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10015_dusk_drgn": {
+   "page": "“小自在”",
+   "owner": "夕",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10017_skadi2_dedant": {
+   "page": "斯卡蒂的海嗣",
+   "owner": "浊心斯卡蒂",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10019_nearl2_sword": {
+   "page": "“耀阳”",
+   "owner": "耀骑士临光",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10022_kazema_shadow": {
+   "page": "纸偶",
+   "owner": "风丸",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10028_vigil_wolf": {
+   "page": "狼群",
+   "owner": "伺夜",
+   "quote": "※持有{{异常效果|禁疗}}。\n※战术点形态期间：不进行普通攻击，持有{{异常效果|无敌}}、{{异常效果|强制缴械}}、{{异常效果|不死}}、{{异常效果|晕眩|反制}}、{{异常效果|沉默|反制}}、{{异常效果|冻结|反制}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌",
+    "强制缴械",
+    "不死",
+    "晕眩·反制",
+    "沉默·反制",
+    "冻结·反制"
+   ],
+   "why": "战术点形态 (a form the sim does not model) holds them"
+  },
+  "token_10030_mlyss_wtrman": {
+   "page": "流形",
+   "owner": "缪尔赛思",
+   "quote": "※持有{{异常效果|禁疗}}。\n※在召唤物形态下进行撤退或被击倒时将变为战术点形态，战术点形态的持续时间由持有者的天赋决定，期间：不进行普通攻击，持有{{异常效果|无敌}}、{{异常效果|强制缴械}}、{{异常效果|不死}}、{{异常效果|晕眩|反制}}、{{异常效果|沉默|反制}}、{{异常效果|冻结|反制}}、{{异常效果|阻回}}、{{异常效果|静默}}，且阻挡数强制归0。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌",
+    "强制缴械",
+    "不死",
+    "晕眩·反制",
+    "沉默·反制",
+    "冻结·反制",
+    "阻回",
+    "静默"
+   ],
+   "why": "战术点形态 / 远程特性流形 (states the sim does not model) hold them"
+  },
+  "token_10031_swire2_gdtrap": {
+   "page": "香槟炸弹",
+   "owner": "琳琅诗怀雅",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10039_ulpia_block": {
+   "page": "从不混淆的方向",
+   "owner": "乌尔比安",
+   "quote": "※持有{{异常效果|无敌}}、{{异常效果|孤立}}、{{异常效果|晕眩|免疫}}、{{异常效果|冻结|免疫}}、{{异常效果|寒冷|免疫}}、{{异常效果|沉睡|免疫}}。",
+   "holds": [
+    "孤立"
+   ],
+   "unexpressed": [
+    "无敌",
+    "晕眩·免疫",
+    "冻结·免疫",
+    "寒冷·免疫",
+    "沉睡·免疫"
+   ]
+  },
+  "token_10040_siege2_vlion": {
+   "page": "黄金盟誓",
+   "owner": "维娜·维多利亚",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10041_cathy_catsld": {
+   "page": "爬行号·防护单元",
+   "owner": "凯瑟琳",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10056_angel2_target": {
+   "page": "投递坐标",
+   "owner": "新约能天使",
+   "quote": "※持有{{异常效果|无敌}}、{{异常效果|不可阻挡}}、{{异常效果|晕眩|免疫}}、{{异常效果|冻结|免疫}}、{{异常效果|浮空|免疫}}、{{异常效果|沉默|免疫}}、{{异常效果|战栗|免疫}}、{{异常效果|恐惧|免疫}}、{{异常效果|麻痹|免疫}}、{{异常效果|麻痹震颤|免疫}}。",
+   "holds": [],
+   "unexpressed": [
+    "无敌",
+    "不可阻挡",
+    "晕眩·免疫",
+    "冻结·免疫",
+    "浮空·免疫",
+    "沉默·免疫",
+    "战栗·免疫",
+    "恐惧·免疫",
+    "麻痹·免疫",
+    "麻痹震颤·免疫"
+   ]
+  },
+  "token_10057_svash2_eagle1": {
+   "page": "风雪之眼",
+   "owner": "凛御银灰",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10057_svash2_eagle2": {
+   "page": "风雪之眼",
+   "owner": "凛御银灰",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10057_svash2_eagle3": {
+   "page": "风雪之眼",
+   "owner": "凛御银灰",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10058_sbell2_icetgt": {
+   "page": "保护目标（冻结状态）",
+   "owner": "圣聆初雪",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|无法撤退}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无法撤退"
+   ]
+  },
+  "token_10002_kalts_mon3tr": {
+   "page": "Mon3tr(凯尔希的召唤物)",
+   "owner": "凯尔希",
+   "quote": "※持有{{异常效果|禁疗}}（可被[[凯尔希]]与[[凯尔希·思衡托]]无视）",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [],
+   "why": "PRTS: 禁疗 (可被凯尔希与凯尔希·思衡托无视) — the owner exception is not modelled (no 凯尔希 kit heals it today)"
+  },
+  "token_10003_cgbird_bird": {
+   "page": "幻影",
+   "owner": "夜莺",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10005_mgllan_drone1": {
+   "page": "龙腾.F",
+   "owner": "麦哲伦",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [],
+   "why": "PRTS 备注 comment: 缴械 is commented out (龙腾.F's normal attack deals no damage for another reason)"
+  },
+  "token_10005_mgllan_drone2": {
+   "page": "龙腾.L",
+   "owner": "麦哲伦",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10005_mgllan_drone3": {
+   "page": "龙腾.A",
+   "owner": "麦哲伦",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10007_phatom_twin": {
+   "page": "镜中虚影",
+   "owner": "傀影",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10009_weedy_cannon": {
+   "page": "工程蓄水炮",
+   "owner": "温蒂",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10020_ling_soul1": {
+   "page": "“清平”",
+   "owner": "令",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10020_ling_soul2": {
+   "page": "“逍遥”",
+   "owner": "令",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10020_ling_soul3": {
+   "page": "“弦惊”",
+   "owner": "令",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10025_doroth_recttp": {
+   "page": "共振装置",
+   "owner": "多萝西",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10026_bgsnow_subbow": {
+   "page": "“打字机”",
+   "owner": "鸿雪",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10027_ironmn_pile1": {
+   "page": "白铁™多功能平台(极致火力)",
+   "owner": "白铁",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10027_ironmn_pile2": {
+   "page": "白铁™多功能平台(高效补给)",
+   "owner": "白铁",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10027_ironmn_pile3": {
+   "page": "铁钳号·原型机",
+   "owner": "白铁",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|孤立}}、{{异常效果|不可阻挡}}、{{异常效果|失衡免疫}}、{{异常效果|元素免疫}}、{{异常效果|晕眩|免疫}}、{{异常效果|寒冷|免疫}}、{{异常效果|冻结|免疫}}、{{异常效果|浮空|免疫}}、{{异常效果|束缚|免疫}}、{{异常效果|沉默|免疫}}、{{异常效果|沉睡|免疫}}",
+   "holds": [
+    "禁疗",
+    "孤立"
+   ],
+   "unexpressed": [
+    "不可阻挡",
+    "失衡免疫",
+    "元素免疫",
+    "晕眩·免疫",
+    "寒冷·免疫",
+    "冻结·免疫",
+    "浮空·免疫",
+    "束缚·免疫",
+    "沉默·免疫",
+    "沉睡·免疫"
+   ],
+   "why": "PRTS: 该召唤物阵营为敌方 — the base game treats it as an ENEMY-faction device; the remake spawns it as an ally, so 孤立 is applied as \"no friendly selector picks it\""
+  },
+  "token_10029_slent2_protrb": {
+   "page": "夜灯",
+   "owner": "淬羽赫默",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10032_jesca2_jckshd": {
+   "page": "机动盾牌",
+   "owner": "涤火杰西卡",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10033_ela_grzmot": {
+   "page": "雷鸣地雷",
+   "owner": "艾拉",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10034_ray_sndbst": {
+   "page": "沙地兽",
+   "owner": "莱伊",
+   "quote": "※持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10035_wisdel_wward": {
+   "page": "魂灵之影",
+   "owner": "维什戴尔",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [],
+   "mentions": {
+    "迷彩": "the note gives 迷彩 to itself and nearby allies — a buff it applies, not an abnormal effect it holds",
+    "孤立": "named only as what can disturb that 迷彩 buff"
+   }
+  },
+  "token_10043_necras_skeltn": {
+   "page": "悲叹的仆役",
+   "owner": "死芒",
+   "quote": "※持有{{异常效果|禁疗}}\n※自身不是特殊形态召唤物时，持有{{异常效果|阻回}}、{{异常效果|沉默}}，且自身的“[[数值范围|技力自然回复速度]]”属性强制归0",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "阻回",
+    "沉默"
+   ],
+   "why": "conditional: 自身不是特殊形态召唤物时 (a form the sim does not model)"
+  },
+  "token_10050_monstr_prosts": {
+   "page": "重构体",
+   "owner": "Mon3tr",
+   "quote": "※持有{{异常效果|禁疗}}（可以被[[Mon3tr]]无视）、{{异常效果|不可阻挡}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "不可阻挡"
+   ],
+   "mentions": {
+    "无敌": "路标形态 only (not modelled)",
+    "孤立": "路标形态 only (not modelled)"
+   },
+   "why": "PRTS: 通常形态 (the manually deployed form the sim models) holds 禁疗 + 不可阻挡 (可以被 Mon3tr 无视); 路标形态 (auto-deployed by 策略：熔毁, not modelled) holds 无敌 + 孤立"
+  },
+  "token_10051_radian_tower1": {
+   "page": "戴乌",
+   "owner": "电弧",
+   "quote": "※持有{{异常效果|禁疗}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10052_radian_tower2": {
+   "page": "赛柯",
+   "owner": "电弧",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [],
+   "mentions": {
+    "迷彩": "the note says its forward-flying bullets ignore 迷彩 — not an effect it holds"
+   }
+  },
+  "token_10053_radian_tower3": {
+   "page": "桑特拉",
+   "owner": "电弧",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10054_phatm2_encdool": {
+   "page": "本能的召唤",
+   "owner": "酒神",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10055_phatm2_mndclv": {
+   "page": "迷狂牢笼",
+   "owner": "酒神",
+   "quote": "※持有{{异常效果|孤立}}、{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗",
+    "孤立"
+   ],
+   "unexpressed": []
+  },
+  "token_10059_nasti_nstdef": {
+   "page": "“质检专员”",
+   "owner": "娜斯提",
+   "quote": "※常态持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10060_nasti_nstchr": {
+   "page": "“监工专员”",
+   "owner": "娜斯提",
+   "quote": "※常态持有{{异常效果|禁疗}}、{{异常效果|无敌}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌",
+    "阻回",
+    "静默"
+   ],
+   "why": "the 阻回 / 静默 are conditional (生命值满 / 持有者技能开启期间)"
+  },
+  "token_10061_nasti_nstbld": {
+   "page": "“应急承重小组”",
+   "owner": "娜斯提",
+   "quote": "※常态持有{{异常效果|禁疗}}、{{异常效果|静默}}",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "静默"
+   ]
+  },
+  "token_10064_wang_stone1": {
+   "page": "棋子",
+   "owner": "望",
+   "quote": "",
+   "holds": [],
+   "unexpressed": []
+  },
+  "token_10065_demetr_dmtpos": {
+   "page": "牵绊",
+   "owner": "贝洛内",
+   "quote": "※持有{{异常效果|无敌}}、{{异常效果|孤立}}、{{异常效果|晕眩|免疫}}、{{异常效果|冻结|免疫}}、{{异常效果|寒冷|免疫}}、{{异常效果|沉睡|免疫}}。",
+   "holds": [
+    "孤立"
+   ],
+   "unexpressed": [
+    "无敌",
+    "晕眩·免疫",
+    "冻结·免疫",
+    "寒冷·免疫",
+    "沉睡·免疫"
+   ]
+  },
+  "token_10066_closur_ourbase": {
+   "page": "指挥中心",
+   "owner": "可露希尔",
+   "quote": "※持有{{异常效果|禁疗}}。\n※在召唤物形态下进行撤退或被击倒时将变为战术点形态，战术点形态的持续时间由天赋决定，期间：不进行普通攻击，持有{{异常效果|无敌}}、{{异常效果|强制缴械}}、{{异常效果|不死}}、{{异常效果|晕眩|反制}}、{{异常效果|沉默|反制}}、{{异常效果|冻结|反制}}，阻挡数最终降低至0（最终乘算）。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": [
+    "无敌",
+    "强制缴械",
+    "不死",
+    "晕眩·反制",
+    "沉默·反制",
+    "冻结·反制"
+   ],
+   "why": "战术点形态 (a form the sim does not model) holds them"
+  },
+  "token_10068_kalts2_mtship": {
+   "page": "战术锚点",
+   "owner": "凯尔希·思衡托",
+   "quote": "※常态持有{{异常效果|无敌}}；实际攻击范围与持有者一致以作为持有者移动后的参照'''（包括移动后的朝向）'''",
+   "holds": [],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10069_mcnist_mcgraf": {
+   "page": "结构性原理",
+   "owner": "机械师",
+   "quote": "※持有{{异常效果|禁疗}}。",
+   "holds": [
+    "禁疗"
+   ],
+   "unexpressed": []
+  },
+  "token_10070_aphris_pc": {
+   "page": "中继器",
+   "owner": "谬因",
+   "quote": "※持有{{异常效果|无敌}}、{{异常效果|禁疗}}、{{异常效果|孤立}}，阻挡数最终降低至0（最终乘算）",
+   "holds": [
+    "禁疗",
+    "孤立"
+   ],
+   "unexpressed": [
+    "无敌"
+   ]
+  },
+  "token_10071_aglna2_agairp": {
+   "page": "“一会儿见！”",
+   "owner": "予愿安洁莉娜",
+   "quote": "※持有{{异常效果|无敌}}、{{异常效果|孤立}}、{{异常效果|不可阻挡}}、{{异常效果|晕眩|免疫}}、{{异常效果|冻结|免疫}}、{{异常效果|寒冷|免疫}}、{{异常效果|沉睡|免疫}}，阻挡数最终降低至0（最终乘算）。",
+   "holds": [
+    "孤立"
+   ],
+   "unexpressed": [
+    "无敌",
+    "不可阻挡",
+    "晕眩·免疫",
+    "冻结·免疫",
+    "寒冷·免疫",
+    "沉睡·免疫"
+   ]
+  },
+  "enemy_9012_acloon": {
+   "page": "“炎佑”",
+   "owner": null,
+   "quote": "{{特殊机制|我方单位}}，{{异常效果|孤立}}，可同时攻击3个目标",
+   "holds": [
+    "孤立"
+   ],
+   "unexpressed": []
+  }
+ }
+}
