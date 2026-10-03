@@ -880,23 +880,7 @@ function buildChess(ctx) {
       }
     }
     /** token id → { sources: Set('display'|'skill'|'talent'), count } for a selected skill record. */
-    const tokenUse = (skillRec) => {
-      const skTok = skillRec?.overrideTokenKey || null;
-      const use = new Map();
-      const add = (id, src) => { if (!use.has(id)) use.set(id, new Set()); use.get(id).add(src); };
-      for (const id of Object.keys(char.displayTokenDict || {})) add(id, 'display');
-      if (skTok) add(skTok, 'skill');
-      for (const t of rec.talents) {
-        const key = t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey;
-        if (key) add(key, 'talent');
-      }
-      const count = (id) => {
-        const tal = rec.talents.find((t) => (t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey) === id && typeof t.bb.cnt === 'number');
-        const skillCnt = skTok === id ? skillRec?.bb?.cnt : undefined;
-        return tal ? tal.bb.cnt : typeof skillCnt === 'number' ? skillCnt : null;
-      };
-      return { use, count };
-    };
+    const tokenUse = (skillRec) => tokenUseOf(char, charTable, rec.talents, skillRec);
     const defUse = tokenUse(rec.skill);
     const sources = defUse.use;
     const resolvable = [...sources.keys()].filter((id) => {
@@ -1100,6 +1084,8 @@ function freePickModuleBlock(ctx, char, charId, tier, phase, level, base) {
   const tr = traitOf(parts.op);
   return {
     equipLevel,
+    modulePhase,
+    tokenParts: parts.token,
     module: {
       id: modId, name: meta?.uniEquipName || null,
       type: meta ? `${meta.typeName1 || ''}${meta.typeName2 ? '-' + meta.typeName2 : ''}` : null,
@@ -1116,6 +1102,53 @@ function freePickModuleBlock(ctx, char, charId, tier, phase, level, base) {
 }
 
 /**
+ * Tokens / summons of one 自选候选 (DESIGN §21). This batch shipped with `tokens: []` ("their summons belong to that
+ * step"), so an operator like 望 (陷阱师, `token_10064_wang_stone1` 棋子) could never hand its summon to the player — user
+ * report 2026-10-03. Resolved exactly like a season chess (`buildChess`: displayTokenDict + the selected skill's
+ * `overrideTokenKey` + the talents' `tokenKey` + the module's isToken parts) and pushed onto the shared `tokenOwners`
+ * map, so `buildTokens` emits the record and its per-owner variant. The token's own battle behaviour stays whatever
+ * `content/tokens.js` authors for that token id (a token without an entry uses the generic kit — a stated gap).
+ * @returns {string[]} the record's `tokens[]`
+ */
+function freePickTokens(ctx, char, charId, phase, level, skillLevel, mod, skillRecs, defaultIdx, talents, talentsBase, tokenOwners) {
+  const { charTable } = ctx;
+  const label = `freePick ${charId}`;
+  const skills = [...skillRecs].sort((a, b) => a.index - b.index);
+  const defSkill = skills.find((s) => s.index === defaultIdx) || null;
+  // a talent tokenKey missing from character_table is a container id (凛御银灰's case): the skill's token replaces it
+  const skillToken = defSkill?.overrideTokenKey || null;
+  for (const t of [...talents, ...talentsBase]) {
+    if (t.tokenKey && !charTable[t.tokenKey] && skillToken && charTable[skillToken]) {
+      t.containerTokenKey = t.tokenKey;
+      t.tokenKey = skillToken;
+    }
+  }
+  const defUse = tokenUseOf(char, charTable, talents, defSkill);
+  const resolvable = [...defUse.use.keys()].filter((id) => {
+    if (charTable[id]) return true;
+    if (!talents.some((t) => t.containerTokenKey === id)) warn(`${label}: token ${id} not in character_table (skipped)`);
+    return false;
+  }).sort(naturalCmp);
+  const altSkills = skills.filter((s) => s.index !== defaultIdx);
+  for (const tokenId of resolvable) {
+    const src = defUse.use.get(tokenId);
+    const skillAlts = altSkills.map((s) => {
+      const u = tokenUseOf(char, charTable, talents, s);
+      return { index: s.index, count: u.count(tokenId), sources: ['talent', 'skill', 'display'].filter((x) => u.use.get(tokenId)?.has(x)) };
+    });
+    if (!tokenOwners.has(tokenId)) tokenOwners.set(tokenId, []);
+    tokenOwners.get(tokenId).push({
+      chessId: `chess_free_${charId}`, charId, phase, level, skillIndex: defaultIdx, skillLevel,
+      count: defUse.count(tokenId), golden: false,
+      modulePhase: mod?.modulePhase ?? null, moduleTokenParts: mod?.tokenParts ?? [],
+      sources: ['talent', 'skill', 'display'].filter((x) => src.has(x)),
+      skillAlts, moduleAlts: [],
+    });
+  }
+  return resolvable;
+}
+
+/**
  * Build data/freePicks.json: one record per 自选候选 charId (freePickCharIds: every 6★ the season pool does not offer,
  * plus the 4★ 预备干员), shaped like a chess record (the client, the sim and the pool logic can then treat it as one) but
  * explicitly marked as a 自选候选 rather than a season chess.
@@ -1128,7 +1161,7 @@ function freePickModuleBlock(ctx, char, charId, tier, phase, level, base) {
  * stays empty until these operators' skills get kits (their summons belong to that step).
  * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
  */
-function buildFreePicks(ctx, seasonChess) {
+function buildFreePicks(ctx, seasonChess, tokenOwners) {
   const { charTable, uniequip } = ctx;
   const out = {};
   const bondStats = {};
@@ -1180,6 +1213,10 @@ function buildFreePicks(ctx, seasonChess) {
     const talentList = baseTalentList(ctx, char, phase, level, `freePick ${charId}`);
     // 模组 (user rule "模组相关规则和普通干员一致"): this record is its own elite — see freePickModuleBlock.
     const mod = freePickModuleBlock(ctx, char, charId, rarity, phase, level, { talentList, traitDefault, attrs, backupEquip, tierLevels });
+    // summons (freePickTokens): resolved like a season chess so a picked operator's summon can be granted and placed
+    const talents = mod ? mod.talents : mergeTalentChanges(talentList, []);
+    const talentsBase = mod ? mod.talentsBase : mergeTalentChanges(talentList, []);
+    const tokens = freePickTokens(ctx, char, charId, phase, level, skillLevel, mod, skillRecs, defaultIdx, talents, talentsBase, tokenOwners);
     const rec = {
       chessId, baseId: chessId, goldenId: null, isGolden: false,
       tier: rarity, // provisional: see the 自由位置 shop-tier gate note above
@@ -1211,7 +1248,7 @@ function buildFreePicks(ctx, seasonChess) {
       skill: skillRecs.find((s) => s.index === defaultIdx) || null,
       skills: skillRecs.map((s) => ({ ...s, isDefault: s.index === defaultIdx })),
       talents: mod ? mod.talents : mergeTalentChanges(talentList, []),
-      tokens: [], module: mod ? mod.module : null,
+      tokens, module: mod ? mod.module : null,
       assets: {
         avatar: charId, portrait: `${charId}_1`, spine: charId,
         skillIcon: (skillRecs.find((s) => s.index === defaultIdx) || {}).iconId || null,
@@ -1333,6 +1370,30 @@ const TOKEN_ABNORMAL = Object.freeze({
  * Build data/tokens.json: summons of chess (per-owner variants), bond summons (炎佑) and band map
  * characters (band_amedic 预备干员-医疗 / Touch). `abnormal` = TOKEN_ABNORMAL (PRTS).
  */
+/**
+ * Cache of token usage per owner: `token id → { sources: Set('display'|'skill'|'talent'), count(id) }` for one selected
+ * skill record. Shared by buildChess (season chess) and buildFreePicks (自选干员, DESIGN §21) so a summon resolves
+ * identically for both: `displayTokenDict` of the character, the selected skill's `overrideTokenKey`, the talents'
+ * `tokenKey` (a container id already remapped onto the skill token by the caller counts as that token).
+ */
+function tokenUseOf(char, charTable, talents, skillRec) {
+  const skTok = skillRec?.overrideTokenKey || null;
+  const use = new Map();
+  const add = (id, src) => { if (!use.has(id)) use.set(id, new Set()); use.get(id).add(src); };
+  for (const id of Object.keys(char.displayTokenDict || {})) add(id, 'display');
+  if (skTok) add(skTok, 'skill');
+  for (const t of talents) {
+    const key = t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey;
+    if (key) add(key, 'talent');
+  }
+  const count = (id) => {
+    const tal = talents.find((t) => (t.containerTokenKey ? (skTok && charTable[skTok] ? skTok : t.tokenKey) : t.tokenKey) === id && typeof t.bb.cnt === 'number');
+    const skillCnt = skTok === id ? skillRec?.bb?.cnt : undefined;
+    return tal ? tal.bb.cnt : typeof skillCnt === 'number' ? skillCnt : null;
+  };
+  return { use, count };
+}
+
 function buildTokens(ctx, chess, tokenOwners, enemies) {
   const { charTable, ac } = ctx;
   const out = {};
@@ -3129,7 +3190,7 @@ async function main() {
   const ctx = await loadContext();
   log('building…');
   const { chess, tokenOwners } = buildChess(ctx);
-  const freePicks = buildFreePicks(ctx, chess);
+  const freePicks = buildFreePicks(ctx, chess, tokenOwners);
   const effects = buildEffects(ctx);
   const bonds = buildBonds(ctx, chess, effects);
   const garrisons = buildGarrisons(ctx, chess);

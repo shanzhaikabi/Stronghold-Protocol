@@ -95,3 +95,29 @@ test('自选干员:名单由原始数据推导 — 候选绝不与本赛季池�
   // the roster is the whole 6★ pool the season does NOT offer: well past the 15 records it started with
   assert.ok(Object.keys(FREE).length >= 90, `roster size ${Object.keys(FREE).length}`);
 });
+
+test('自选干员: their summons resolve into tokens.json, and no season operator\'s summon changed', () => {
+  // user report 2026-10-03: "部署望这种有召唤物的干员，也无法选取召唤物部署" — the batch shipped with `tokens: []`; the
+  // builder now resolves them like a season chess (displayTokenDict + the skills' overrideTokenKey + the talents'
+  // tokenKey) and buildTokens emits the record. 26 of the 93 picks have summons (37 token ids).
+  const TOK = load('tokens.json');
+  const freeOwned = Object.values(TOK).filter((t) => (t.owners || []).some((o) => String(o).startsWith('chess_free_')));
+  assert.ok(freeOwned.length >= 20, `${freeOwned.length} 自选干员 summons built`);
+  const stone = TOK['token_10064_wang_stone1'];   // 望's 棋子
+  assert.ok(stone, '棋子 exists');
+  assert.equal(stone.name, '棋子');
+  assert.equal(stone.placeable, true, 'and is a manually deployable hand card');
+  assert.ok(stone.variants['chess_free_char_2027_wang'], 'with the owner variant');
+  assert.deepEqual(FREE['chess_free_char_2027_wang'].tokens, ['token_10064_wang_stone1']);
+  // ownership never mixes: a token belongs to the season or to the free-pick roster
+  for (const t of Object.values(TOK)) {
+    const owners = (t.owners || []).map(String);
+    const free = owners.some((o) => o.startsWith('chess_free_'));
+    const season = owners.some((o) => !o.startsWith('chess_free_'));
+    assert.ok(!(free && season), `${t.tokenId}: a season and a 自选干员 must not share a token`);
+  }
+  // every season chess still finds each of its summons, owned by itself (the 22 season tokens are untouched)
+  for (const [id, c] of Object.entries(CHESS)) {
+    for (const tid of c.tokens || []) assert.ok((TOK[tid]?.owners || []).includes(id), `${id}: ${tid} still owned by it`);
+  }
+});

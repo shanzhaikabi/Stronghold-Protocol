@@ -421,7 +421,10 @@ test('爬行号·防护单元: shield = 凯瑟琳 max HP × max_shield_ratio on 
 
 test('every token of data/tokens.json spawns with data defaults and runs without content errors', REAL, () => {
   const raw = ds.raw.tokens && Object.keys(ds.raw.tokens).length ? ds.raw.tokens : {};
-  const ids = Object.keys(raw).filter((id) => id !== TOKEN_IDS.yanyou);
+  // the season's tokens all have a hand-authored kit; the free-pick roster's summons (DESIGN §21) resolve with their
+  // own stats / skill blackboard but have no kit yet — the second half pins that gap instead of hiding it
+  const isFree = (id) => (raw[id].owners || []).some((o) => String(o).startsWith('chess_free_'));
+  const ids = Object.keys(raw).filter((id) => id !== TOKEN_IDS.yanyou && !isFree(id));
   assert.ok(ids.length >= 21);
   const h = makeBattle({ defs: { chess: { test_owner: summoner() }, enemies: { enemy_walker: walker({ atk: 50 }) } }, units: [{ chessId: 'test_owner', row: 12, col: 2 }], enemies: [{ key: 'enemy_walker', route: 0, count: 5, interval: 2 }], autoFinish: false, timeLimit: 60 });
   h.step();
@@ -434,6 +437,24 @@ test('every token of data/tokens.json spawns with data defaults and runs without
     assert.ok(t, `${id} spawned`);
     assert.ok(t.kit && t.kit.fromTokens, `${id} uses its token kit`);
   }
+  // the free-pick summons spawn with their data too (no kit: the generic one, a stated gap), and run cleanly
+  const freeIds = Object.keys(raw).filter((id) => id !== TOKEN_IDS.yanyou && isFree(id));
+  assert.ok(freeIds.length >= 20, `${freeIds.length} 自选干员 summons in tokens.json`);
+  const h2 = makeBattle({ defs: { chess: { test_owner: summoner() } }, units: [{ chessId: 'test_owner', row: 12, col: 2 }], autoFinish: false, timeLimit: 60 });
+  h2.step();
+  const o2 = h2.unit('test_owner');
+  const freeTiles = [];
+  for (let r = 9; r <= 12; r++) for (let c = 3; c <= 9; c++) freeTiles.push([r, c]);
+  for (const id of freeIds.slice(0, 12)) {
+    const [r, c] = freeTiles.shift();
+    // spawn with the record's own defaults (`def:`): a free pick's variant is keyed by ITS chess id, not by test_owner
+    const t = h2.b.spawnToken(o2, id, r, c, { def: raw[id] });
+    assert.ok(t, `${id} spawned`);
+    assert.equal(t.kit?.fromTokens, undefined, `${id}: no hand-authored token kit yet`);
+  }
+  h2.run(10);
+  assert.deepEqual(h2.b.errors.filter((e) => /tokens\.js|devices\.js/.test(String(e.stack))), [], 'a free-pick summon runs cleanly');
+  checkInvariants(h2.b);
   h.run(10);
   const errs = h.b.errors.filter((e) => /tokens\.js|devices\.js/.test(String(e.stack)));
   assert.deepEqual(errs, []);
