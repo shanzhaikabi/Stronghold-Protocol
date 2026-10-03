@@ -34,12 +34,17 @@ async function safeImport(path) {
 }
 
 const TIERS = await Promise.all([1, 2, 3, 4, 5, 6].map((t) => safeImport(`./kits/tier${t}.js`)));
+// 自选干员 of 自由位置 (DESIGN §21): the hand-authored kits of the 6★ 原型干员 batch (data/freePicks.json records are
+// keyed by their own chess id, so they never collide with a tier module's `chess_char_N_NN_a` keys)
+const FREE_PICKS = await safeImport('./kits/freePicks.js');
 const DOMAIN_NAMES = ['tokens', 'devices', 'enemies', 'bosses', 'bonds', 'garrisons', 'items', 'bands', 'choices'];
 const DOMAINS = await Promise.all(DOMAIN_NAMES.map((n) => safeImport(`./${n}.js`)));
 const tokens = DOMAINS[0];
 
 /** Merged kit registry: baseChessId → (bb, chess, def) => Kit */
-export const KITS = Object.freeze(Object.assign({}, ...TIERS.map((m) => (m && m.default && typeof m.default === 'object' ? m.default : {}))));
+export const KITS = Object.freeze(Object.assign({},
+  ...TIERS.map((m) => (m && m.default && typeof m.default === 'object' ? m.default : {})),
+  FREE_PICKS && FREE_PICKS.default && typeof FREE_PICKS.default === 'object' ? FREE_PICKS.default : {}));
 
 /** Domain modules in install order: tokens, devices, enemies, bosses, bonds, garrisons, items, bands, choices. */
 export const MODULES = Object.freeze(DOMAIN_NAMES.map((n, i) => [n, DOMAINS[i]]));

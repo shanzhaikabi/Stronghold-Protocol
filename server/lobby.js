@@ -59,10 +59,12 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout } from '../shared/protocol.js';
+import { checkLoadout, checkFreePicks } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
-import { getData as defaultGetData, lookup } from './data.js';
+import { getData as defaultGetData, getChess, getBond, getItem, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
+// TEMPORARY debug room (2026-10-03): env-gated, remove with server/debugRoom.js (see its header).
+import { debugRoomSpec, debugBondChess } from './debugRoom.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -96,6 +98,13 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 function freezeLoadout(loadout) {
   const out = {};
   for (const [id, e] of Object.entries(loadout || {})) out[id] = Object.freeze({ skill: e.skill, module: e.module ?? null });
+  return Object.freeze(out);
+}
+
+/** Deep-frozen copy of checked 自由位置 picks (DESIGN §21), shared by the session, the seat and the match. */
+function freezeFreePicks(picks) {
+  const out = {};
+  for (const [level, list] of Object.entries(picks || {})) out[level] = Object.freeze([...list]);
   return Object.freeze(out);
 }
 
@@ -335,6 +344,67 @@ export class Lobby {
     return OK;
   }
 
+  /**
+   * TEMPORARY debug room (2026-10-03, user verification of the 自选干员 battle fix; see server/debugRoom.js): create
+   * (or reuse) a room with a FIXED code whose matches hand every human the debug chess at round 1 and start their
+   * first prep with the requested 调度中心 level / bond layers. Coop mode so the player can join it by code from the
+   * lobby. `spec.bondMembers` is resolved here into real chess ids (data/chess.json `bonds`) and appended to
+   * `debugGrants`, so those pieces take the one existing round-1 grant path; `spec.items` (the 转职球 knob) is
+   * validated against data/items.json and becomes `debugItems` (the second round-1 grant path). Nothing here runs
+   * unless `SP_DEBUG_ROOM` is set.
+   * @returns {{ ok: true, code: string, mode: string, difficulty: string, grants: string[], reused: boolean,
+   *             shopLevel: number|null, bondLayers: Record<string, number>, items?: string[] } | { error: string }}
+   */
+  createDebugRoom(spec = debugRoomSpec()) {
+    if (!spec) return fail(ERR.ROOM_NOT_FOUND, 'debug room disabled (set SP_DEBUG_ROOM)');
+    const code = String(spec.code || '').trim().toUpperCase();
+    if (code.length !== ROOM_CODE_LEN) return fail(ERR.BAD_MSG, `debug room code must be ${ROOM_CODE_LEN} letters`);
+    const data = this.safeData();
+    const bondLayers = {};
+    for (const [bondId, n] of Object.entries(spec.bondLayers || {})) {
+      if (!getBond(bondId, data)) return fail(ERR.BAD_TARGET, `unknown bond ${bondId}`);
+      bondLayers[bondId] = n;
+    }
+    const grants = Array.isArray(spec.grants) ? spec.grants.filter(Boolean) : [];
+    // SP_DEBUG_BOND_MEMBERS: the season chess that make a bond active (a bond needs distinct members — hand counts
+    // for 奇迹 / 远见 / 投资人, bondsMeta countMode BOARD_AND_DECK)
+    for (const [bondId, n] of Object.entries(spec.bondMembers || {})) {
+      if (!getBond(bondId, data)) return fail(ERR.BAD_TARGET, `unknown bond ${bondId}`);
+      const ids = debugBondChess(data, bondId, n);
+      if (ids.length < n) return fail(ERR.BAD_TARGET, `only ${ids.length} chess carry ${bondId}, need ${n}`);
+      for (const id of ids) if (!grants.includes(id)) grants.push(id);
+    }
+    for (const id of grants) {
+      if (!getChess(id, data)) return fail(ERR.BAD_TARGET, `unknown chess ${id}`);
+    }
+    // SP_DEBUG_ITEMS: the item grant (转职球 变形同构体 + the giveBondId item it needs to pair with) — item record ids
+    // of data/items.json, granted through PlayerState.acquireItem at round 1
+    const items = Array.isArray(spec.items) ? spec.items.filter(Boolean) : [];
+    for (const id of items) {
+      if (!getItem(id, data)) return fail(ERR.BAD_TARGET, `unknown item ${id}`);
+    }
+    const setup = { shopLevel: spec.shopLevel ?? null, bondLayers, noBans: !!spec.noBans };
+    const existing = this.rooms.get(code);
+    if (existing) {
+      existing.debugGrants = grants.slice();
+      existing.debugItems = items.slice();
+      existing.debugSetup = setup;
+      this.log.warn(`[debug] room ${code} reused; round 1 grants: ${grants.join(', ')}; items: ${items.join(', ') || '(none)'}; setup ${JSON.stringify(setup)}`);
+      return { ok: true, code, mode: existing.mode, difficulty: existing.difficulty, grants: grants.slice(), reused: true, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans, ...(items.length ? { items: items.slice() } : {}) };
+    }
+    if (this.rooms.size >= this.opts.maxRooms) return fail(ERR.INTERNAL, 'too many rooms');
+    const mode = 'coop';
+    const difficulty = spec.difficulty || 'NORMAL';
+    const room = new Room(code, mode, difficulty, this.now());
+    room.debugGrants = grants.slice();
+    room.debugItems = items.slice();
+    room.debugSetup = setup;
+    this.rooms.set(code, room);
+    this.log.warn(`[debug] room ${code} created (${mode}/${difficulty}); round 1 grants: ${grants.join(', ')}; items: ${items.join(', ') || '(none)'}; setup ${JSON.stringify(setup)}`);
+    this.broadcastState(room);
+    return { ok: true, code, mode, difficulty, grants: grants.slice(), reused: false, shopLevel: setup.shopLevel, bondLayers, noBans: setup.noBans, ...(items.length ? { items: items.slice() } : {}) };
+  }
+
   join(session, { code }) {
     const norm = String(code).trim().toUpperCase();
     const room = norm.length === ROOM_CODE_LEN ? this.rooms.get(norm) : undefined;
@@ -443,19 +513,32 @@ export class Lobby {
   }
 
   /**
-   * room.loadout (DESIGN §16): check the operator loadout against the game data, store it on the session and the seat,
-   * and — while a match runs — hand it to the match (accepted only during INFO_CHECK, see the header).
+   * room.loadout (DESIGN §16) + the 自由位置 picks it carries (DESIGN §21): check both against the game data, store
+   * them on the session and the seat, and — while a match runs — hand them to the match (accepted only during
+   * INFO_CHECK, see the header). `picks` absent means "leave the stored picks alone" (older clients).
    */
-  loadout(session, { entries }) {
+  loadout(session, { entries, picks }) {
     const data = this.safeData();
-    const res = checkLoadout(entries, (id) => lookup('chess', id, data));
+    // getChess (not lookup('chess')): a 自选干员 lives in data/freePicks.json, and both halves of the message must be able
+    // to resolve one — otherwise a valid pick makes the whole room.loadout frame fail and the loadout silently reverts.
+    const res = checkLoadout(entries, (id) => getChess(id, data));
     if (!res || res.error) return fail(res && isErrCode(res.error) ? res.error : ERR.BAD_MSG, res && res.detail);
     const loadout = freezeLoadout(res.loadout);
+    let freePicks = null;
+    if (picks !== undefined) {
+      const fp = checkFreePicks(picks, (id) => getChess(id, data));
+      if (!fp || fp.error) return fail(fp && isErrCode(fp.error) ? fp.error : ERR.BAD_MSG, fp && fp.detail);
+      freePicks = freezeFreePicks(fp.picks);
+    }
     session.loadout = loadout;
+    if (freePicks) session.picks = freePicks;
     const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
-    if (seat) seat.loadout = loadout;
+    if (seat) {
+      seat.loadout = loadout;
+      if (freePicks) seat.picks = freePicks;
+    }
     if (!room.match) return OK;
     if (typeof room.match.setLoadout !== 'function') return fail(ERR.ROOM_STARTED, 'stored for the next match');
     let r;
@@ -467,6 +550,18 @@ export class Lobby {
     }
     if (r && typeof r === 'object' && r.error) {
       return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
+    }
+    if (freePicks && typeof room.match.setFreePicks === 'function') {
+      let fr;
+      try {
+        fr = room.match.setFreePicks(session.playerId, freePicks);
+      } catch (e) {
+        this.log.error(`[lobby] ${room.code} match.setFreePicks threw`, e);
+        return fail(ERR.INTERNAL);
+      }
+      if (fr && typeof fr === 'object' && fr.error) {
+        return fail(isErrCode(fr.error) ? fr.error : ERR.INTERNAL, typeof fr.detail === 'string' ? fr.detail : undefined);
+      }
     }
     return OK;
   }
@@ -483,6 +578,8 @@ export class Lobby {
       seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, connected: s.connected,
       // DESIGN §16: the human's checked operator loadout (bots fight with the defaults)
       loadout: s.isBot ? null : s.loadout || null,
+      // DESIGN §21: the human's checked 自由位置 picks (bots never pick either)
+      picks: s.isBot ? null : s.picks || null,
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
     const ctx = { live: true, ended: false, disposed: false, match: null, lastPublic: null, sharedResult: null, results: new Map() };
@@ -498,6 +595,12 @@ export class Lobby {
         seed,
         // the room's match number: with the seed it keeps battleIds unique across the room's matches (DESIGN §14)
         matchNo: room.matchCount + 1,
+        // TEMPORARY debug room (server/debugRoom.js): round-1 hand-out for the room created by /debug/room …
+        debugGrants: Array.isArray(room.debugGrants) && room.debugGrants.length ? room.debugGrants.slice() : null,
+        // … plus its round-1 item hand-out (SP_DEBUG_ITEMS, the 转职球 knob) …
+        debugItems: Array.isArray(room.debugItems) && room.debugItems.length ? room.debugItems.slice() : null,
+        // … plus the 调度中心 level / bond layers its match starts with (applied before the players' startRound)
+        debugSetup: room.debugSetup && typeof room.debugSetup === 'object' ? room.debugSetup : null,
         data: this.safeData(),
         log: this.log,
         now: this.now,
@@ -735,6 +838,8 @@ export class Lobby {
     return {
       seat: idx, playerId: session.playerId, name: session.name, isBot: false, ready: false, connected: session.connected, left: false,
       loadout: session.loadout || null,
+      // DESIGN §21: the 自由位置 picks already stored on the session follow the player into the room, like the loadout
+      picks: session.picks || null,
     };
   }
 

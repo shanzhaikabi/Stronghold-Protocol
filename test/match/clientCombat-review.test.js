@@ -382,26 +382,103 @@ test('fitResult: an oversized b.result is trimmed under the frame budget without
 
 // ---- browser loader (runs last: it injects the data into this process' sim like a page does) ------------------------
 
+/**
+ * The data files that hold chess-shaped records — read off the data itself, never copied from a list: a file whose
+ * records are keyed by their own `chessId` is a chess table (data/chess.json, data/freePicks.json; enemies / tokens /
+ * items are keyed by their own id field instead). A new chess table is therefore covered the day it appears. The 90 %
+ * threshold tolerates an odd record without losing the file.
+ */
+function chessTablesOf(data) {
+  const out = [];
+  for (const [file, map] of Object.entries(data)) {
+    if (!map || typeof map !== 'object' || Array.isArray(map)) continue;
+    const ids = Object.keys(map);
+    const chessShaped = ids.filter((id) => map[id] && typeof map[id] === 'object' && map[id].chessId === id).length;
+    if (chessShaped >= 5 && chessShaped >= ids.length * 0.9) out.push([file, ids]);
+  }
+  return out;
+}
+
+/**
+ * The data keys a production `DataSource` consumes, **observed instead of listed**: the constructor is handed a Proxy
+ * and every property it reads is recorded. A file added to (or dropped from) the constructor's merge changes this set —
+ * and with it what the browser loader below is required to fetch.
+ */
+function consumedDataKeys(DataSource) {
+  const seen = new Set();
+  const probe = new Proxy({}, {
+    get(_t, k) { if (typeof k === 'string') seen.add(k); return undefined; },
+    has(_t, k) { if (typeof k === 'string') seen.add(k); return false; },
+  });
+  new DataSource(probe, null);
+  for (const k of ['then', 'toJSON', 'constructor', 'prototype']) seen.delete(k);
+  return [...seen];
+}
+
 test('loadBrowserSim: a data file that cannot be fetched fails the loader (no battle on partial data); all files → a working sim', async () => {
   const { loadBrowserSim, SIM_DATA_FILES } = await import('../../public/js/battle/runner.js');
+  const { DataSource } = await import('../../server/sim/simdata.js');
+  const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (数据文件 data/freePicks.json, DESIGN §21)
+  const INSIDE = 'chess_char_1_01_a';         // 隐现, a season chess (数据文件 data/chess.json)
   const base = new URL('../../server/sim/', import.meta.url).href;
+  const nameOf = (url) => String(url).replace(/^.*\//, '').replace(/\.json$/, '');
   const served = (fail = new Set()) => async (url) => {
-    const name = String(url).replace(/^.*\//, '').replace(/\.json$/, '');
+    const name = nameOf(url);
     if (fail.has(name)) return { ok: false, status: 503, json: async () => null };
     return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(DATA[name])) };
   };
-  let calls = 0;
+
+  // ---- the contract, not a re-listed copy of today's names ------------------------------------------------------
+  // The old guard asserted `calls === SIM_DATA_FILES.length + 1`: the expectation came from the very list under test,
+  // so dropping a file from that list could never fail it, and its functional half used `units: []` — no chess-def
+  // lookup ever ran. The 自选干员 shipped broken exactly that way: `freePicks` was in neither the browser list nor the
+  // server's merge, `getChess(id)` was null, and the unit vanished when the battle started (user report 2026-10-03).
+  const tables = chessTablesOf(DATA).map(([file]) => file);
+  const consumed = consumedDataKeys(DataSource);
+  assert.ok(tables.length >= 2, `the data holds >= 2 chess tables (${tables.join(', ')})`);
+  assert.ok(consumed.length >= 2, `a DataSource consumes >= 2 keys (${consumed.join(', ')})`);
+  // (a) every chess table the data files hold is merged by a production DataSource
+  for (const file of tables) assert.ok(consumed.includes(file), `a DataSource merges ${file}.json (it holds chess records)`);
+  // (b) every key that DataSource reads is fetched by the browser loader — the loader requests what the sim needs
+  for (const key of consumed) assert.ok(SIM_DATA_FILES.includes(key), `the browser runner fetches ${key}.json (the sim's DataSource reads it)`);
+
+  // a failed data file aborts the whole load: a battle simulated on partial data would still produce a plausible result
+  const requested = [];
   const flaky = served(new Set(['bonds']));
-  await assert.rejects(loadBrowserSim({ base, fetchFn: (u, o) => { calls++; return flaky(u, o); } }), /simulation data unavailable: bonds/);
-  assert.equal(calls, SIM_DATA_FILES.length + 1, 'one retry for the failed file');
+  await assert.rejects(loadBrowserSim({ base, fetchFn: (u, o) => { requested.push(nameOf(u)); return flaky(u, o); } }), /simulation data unavailable: bonds/);
+  for (const key of [...consumed, ...tables]) assert.ok(requested.includes(key), `the loader requests ${key}.json before it builds anything`);
+  assert.equal(requested.filter((n) => n === 'bonds').length, 2, 'the failed file is retried exactly once (transient failures recover)');
+
   // a transient failure is retried once
   let first = true;
   const once = served();
   const sim = await loadBrowserSim({ base, fetchFn: (u, o) => { if (first && /enemies/.test(u)) { first = false; return Promise.reject(new Error('net')); } return once(u, o); } });
   assert.ok(sim.spec && sim.ds);
+
+  // (c) every id of every chess table resolves through the source the loader produced: a file the loader never fetched,
+  // or a key the DataSource drops from the merge, leaves its ids unresolved here (→ "unknown chess" and a dropped unit)
+  const unresolved = [];
+  for (const [file, ids] of chessTablesOf(DATA)) {
+    for (const id of ids) {
+      let def = null;
+      try { def = sim.ds.getChess(id); } catch { def = null; }
+      if (!def || def.id !== id) unresolved.push(`${file}.json:${id}`);
+    }
+  }
+  assert.deepEqual(unresolved, [], `${unresolved.length} chess record(s) do not resolve in the loaded sim`);
+
+  // and the functional half builds a battle from REAL units, so a broken chess-def lookup cannot pass again: a def-less
+  // chess is dropped by Battle._addAllyFromInput ("unknown chess") and never reaches the field
   const spec = buildBattleSpec({ battleId: 'l1', fieldId: 'n:p', kind: 'normal', seed: 5, round: 1, stageId: Object.keys(DATA.stages)[0], timeLimit: 30,
-    players: [{ playerId: 'p', units: [], bonds: {} }], spawns: [{ enemyKey: plainKey, count: 1, time: 1 }], flags: { layerGainsEnabled: true } });
+    players: [{ playerId: 'p', units: [
+      { uid: 1, chessId: WANG, row: 10, col: 5, dir: 'RIGHT', skillIndex: 0 },
+      { uid: 2, chessId: INSIDE, row: 10, col: 7, dir: 'RIGHT', skillIndex: 0 },
+    ], bonds: {} }], spawns: [{ enemyKey: plainKey, count: 1, time: 1 }], flags: { layerGainsEnabled: true } });
   const b = sim.spec.createBattleFromSpec(spec, sim.ds, { quiet: true, recordEvents: false });
+  const onField = b.allyUnits.filter((u) => u.kind === 'op').map((u) => u.uid).sort();
+  assert.deepEqual(onField, [1, 2], 'both input operators are on the field (a chess that resolves to no def is dropped, "unknown chess")');
+  assert.equal(b.allyUnits.find((u) => u.uid === 1).defId, WANG, 'the 自选干员 fights as itself');
+  assert.equal(b.errors.length, 0);
   b.runToEnd(100);
   assert.ok(b.finished);
 });

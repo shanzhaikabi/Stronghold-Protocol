@@ -82,6 +82,35 @@ describe('room.loadout (lobby, stub match)', () => {
     assert.deepEqual(cap.errors, []);
   });
 
+  test('自选干员 (DESIGN §21): picks ride along with room.loadout and reach the seat', async () => {
+    const a = await pool.player('A');
+    const FREE = DATA.freePicks;
+    const proto6 = Object.keys(FREE).find((id) => FREE[id].rarity === 6);
+    const proto4 = Object.keys(FREE).find((id) => FREE[id].rarity === 4);
+    const banner6 = Object.keys(FREE).find((id) => FREE[id].rarity === 6 && id !== proto6);
+    const normal6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'NORMAL' && c.rarity === 6 && c.visible).chessId;
+    const preset6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 6).chessId;
+    assert.ok(proto6 && proto4 && banner6 && normal6 && preset6, 'fixtures');
+
+    // the lobby resolves a 自选候选 through getChess (data/freePicks.json fallback) — for the picks AND for a loadout
+    // entry of a picked operator (a 自选候选 is invisible + hidden by design yet configurable by its owner)
+    await ok(a, { t: 'room.loadout', entries: { [proto6]: { skill: 0 } }, picks: { 5: [banner6, proto4], 6: [proto6] } });
+    // a bad pick refuses the whole frame — the loadout half is stored only when both halves are valid
+    await err(a, { t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: { 5: [preset6] } }, ERR.BAD_TARGET);
+    await err(a, { t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: { 5: [normal6] } }, ERR.BAD_TARGET);
+    await err(a, { t: 'room.loadout', entries: {}, picks: { 6: [proto4] } }, ERR.BAD_TARGET);
+    await err(a, { t: 'room.loadout', entries: {}, picks: { 5: [proto6, proto6] } }, ERR.BAD_TARGET);
+    await err(a, { t: 'room.loadout', entries: {}, picks: { 4: [proto6] } }, ERR.BAD_MSG);
+
+    const st = await createRoom(a, 'solo');
+    await ok(a, { t: 'room.start' });
+    await a.waitFor('m.public', (p) => p.phase === 'INFO_CHECK');
+    const m = RecordingStub.instances.at(-1);
+    assert.equal(m.opts.roomCode, st.code);
+    assert.deepEqual(m.opts.seats[0].picks, { 5: [banner6, proto4], 6: [proto6] }, 'the checked picks reach the seat');
+    assert.deepEqual(cap.errors, []);
+  });
+
   test('stored per session and seat: follows into rooms, latest wins until start, bots get none, resume keeps it', async () => {
     const host = await pool.player('Host');
     await ok(host, { t: 'room.loadout', entries: { [SWIRE]: { module: SWIRE_ALT } } });

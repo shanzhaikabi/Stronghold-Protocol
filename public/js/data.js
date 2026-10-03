@@ -30,6 +30,9 @@ export const DATA_FILES = Object.freeze({
   choices: 'choices.json',
   config: 'config.json',
   assets: 'assets.json',
+  // 自选干员 (DESIGN §21): chess-shaped records that are NOT season chess — they live in their own file so that
+  // `list('chess')` / `lookup` stay about the season (see the lookup fallback below).
+  freePicks: 'freePicks.json',
   // Optional art extracted from a local game client (DESIGN §13): { groups: { '<subdir>': { name: { path, w, h } } } }.
   local: 'local-assets.json',
 });
@@ -168,10 +171,14 @@ export function createDataStore(opts = {}) {
     get: (name) => entries.get(name)?.value ?? null,
     /** 'idle' | 'loading' | 'ready' | 'missing' */
     status: (name) => entries.get(name)?.status ?? 'idle',
-    /** Record by id from a loaded file (null when unknown / not loaded). */
+    /** Record by id from a loaded file (null when unknown / not loaded). 自选干员 resolve as chess too (DESIGN §21). */
     lookup(name, id) {
       if (id == null) return null;
-      return index(name)?.get(String(id)) ?? null;
+      const hit = index(name)?.get(String(id));
+      if (hit) return hit;
+      // data/freePicks.json is a separate file on purpose (it must never join list('chess') / the season pool), but its
+      // records ARE chess-shaped, so anything resolving a chess id has to find them here.
+      return name === 'chess' ? (index('freePicks')?.get(String(id)) ?? null) : null;
     },
     /** All records of a loaded file as an array (empty when not loaded). */
     list: (name) => [...(index(name)?.values() ?? [])],

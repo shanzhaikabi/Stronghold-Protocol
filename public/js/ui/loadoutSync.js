@@ -13,7 +13,7 @@
 
 import { createStore, loadPref, savePref } from '../store.js';
 import { data } from '../data.js';
-import { LOADOUT_PREF, parseStored, toStored, sanitizeEntries } from './loadoutModel.js';
+import { LOADOUT_PREF, parseStored, parseStoredPicks, toStored, sanitizeEntries, sanitizePicks } from './loadoutModel.js';
 import { toast } from './toasts.js';
 
 export const SYNC_DEBOUNCE_MS = 500;
@@ -23,9 +23,15 @@ function readStored() {
   try { return parseStored(loadPref(LOADOUT_PREF, null)); } catch { return {}; }
 }
 
+function readStoredPicks() {
+  try { return parseStoredPicks(loadPref(LOADOUT_PREF, null)?.picks); } catch { return {}; }
+}
+
 /** Loadout + screen state (separate from the app store: it must survive room / match resets). */
 export const loadoutStore = createStore({
   entries: readStored(),
+  // 自由位置 picks (DESIGN §21): `{ [调度中心 level]: chessId[] }`, sent with the loadout and kept per browser
+  picks: readStoredPicks(),
   open: false,
   from: null,          // 'lobby' | 'room' | 'briefing'
   sel: null,           // selected base chess id
@@ -36,8 +42,35 @@ export const loadoutStore = createStore({
 /** Replace the stored entries (persisted at once; the sync picks the change up). */
 export function setEntries(entries) {
   const next = entries && typeof entries === 'object' ? entries : {};
-  savePref(LOADOUT_PREF, toStored(next));
+  savePref(LOADOUT_PREF, toStored(next, loadoutStore.get().picks));
   loadoutStore.set({ entries: next });
+}
+
+/**
+ * Replace the 自由位置 picks (DESIGN §21), persisted and synced like the entries. Callers pass the result of
+ * `setPick` / `clearPick` (ui/loadoutModel.js), which already enforce selectability and the no-duplicate rule.
+ * @param {Record<string, string[]>} picks
+ */
+export function setPicks(picks) {
+  const next = parseStoredPicks(picks);
+  savePref(LOADOUT_PREF, toStored(loadoutStore.get().entries, next));
+  loadoutStore.set({ picks: next });
+}
+
+/**
+ * Apply a parsed entry map: an imported preset, or (later) the loadout an account returns after login. Sanitised
+ * against the loaded data first, then persisted and synced like any ordinary edit — so a preset from another build
+ * never sends the server an entry it would refuse.
+ * @param {Record<string, any>} entries `parseImport(...).entries` (or an account payload's `entries`)
+ * @param {(id: string) => any} lookup chess lookup
+ * @returns {{ applied: number, dropped: number }} entries kept / entries the loaded data could not accept
+ */
+export function applyLoadoutEntries(entries, lookup) {
+  const asked = Object.keys(entries || {}).length;
+  const clean = sanitizeEntries(entries, lookup);
+  setEntries(clean);
+  const applied = Object.keys(clean).length;
+  return { applied, dropped: Math.max(0, asked - applied) };
 }
 
 /** Open the 干員调配 screen. @param {'lobby'|'room'|'briefing'} from @param {string|null} [sel] */
@@ -46,6 +79,8 @@ export function openLoadout(from = 'lobby', sel = null) {
   data.load('bonds');
   data.load('assets');
   data.load('local');
+  // DESIGN §21: the 自由位置 picker needs the 自选候选 records too (they live outside chess.json)
+  data.load('freePicks');
   loadoutStore.set({ open: true, from, ...(sel ? { sel } : {}) });
 }
 export const closeLoadout = () => loadoutStore.set({ open: false });
@@ -58,7 +93,7 @@ export const closeLoadout = () => loadoutStore.set({ open: false });
  */
 export function installLoadoutSync({ net, getChessReady, lookupChess, timers, target = loadoutStore, notify } = {}) {
   const T = timers || { setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms), clearTimeout: (id) => globalThis.clearTimeout(id) };
-  const ready = getChessReady || (() => data.load('chess'));
+  const ready = getChessReady || (() => Promise.all([data.load('chess'), data.load('freePicks')]));
   const lookup = lookupChess || ((id) => data.lookup('chess', id));
   const tell = notify || ((text) => toast(text, 'warn'));
   let timer = null;
@@ -85,15 +120,17 @@ export function installLoadoutSync({ net, getChessReady, lookupChess, timers, ta
     if (net.status !== 'online') { setState('idle'); return; } // the next welcome resends
     try {
       const current = target.get().entries;
+      const currentPicks = target.get().picks;
       // an empty loadout needs no data (nothing to sanitise): a player who never opened 干员调配 does not download
       // chess.json in the lobby just for this
-      const empty = !current || Object.keys(current).length === 0;
+      const empty = (!current || Object.keys(current).length === 0) && (!currentPicks || Object.keys(currentPicks).length === 0);
       const loaded = empty ? true : await ready();
       if (disposed) return;
       // never sanitise against missing data: every entry would be dropped and the server's copy cleared
       if (loaded == null) { setState('error'); return; }
-      const entries = empty ? {} : sanitizeEntries(target.get().entries, lookup);
-      const json = JSON.stringify(entries);
+      const entries = empty ? {} : sanitizeEntries(current, lookup);
+      const picks = empty ? {} : sanitizePicks(currentPicks, lookup);
+      const json = JSON.stringify({ entries, picks });
       if (json === pendingJson) return; // the same content is already on its way
       if (json === lastSent && pendingJson == null) { edited = false; setState('synced'); return; }
       const my = ++seq;
@@ -102,7 +139,7 @@ export function installLoadoutSync({ net, getChessReady, lookupChess, timers, ta
       pendingJson = json;
       setState('sending');
       try {
-        await net.request('room.loadout', { entries });
+        await net.request('room.loadout', { entries, picks });
         if (my !== seq) return;
         pendingJson = null;
         lastSent = json;
@@ -127,7 +164,7 @@ export function installLoadoutSync({ net, getChessReady, lookupChess, timers, ta
 
   const offWelcome = net.on('welcome', () => { lastSent = null; pendingJson = null; seq++; schedule(50); });
   const offStore = target.subscribe((s, prev) => {
-    if (s.entries !== prev.entries) { edited = true; schedule(); }
+    if (s.entries !== prev.entries || s.picks !== prev.picks) { edited = true; schedule(); }
     // closing the overlay sends a pending edit at once (review fix): the player's next click — 准备就绪 in the solo
     // briefing, 开始模拟 in the room — must not overtake the debounced room.loadout (the match locks its loadout when
     // INFO_CHECK ends, so a late edit would silently only apply to the next match). Same socket ⇒ ordered.

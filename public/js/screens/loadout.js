@@ -13,22 +13,63 @@
 // Keyboard: Esc closes, ←/→ move through the (filtered) roster when focus is not in the search field.
 
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { html, Icon, MicroLabel, Button, TierChip, TextField, Countdown, Spinner, confirmDialog, hasDeadline } from '../ui/components.js';
+import { html, Icon, MicroLabel, Button, TierChip, TextField, Countdown, Spinner, confirmDialog, hasDeadline, Modal } from '../ui/components.js';
 import { Img, RichText, UnitThumb } from '../ui/gameComponents.js';
 import { chessAvatarUrl, chessPortraitUrl, subProfIconUrl, bondIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
 import { data, useData, localAsset } from '../data.js';
 import { useStore } from '../store.js';
 import { PHASE } from '../../../shared/constants.js';
+import { freePickLevelsOf } from '../../../shared/protocol.js';
 import {
-  MODULE_NONE, PROF_ORDER, PROF_NAME, rosterOf, filterRoster, recordsOf, chessOptions, effectiveChoice, setChoice, resetChoice,
-  changedCount, skillLabel, moduleBadge, attrRows, skillTags,
+  MODULE_NONE, PROF_ORDER, PROF_NAME, rosterOf, freePickRosterOf, filterRoster, recordsOf, chessOptions, effectiveChoice, setChoice, resetChoice,
+  changedCount, skillLabel, moduleBadge, attrRows, skillTags, serializeExport, parseImport,
+  freePickSlots, setPick, clearPick, pickedIds, pickedCount, FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../ui/loadoutModel.js';
-import { loadoutStore, openLoadout, closeLoadout, setEntries } from '../ui/loadoutSync.js';
+import { loadoutStore, openLoadout, closeLoadout, setEntries, setPicks, applyLoadoutEntries } from '../ui/loadoutSync.js';
+import { copyText } from '../ui/clipboard.js';
+import { toast } from '../ui/toasts.js';
 
 export { openLoadout, closeLoadout };
 
 const cx = (...p) => p.flat().filter(Boolean).join(' ');
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
+
+// ---- export / import (干员调配 presets) -----------------------------------------------------------------------------
+//
+// The payload is the versioned envelope of ui/loadoutModel.js (exportPayload / parseImport): a downloaded file, a
+// pasted string and — later — the blob an account endpoint stores are the SAME object, so 导出 / 导入 and login-time
+// "load my loadout" all funnel through applyLoadoutEntries (sanitise → persist → room.loadout).
+
+/** Save `text` as a download. Silent no-op when the browser refuses downloads — 复制 stays available. */
+function downloadText(filename, text) {
+  try {
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch { /* ignore */ }
+}
+
+/** Read a picked file as text (`File.text()`, with a FileReader fallback for older Safari). */
+function readFileText(file) {
+  if (typeof file?.text === 'function') return file.text();
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(String(fr.result ?? ''));
+    fr.onerror = () => reject(fr.error || new Error('read failed'));
+    fr.readAsText(file);
+  });
+}
+
+/** `stronghold-loadout-20261003-1245.json` */
+function exportFilename(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `stronghold-loadout-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}.json`;
+}
 
 /** Square profession glyph (manifest prof.large: black glyph on white, drawn as a white glyph by loadout.css). */
 function profGlyphUrl(m, prof) {
@@ -206,7 +247,7 @@ function Detail({ m, chess, golden, entries, onChange, onReset, locked }) {
           <h3>技能<${MicroLabel}>SKILL<//></h3>
           <div class="lo-seg" role="tablist" aria-label="技能等级">
             <button type="button" role="tab" aria-selected=${level === 'normal' ? 'true' : 'false'} class=${cx(level === 'normal' && 'is-on')} onClick=${() => setLevel('normal')}>普通 <span class="num">Lv.${lv(chess)}</span></button>
-            <button type="button" role="tab" aria-selected=${level === 'elite' ? 'true' : 'false'} class=${cx(level === 'elite' && 'is-on')} disabled=${!golden} onClick=${() => setLevel('elite')}>精锐 <span class="num">Lv.${lv(golden)}</span></button>
+            <button type="button" role="tab" aria-selected=${level === 'elite' ? 'true' : 'false'} class=${cx(level === 'elite' && 'is-on')} disabled=${!golden || golden.chessId === chess.chessId} onClick=${() => setLevel('elite')}>精锐 <span class="num">Lv.${lv(golden)}</span></button>
           </div>
         </header>
         <div class="lo-skills" role="radiogroup" aria-label="选择技能">
@@ -217,7 +258,7 @@ function Detail({ m, chess, golden, entries, onChange, onReset, locked }) {
       ${golden ? html`<section class="lo-sec lo-sec--mod">
         <header class="lo-sec__head">
           <h3>模组<${MicroLabel}>MODULE<//></h3>
-          <span class="lo-sec__note">仅精锐干员装备 · 模组等级 <b class="num">${golden.status?.equipLevel ?? 1}</b></span>
+          <span class="lo-sec__note">${golden.chessId === chess.chessId ? '自选干员自带模组' : '仅精锐干员装备'} · 模组等级 <b class="num">${golden.status?.equipLevel ?? 1}</b></span>
         </header>
         <div class="lo-mods" role="radiogroup" aria-label="选择模组">
           ${opt.moduleOptions.map((mo) => html`<button key=${mo.id} type="button" role="radio" aria-checked=${mo.id === choice.module ? 'true' : 'false'}
@@ -271,6 +312,135 @@ function Filters({ m, filters, onFilters, bonds }) {
   </div>`;
 }
 
+// ---- 自由位置 (DESIGN §21) -------------------------------------------------------------------------------------------
+//
+// 调度中心 5 级 and 6 级 each hold two 自由位置 slots: the player picks an operator BEFORE the match and it joins their OWN
+// shop pool — drawn at random like any other operator, never gifted away by 信标, and its pool is private (server:
+// PlayerState.freePickIds / freePickEntries). The candidates are the 自选候选 records of data/freePicks.json (operators
+// the season pool does NOT offer); the level a record may be picked at comes from shared/protocol.js `freePickLevelsOf`,
+// the very function the server checks with — so the picker can never offer something the server would refuse.
+
+/**
+ * The 自由位置 sub-page: a screen of its OWN, shaped like the main 干员调配 one — the candidate roster on the left (the same
+ * filters) and the selected candidate's skills on the right — plus the action that puts it into a slot. Reusing
+ * RosterCard / Detail means a 自选干员 is configured exactly like any other operator: its skill lands in the same `entries`
+ * map (which the server's checkLoadout accepts and the debounced sync sends), and `changes` shows in the main screen.
+ */
+function FreePickPage({ m, level, picks, entries, locked, sel, onBack, onSelect, onAdd, onRemove }) {
+  const ready = useData('freePicks');
+  const getChess = (id) => data.lookup('chess', id);
+  const getBond = (id) => data.lookup('bonds', id);
+  const [filters, setFilters] = useState({ tier: null, prof: null, bond: null, query: '', changedOnly: false });
+  const [narrowDetail, setNarrowDetail] = useState(false);
+  const taken = pickedIds(picks);
+  const here = picks[String(level)] || [];
+  // candidates of THIS level, minus the operators already picked at the other one (no operator twice [user])
+  const roster = useMemo(() => freePickRosterOf(data.list('freePicks'), level)
+    .filter((c) => !taken.has(c.chessId) || here.includes(c.chessId)), [ready, level, picks]);
+  const bonds = useMemo(() => {
+    const used = new Set(roster.flatMap((c) => c.bonds || []));
+    return (data.list('bonds') || []).filter((b) => b && used.has(b.bondId))
+      .sort((a, b) => (b.isCore ? 1 : 0) - (a.isCore ? 1 : 0) || (a.bondOrder ?? 0) - (b.bondOrder ?? 0) || String(a.name).localeCompare(String(b.name), 'zh'));
+  }, [ready, roster]);
+  const list = filterRoster(roster, filters, entries, getChess, getBond);
+  const selId = sel && roster.some((c) => c.chessId === sel) ? sel : list[0]?.chessId || roster[0]?.chessId || null;
+  const { base, golden } = selId ? recordsOf(selId, getChess) : { base: null, golden: null };
+  const inSlot = !!selId && here.includes(selId);
+  const full = !inSlot && here.length >= FREE_PICK_PER_LEVEL;
+  const gridRef = useRef(null);
+  useEffect(() => {
+    const el = gridRef.current?.querySelector(`[data-chess="${selId}"]`);
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' });
+  }, [selId]);
+  const change = (patch) => { if (base) setEntries(setChoice(loadoutStore.get().entries, base, golden, patch)); };
+  const resetOne = () => { if (base) setEntries(resetChoice(loadoutStore.get().entries, base.chessId)); };
+
+  return html`<div class="lo lo--free" role="dialog" aria-modal="true" aria-label=${`自由位置 · 调度中心 ${ROMAN[level]} 级`}>
+    <div class="lo__bg" aria-hidden="true"></div>
+    <header class="lo-top">
+      <div class="lo-top__left">
+        <${Button} variant="ghost" size="md" icon="chevronLeft" class="lo-back" data-testid="free-back" onClick=${onBack} aria-label="返回" title="返回">返回<//>
+      </div>
+      <div class="lo-top__center">
+        <${MicroLabel} tone="mint">FREE PICK<//>
+        <h1 class="lo-top__title">自由位置 · ${ROMAN[level]} 级</h1>
+      </div>
+      <div class="lo-top__right">
+        <span class="lo-free__count">本级已选 <b class="num">${here.length}</b><span class="num t-dim">/${FREE_PICK_PER_LEVEL}</span></span>
+        ${inSlot
+          ? html`<${Button} variant="danger" size="sm" data-testid="free-page-remove" disabled=${locked} onClick=${() => onRemove(selId)}>移出本级<//>`
+          : html`<${Button} variant="primary" size="sm" icon="check" data-testid="free-page-add" disabled=${locked || !selId || full}
+              onClick=${() => onAdd(level, selId)}>${full ? `本级已满（${FREE_PICK_PER_LEVEL}）` : '选入本级'}<//>`}
+      </div>
+    </header>
+    <p class="lo-note"><${Icon} name="info" />选中的干员只进入<b>你自己</b>的干员池，仍需像普通干员一样随机抽出，且不能被信标送走。<b>本槽位就是他的等阶</b>：调度中心 ${ROMAN[level]} 级起才可能出现。在右侧给他配好携带的技能，本局生效。</p>
+    <main class=${cx('lo-body', narrowDetail && 'is-detail')}>
+      <section class="lo-roster">
+        <${Filters} m=${m} filters=${filters} bonds=${bonds} onFilters=${setFilters} />
+        <div class="lo-grid" role="listbox" aria-label="自选干员候选" ref=${gridRef}>
+          ${list.length ? list.map((c) => html`<${RosterCard} key=${c.chessId} m=${m} chess=${c} golden=${null} entries=${entries}
+            selected=${c.chessId === selId} onPick=${(id) => { onSelect(id); setNarrowDetail(true); }} />`)
+            : html`<p class="lo-empty t-dim">没有符合条件的干员</p>`}
+        </div>
+      </section>
+      <div class="lo-detail-wrap">
+        <button type="button" class="lo-detail-back tapx" onClick=${() => setNarrowDetail(false)}><${Icon} name="chevronLeft" />候选列表</button>
+        <${Detail} m=${m} chess=${base} golden=${golden} entries=${entries} onChange=${change} onReset=${resetOne} locked=${locked} />
+      </div>
+    </main>
+  </div>`;
+}
+
+/** One filled 自由位置 slot: the operator, a 原型 marker, and a remove button. Clicking the operator opens the sub-page
+ *  to configure its skill (or replace it). */
+function FreeSlot({ m, rec, level, locked, banned, onEdit, onClear }) {
+  const isProto = rec.freePick === true;
+  return html`<span class=${cx('lo-free__slot', 'is-full', banned && 'is-banned')} data-testid=${`free-slot-${level}`}
+      title=${banned ? `${rec.name}：主盟约在本局被禁用，不会进入你的干员池` : `${rec.name}${isProto ? '（原型干员）' : ''} · 点击配置技能`}>
+    <button type="button" class="lo-free__open tapx" data-testid=${`free-edit-${level}-${rec.chessId}`} disabled=${locked}
+      aria-label=${`配置 ${rec.name} 的技能`} onClick=${() => onEdit(rec.chessId)}>
+      <span class="lo-free__art">
+        <${Img} src=${chessAvatarUrl(m, rec)} fallback=${html`<span class="lo-free__glyph">${[...(rec.name || '?')][0]}</span>`} />
+      </span>
+      <span class="lo-free__name">${rec.name}</span>
+      ${isProto ? html`<span class="lo-free__tag">原型</span>` : null}
+    </button>
+    ${banned ? html`<span class="lo-free__ban" aria-label="本局被禁用"><${Icon} name="info" /></span>` : null}
+    <button type="button" class="lo-free__x tapx" data-testid=${`free-clear-${level}-${rec.chessId}`} disabled=${locked}
+      aria-label="移除" title="移除" onClick=${() => onClear(rec.chessId)}><${Icon} name="close" /></button>
+  </span>`;
+}
+
+/** The 自由位置 strip: two level rows of `FREE_PICK_PER_LEVEL` slots (click an empty one to open the picker). */
+function FreePicks({ m, picks, locked, bannedIds, onOpen, onClear }) {
+  const slots = freePickSlots(picks);
+  const getChess = (id) => data.lookup('chess', id);
+  const total = pickedCount(picks);
+  return html`<section class="lo-free" data-testid="loadout-free">
+    <div class="lo-free__head">
+      <span class="lo-free__title"><${MicroLabel} tone="mint">FREE PICK<//>自由位置</span>
+      <span class="lo-free__hint t-dim">调度中心 5 / 6 级各 2 名，从六星干员与原型干员中自选；<b>填在 Ⅴ 级槽的从调度中心 5 级起</b>、Ⅵ 级槽的从 6 级起才可能被抽到（等阶即槽位）。他们只进入<b>你自己</b>的干员池，仍需随机抽取</span>
+      <span class="lo-free__count">已选 <b class="num">${total}</b><span class="num t-dim">/${FREE_PICK_LEVELS.length * FREE_PICK_PER_LEVEL}</span></span>
+    </div>
+    ${FREE_PICK_LEVELS.map((level) => html`<div class="lo-free__row" key=${level} data-testid=${`free-row-${level}`}>
+      <span class="lo-free__lvl"><b class="num">${ROMAN[level]}</b> 级</span>
+      <div class="lo-free__slots">
+        ${slots[String(level)].map((id, i) => {
+          const rec = id ? getChess(id) : null;
+          if (!rec) {
+            return html`<button type="button" key=${`e${i}`} class="lo-free__slot is-empty tapx" data-testid=${`free-slot-${level}-${i}`}
+              disabled=${locked} title=${`选择调度中心 ${ROMAN[level]} 级的自选干员`} onClick=${() => onOpen(level)}>
+              <${Icon} name="plus" /><span class="lo-free__empty">自选</span>
+            </button>`;
+          }
+          return html`<${FreeSlot} key=${id} m=${m} rec=${rec} level=${level} locked=${locked}
+            banned=${bannedIds ? bannedIds.has(id) : false} onEdit=${(cid) => onOpen(level, cid)} onClear=${onClear} />`;
+        })}
+      </div>
+    </div>`)}
+  </section>`;
+}
+
 // ---- screen -------------------------------------------------------------------------------------------------------------
 
 const SYNC_TEXT = {
@@ -301,7 +471,30 @@ function LoadoutScreen({ st }) {
   const nChanged = changedCount(st.entries, getChess);
   const locked = (inMatch && phase && phase !== PHASE.INFO_CHECK && phase !== PHASE.LOBBY) || st.sync === 'locked';
   const gridRef = useRef(null);
+  const fileRef = useRef(null);                            // hidden <input type=file> of the 导入 dialog
   const [narrowDetail, setNarrowDetail] = useState(false); // phones: the detail slides over the roster
+  const [io, setIo] = useState(null);                      // 导出 / 导入 dialog: { mode, text } | null
+  const [freeFor, setFreeFor] = useState(null);
+  const [freeSel, setFreeSel] = useState(null);            // 自由位置 sub-page: the candidate it shows
+
+  // 自由位置 (DESIGN §21) — its own sub-page (FreePickPage), opened from a slot. `m.private.freePicks` is what the server
+  // actually let into the pool: a pick missing from it was dropped because its 主盟约 is banned this match, and the strip
+  // marks it instead of silently doing nothing.
+  const freePicks = st.picks || {};
+  const freeTaken = pickedIds(freePicks);
+  const allowedFree = useStore((s) => s.match?.private?.freePicks || null);
+  const freeBanned = allowedFree ? new Set([...freeTaken].filter((id) => !allowedFree.includes(id))) : null;
+  const freeLocked = locked || !ready;
+  const freeOpen = (level, sel = null) => { setFreeSel(sel); setFreeFor(level); };
+  const freeAdd = (level, id) => {
+    const next = setPick(freePicks, level, id, getChess);
+    if (!next) { toast('该干员不能选入这个等级的自由位置', 'warn'); return; }
+    setPicks(next);
+  };
+  const freeRemove = (id) => {
+    const level = FREE_PICK_LEVELS.find((lv) => (freePicks[String(lv)] || []).includes(id));
+    if (level != null) setPicks(clearPick(freePicks, level, id));
+  };
 
   const pick = (id) => { loadoutStore.set({ sel: id }); setNarrowDetail(true); };
   const change = (patch) => { if (base) setEntries(setChoice(loadoutStore.get().entries, base, golden, patch)); };
@@ -310,6 +503,34 @@ function LoadoutScreen({ st }) {
     if (!nChanged) return;
     const ok = await confirmDialog({ title: '全部恢复默认', text: `将 ${nChanged} 名干员的技能与模组恢复为默认配置？`, okText: '恢复默认', danger: true });
     if (ok) setEntries({});
+  };
+
+  // 导出 / 导入 the loadout as the versioned payload (a downloaded file, the clipboard, or the textarea)
+  const ioText = io?.text ?? '';
+  const openExport = () => setIo({ mode: 'export', text: serializeExport(loadoutStore.get().entries) });
+  const openImport = () => setIo({ mode: 'import', text: '' });
+  const ioCopy = async () => {
+    const ok = await copyText(ioText);
+    toast(ok ? '已复制到剪贴板' : '复制失败，请在文本框中手动全选复制', ok ? 'success' : 'warn');
+  };
+  const ioDownload = () => downloadText(exportFilename(), ioText);
+  const ioPick = () => fileRef.current?.click();
+  const ioFile = async (e) => {
+    const f = e.currentTarget.files && e.currentTarget.files[0];
+    e.currentTarget.value = ''; // picking the same file twice must fire again
+    if (!f) return;
+    try { setIo({ mode: 'import', text: await readFileText(f) }); } catch { toast('读取文件失败', 'error'); }
+  };
+  const ioApply = () => {
+    // an import before chess.json is loaded would sanitise every entry away — refuse instead of wiping the loadout
+    if (!ready) { toast('干员数据仍在载入，请稍候再导入', 'warn'); return; }
+    const res = parseImport(ioText);
+    if (!res.ok) { toast(`导入失败：${res.error}`, 'error'); return; }
+    const { applied, dropped } = applyLoadoutEntries(res.entries, getChess);
+    setIo(null);
+    toast(dropped
+      ? `已导入 ${applied} 名干员（${dropped} 项当前版本没有，已忽略）`
+      : `已导入 ${applied} 名干员的调配`, dropped ? 'warn' : 'success');
   };
 
   // Esc closes; ←/→ browse the filtered roster (not while typing in the search field)
@@ -344,6 +565,14 @@ function LoadoutScreen({ st }) {
   const [syncText, syncCls] = SYNC_TEXT[st.sync] || SYNC_TEXT.idle;
   const fromText = st.from === 'briefing' ? '确认本局信息阶段结束前可调整本局配置' : '开始模拟前可调整干员携带的技能与模组，干员等级不可调整';
 
+  // The 自由位置 sub-page (DESIGN §21) is a screen of its own, like the main 干员调配 one — it replaces the overlay
+  // entirely, so a 自选干员 is browsed, filtered and configured with exactly the same components. Every hook above runs
+  // before this point, so the early return cannot change the hook order.
+  if (freeFor != null) {
+    return html`<${FreePickPage} m=${m} level=${freeFor} picks=${freePicks} entries=${st.entries} locked=${freeLocked}
+      sel=${freeSel} onBack=${() => setFreeFor(null)} onSelect=${setFreeSel} onAdd=${freeAdd} onRemove=${freeRemove} />`;
+  }
+
   return html`<div class="lo" role="dialog" aria-modal="true" aria-label="干员调配">
     <div class="lo__bg" aria-hidden="true"></div>
     <header class="lo-top">
@@ -358,15 +587,19 @@ function LoadoutScreen({ st }) {
         ${inMatch && hasDeadline(infoDeadline) ? html`<${Countdown} deadline=${infoDeadline} size="sm" gauge=${false} label="调配截止" class="lo-deadline" />` : null}
         ${syncText ? html`<span class=${cx('lo-sync', syncCls)} role="status">${syncText}</span>` : null}
         <span class="lo-count">已调整 <b class="num">${nChanged}</b><span class="num t-dim">/${roster.length}</span></span>
+        <${Button} variant="ghost" size="sm" data-testid="loadout-export" disabled=${!nChanged} onClick=${openExport} title="把当前调配导出为 JSON（可复制或下载）">导出<//>
+        <${Button} variant="ghost" size="sm" data-testid="loadout-import" disabled=${!ready} onClick=${openImport} title="从 JSON 导入调配（粘贴或选择文件）">导入<//>
         <${Button} variant="secondary" size="sm" icon="refresh" disabled=${!nChanged} onClick=${resetAll}>全部恢复默认<//>
       </div>
     </header>
     <p class=${cx('lo-note', locked && 'is-locked')}><${Icon} name="info" />${locked ? '本局的调配已锁定（确认本局信息后无法修改），修改将在下一局生效' : fromText}</p>
+    ${ready ? html`<${FreePicks} m=${m} picks=${freePicks} locked=${freeLocked} bannedIds=${freeBanned}
+      onOpen=${(lv, cid) => freeOpen(lv, cid)} onClear=${freeRemove} />` : null}
     ${!ready ? html`<div class="lo-loading"><${Spinner} size="sm" />正在载入干员数据（打开页面后仅载入一次）…</div>` : html`<main class=${cx('lo-body', narrowDetail && 'is-detail')}>
       <section class="lo-roster">
         <${Filters} m=${m} filters=${st.filters} bonds=${bonds} onFilters=${(filters) => loadoutStore.set({ filters })} />
         <div class="lo-grid" role="listbox" aria-label="干员列表" ref=${gridRef}>
-          ${list.length ? list.map((c) => html`<${RosterCard} key=${c.chessId} m=${m} chess=${c} golden=${c.goldenId ? getChess(c.goldenId) : null}
+          ${list.length ? list.map((c) => html`<${RosterCard} key=${c.chessId} m=${m} chess=${c} golden=${recordsOf(c.chessId, getChess).golden}
             entries=${st.entries} selected=${c.chessId === selId} onPick=${pick} />`) : html`<p class="lo-empty t-dim">没有符合条件的干员</p>`}
         </div>
       </section>
@@ -375,6 +608,23 @@ function LoadoutScreen({ st }) {
         <${Detail} m=${m} chess=${base} golden=${golden} entries=${st.entries} onChange=${change} onReset=${resetOne} locked=${locked} />
       </div>
     </main>`}
+    ${io ? html`<${Modal} open=${true} onClose=${() => setIo(null)}
+      title=${io.mode === 'export' ? '导出干员调配' : '导入干员调配'} micro="OPERATOR LOADOUT"
+      actions=${io.mode === 'export'
+        ? html`<${Button} variant="ghost" onClick=${() => setIo(null)}>关闭<//>
+            <${Button} variant="secondary" icon="copy" data-testid="loadout-io-copy" onClick=${ioCopy}>复制<//>
+            <${Button} variant="primary" data-testid="loadout-io-download" onClick=${ioDownload}>下载文件<//>`
+        : html`<${Button} variant="ghost" onClick=${() => setIo(null)}>取消<//>
+            <${Button} variant="secondary" data-testid="loadout-io-pick" onClick=${ioPick}>选择文件<//>
+            <${Button} variant="primary" icon="check" data-testid="loadout-io-apply" disabled=${!ioText.trim() || !ready} onClick=${ioApply}>导入<//>`}>
+      <p class="lo-io__hint">${io.mode === 'export'
+        ? html`共 <b class="num">${nChanged}</b> 名干员已调整。复制或下载这份数据，即可在别的设备或浏览器上导入。`
+        : html`把导出的 JSON 粘贴到下方，或点「选择文件」。导入会<strong>覆盖</strong>当前的 ${nChanged} 名干员调配。`}</p>
+      <textarea class="lo-io__text" data-testid="loadout-io-text" spellcheck=${false} readOnly=${io.mode === 'export'} value=${ioText}
+        placeholder=${io.mode === 'export' ? '' : '在此粘贴干员调配的 JSON…'}
+        onInput=${(e) => setIo({ mode: io.mode, text: e.currentTarget.value })}></textarea>
+      <input type="file" accept=".json,application/json,text/plain" class="lo-io__file" ref=${fileRef} onChange=${ioFile} />
+    <//>` : null}
   </div>`;
 }
 

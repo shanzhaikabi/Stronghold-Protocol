@@ -31,6 +31,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,8 @@ import { Network, SessionRegistry, NET_DEFAULTS } from './net.js';
 import { Lobby } from './lobby.js';
 import { getData, loadData } from './data.js';
 import { PROTOCOL_VERSION, APP_VERSION } from '../shared/constants.js';
+// TEMPORARY debug room (2026-10-03): remove with server/debugRoom.js (see its header).
+import { debugRoomSpec } from './debugRoom.js';
 
 /** Repository root. */
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -113,6 +116,61 @@ const LONG_CACHE = 'public, max-age=86400';          // 1 day
 const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 const LONG_CACHE_DIRS = ['assets', 'fonts', 'vendor']; // first path segment under public/
 const MAX_URL_LENGTH = 4096;
+
+// ---------------------------------------------------------------------------------------------------
+// build tag — the "your page is stale" signal (public/js/ui/buildGuard.js)
+// ---------------------------------------------------------------------------------------------------
+
+/**
+ * Files that make up the runtime the browser loads. A change in ANY of them is a new build: an already-open page
+ * keeps the modules it imported at load time (ES modules live in the page's module map for its whole lifetime), so
+ * without this signal a deployed fix could never reach a player who does not reload — which is exactly how the
+ * 自选干员 battle fix (2026-10-03) stayed invisible on an iOS page that had been opened before the deploy.
+ */
+export const BUILD_INPUTS = Object.freeze(['public/index.html', 'public/js', 'public/css', 'shared', 'server', 'data']);
+/** How long a computed tag is reused — a client-only deploy does not restart the process, so this is re-read. */
+export const BUILD_TAG_TTL_MS = 30_000;
+
+/** @type {{ at: number, tag: string|null }} */
+let buildCache = { at: 0, tag: null };
+
+/** Every file under `abs` (or `abs` itself), as `[relative path, size, mtimeMs]`, sorted by path. Missing → []. */
+function buildEntries(abs, rel, out) {
+  let stat;
+  try { stat = fs.statSync(abs); } catch { return; }
+  if (stat.isFile()) { out.push([rel, stat.size, stat.mtimeMs]); return; }
+  if (!stat.isDirectory()) return;
+  let names;
+  try { names = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
+  for (const d of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const child = path.join(abs, d.name);
+    const childRel = rel ? `${rel}/${d.name}` : d.name;
+    if (d.isDirectory()) buildEntries(child, childRel, out);
+    else if (d.isFile()) { try { const s = fs.statSync(child); out.push([childRel, s.size, s.mtimeMs]); } catch { /* ignore */ } }
+  }
+}
+
+/** Short hash of the served runtime (size + mtime of every BUILD_INPUTS file); null when nothing is readable. */
+export function computeBuildTag(root = ROOT) {
+  const out = [];
+  for (const rel of BUILD_INPUTS) buildEntries(path.join(root, rel), rel, out);
+  if (!out.length) return null;
+  out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const h = createHash('sha1');
+  for (const [rel, size, mtime] of out) h.update(`${rel}\0${size}\0${Math.floor(mtime)}\n`);
+  return h.digest('hex').slice(0, 12);
+}
+
+/** The current build tag (cached for BUILD_TAG_TTL_MS). */
+export function buildTag(now = Date.now()) {
+  if (buildCache.tag && now - buildCache.at < BUILD_TAG_TTL_MS) return buildCache.tag;
+  const tag = computeBuildTag();
+  buildCache = { at: now, tag };
+  return tag;
+}
+
+/** Drop the cache (tests). */
+export function resetBuildTag() { buildCache = { at: 0, tag: null }; }
 
 const gzipAsync = promisify(zlib.gzip);
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
@@ -541,8 +599,20 @@ export async function startServer(opts = {}) {
     if (parts.rawPath === '/healthz') {
       sendJson(req, res, 200, {
         ok: true, version: PROTOCOL_VERSION, app: APP_VERSION, uptimeSec: Math.round((Date.now() - startedAt) / 1000),
+        // the runtime the server is serving right now (public/js/ui/buildGuard.js): a page whose own build is
+        // older than this reloads itself, so a deploy reaches clients that never reload
+        build: buildTag(),
         sockets: network.connectionCount, sessions: registry.size, ...lobby.stats(),
       });
+      return;
+    }
+    // TEMPORARY debug room (server/debugRoom.js; grep SP_DEBUG_ROOM): only exists while the env var is set.
+    if (parts.rawPath === '/debug/room') {
+      const spec = debugRoomSpec();
+      if (!spec) { sendError(req, res, 404, '页面不存在 · Not found'); return; }
+      const r = lobby.createDebugRoom(spec);
+      sendJson(req, res, r && r.ok ? 200 : 400, r);
+      log.warn(`[debug] /debug/room → ${JSON.stringify(r)}`);
       return;
     }
     await serveStatic(req, res, parts.rawPath, parts.query);

@@ -9,7 +9,7 @@
 // them only the default skill / module is offered. The option rules are shared with the server
 // (shared/protocol.js loadoutOptions / checkLoadout), so a sanitised loadout is always accepted.
 
-import { loadoutOptions, checkLoadout, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS } from '../../../shared/protocol.js';
+import { loadoutOptions, checkLoadout, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS, FREE_PICK_LIMITS, freePickLevelsOf } from '../../../shared/protocol.js';
 
 export { MODULE_NONE };
 
@@ -30,6 +30,8 @@ export const ATTR_LABEL = Object.freeze({
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isInteger(v);
+/** Shape of a chess / bond / item id, shared by the stored parsers (mirrors the server's `isId`). */
+const ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 // ---- storage -----------------------------------------------------------------------------------------------------
 
@@ -53,20 +55,195 @@ export function parseStored(raw) {
   return out;
 }
 
-/** Serialised form for localStorage. */
-export const toStored = (entries) => ({ v: LOADOUT_VERSION, entries: entries || {} });
+/** Serialised form for localStorage (entries + 自由位置 picks, DESIGN §21). */
+export const toStored = (entries, picks = {}) => ({ v: LOADOUT_VERSION, entries: entries || {}, picks: picks || {} });
+
+// ---- 自由位置 picks (DESIGN §21) ------------------------------------------------------------------------------------
+
+/** The 调度中心 levels that hold 自由位置 slots (5 级 and 6 级), re-exported for the screen. */
+export const FREE_PICK_LEVELS = Object.freeze([...FREE_PICK_LIMITS.levels]);
+/** Slots per level (the screen renders this many card slots). */
+export const FREE_PICK_PER_LEVEL = FREE_PICK_LIMITS.perLevel;
+
+/**
+ * Parse stored 自由位置 picks (any junk → {}): structurally valid level keys, id-shaped entries, at most `perLevel` per
+ * level, and never the same operator twice — the picker forbids duplicates across both levels [user].
+ * @param {any} raw `{ [level]: chessId[] }`
+ * @returns {Record<string, string[]>}
+ */
+export function parseStoredPicks(raw) {
+  const src = isObj(raw) ? raw : {};
+  const out = {};
+  const seen = new Set();
+  for (const level of FREE_PICK_LEVELS) {
+    const list = src[level] ?? src[String(level)];
+    if (!Array.isArray(list)) continue;
+    const keep = [];
+    for (const id of list) {
+      if (keep.length >= FREE_PICK_LIMITS.perLevel) break;
+      if (typeof id !== 'string' || !ID_RE.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      keep.push(id);
+    }
+    if (keep.length) out[String(level)] = keep;
+  }
+  return out;
+}
+
+/** The ids picked at any level (the picker marks them as taken — an operator may not be picked twice [user]). */
+export function pickedIds(picks) {
+  const s = new Set();
+  for (const list of Object.values(parseStoredPicks(picks))) for (const id of list) s.add(id);
+  return s;
+}
+
+/**
+ * Drop picks that are not selectable any more (a retired operator, a level that no longer fits) — the spirit of
+ * `sanitizeEntries`, so one stale id never makes the server refuse the whole `room.loadout` frame.
+ * @param {any} picks @param {(id: string) => any} getChess
+ */
+export function sanitizePicks(picks, getChess) {
+  const out = {};
+  const seen = new Set();
+  for (const [level, list] of Object.entries(parseStoredPicks(picks))) {
+    const lv = Number(level);
+    const keep = [];
+    for (const id of list) {
+      if (seen.has(id)) continue;
+      if (!freePickLevelsOf(getChess ? getChess(id) : null).includes(lv)) continue;
+      seen.add(id);
+      keep.push(id);
+    }
+    if (keep.length) out[level] = keep;
+  }
+  return out;
+}
+
+/**
+ * Put `id` into the 自由位置 slot list of `level` (DESIGN §21). Returns the NEW picks, or null when the operator is
+ * not selectable at that level, is already picked at another level, or the level's slots are full.
+ * @param {any} picks @param {number|string} level @param {string} id @param {(id: string) => any} getChess
+ * @returns {Record<string, string[]> | null}
+ */
+export function setPick(picks, level, id, getChess) {
+  const lv = Number(level);
+  if (!FREE_PICK_LEVELS.includes(lv)) return null;
+  if (!freePickLevelsOf(getChess ? getChess(id) : null).includes(lv)) return null;
+  const current = parseStoredPicks(picks);
+  if (pickedIds(current).has(id)) return null;
+  const list = current[String(lv)] || [];
+  if (list.length >= FREE_PICK_LIMITS.perLevel) return null;
+  return { ...current, [String(lv)]: [...list, id] };
+}
+
+/** Remove `id` from the slots of `level` (an emptied level disappears). */
+export function clearPick(picks, level, id) {
+  const current = parseStoredPicks(picks);
+  const key = String(level);
+  const list = (current[key] || []).filter((x) => x !== id);
+  const out = { ...current };
+  if (list.length) out[key] = list;
+  else delete out[key];
+  return out;
+}
+
+/**
+ * The 自由位置 slots for rendering: `{ 5: [id|null, id|null], 6: […] }` — always `perLevel` entries per level, so the
+ * screen does not have to pad them itself.
+ * @param {any} picks
+ * @returns {Record<string, Array<string|null>>}
+ */
+export function freePickSlots(picks) {
+  const current = parseStoredPicks(picks);
+  const out = {};
+  for (const level of FREE_PICK_LEVELS) {
+    const list = current[String(level)] || [];
+    out[String(level)] = Array.from({ length: FREE_PICK_LIMITS.perLevel }, (_, i) => list[i] ?? null);
+  }
+  return out;
+}
+
+/** Total picks in use (a badge on the 自由位置 row: "2/4"). */
+export const pickedCount = (picks) => pickedIds(picks).size;
+
+// ---- export / import ----------------------------------------------------------------------------------------------
+
+/**
+ * `kind` of an exported loadout envelope. A saved-file / clipboard payload and (later) the blob an account endpoint
+ * stores are the SAME object, so 导出 / 导入 / 登录后读取 all share one path: `entries` is exactly
+ * `room.loadout.entries`, i.e. what `setEntries` + the sync already accept.
+ */
+export const LOADOUT_EXPORT_KIND = 'stronghold.loadout';
+
+/**
+ * Portable payload of a loadout (the shape a future account API PUTs / GETs as-is).
+ * @param {Record<string, any>} entries `room.loadout.entries`
+ * @param {{ now?: number, name?: string|null }} [o]
+ */
+export function exportPayload(entries, { now = Date.now(), name = null } = {}) {
+  const clean = {};
+  for (const [id, e] of Object.entries(entries || {})) if (isObj(e)) clean[id] = { ...e };
+  return {
+    kind: LOADOUT_EXPORT_KIND,
+    v: LOADOUT_VERSION,
+    name: name ? String(name).slice(0, 40) : null,
+    exportedAt: new Date(Number.isFinite(now) ? now : Date.now()).toISOString(),
+    count: Object.keys(clean).length,
+    entries: clean,
+  };
+}
+
+/** Pretty JSON of `exportPayload` — one preset per file / clipboard payload. */
+export function serializeExport(entries, opts) {
+  return JSON.stringify(exportPayload(entries, opts), null, 2);
+}
+
+/**
+ * Parse an exported, pasted or account-fetched loadout. Tolerant by design: the envelope, the stored `{ v, entries }`
+ * form and a bare `{ [chessId]: { skill, module } }` map all work, as does a JSON string of any of them. Parsing is
+ * STRUCTURAL only — the caller still runs `sanitizeEntries` against the loaded data, because a preset from another
+ * season may name chess / skills / modules this build does not have.
+ * @param {any} input payload object or JSON text
+ * @returns {{ ok: true, entries: Record<string, any>, meta: { v: number|null, name: string|null, exportedAt: string|null, kind: string|null } }
+ *          | { ok: false, error: string }}
+ */
+export function parseImport(input) {
+  let raw = input;
+  if (typeof raw === 'string') {
+    const text = raw.trim();
+    if (!text) return { ok: false, error: '没有可导入的内容' };
+    try { raw = JSON.parse(text); } catch { return { ok: false, error: '不是合法的 JSON' }; }
+  }
+  if (!isObj(raw)) return { ok: false, error: '无法识别的格式' };
+  const v = isInt(raw.v) ? raw.v : null;
+  // a newer envelope may reshuffle fields — refuse instead of silently reading it as something else
+  if (v != null && v > LOADOUT_VERSION) return { ok: false, error: `数据版本 v${v} 高于当前支持的 v${LOADOUT_VERSION}` };
+  const kind = typeof raw.kind === 'string' ? raw.kind : null;
+  if (kind && kind !== LOADOUT_EXPORT_KIND) return { ok: false, error: '这不是干员调配的数据' };
+  const entries = parseStored(raw);
+  if (!Object.keys(entries).length) return { ok: false, error: '里面没有有效的调配条目' };
+  return {
+    ok: true,
+    entries,
+    meta: { v, name: typeof raw.name === 'string' ? raw.name : null, exportedAt: typeof raw.exportedAt === 'string' ? raw.exportedAt : null, kind },
+  };
+}
 
 // ---- options & choices ---------------------------------------------------------------------------------------------
 
 /**
  * The chess records of one loadout slot.
+ * A 自选候选 (DESIGN §21, `freePick: true`) has `goldenId: null` and no `_b` sibling but carries its own `modules[]`
+ * (DATA.md / tools/build-data.mjs freePickModuleBlock), so the record is returned as its own elite — the detail panel
+ * then shows its 模组 section exactly like a season operator's (模组相关规则和普通干员一致).
  * @param {string} baseId normal chess id
  * @param {(id: string) => any} getChess
  * @returns {{ base: any, golden: any }}
  */
 export function recordsOf(baseId, getChess) {
   const base = getChess(baseId) || null;
-  const golden = base && base.goldenId ? getChess(base.goldenId) || null : null;
+  const golden = base && base.goldenId ? getChess(base.goldenId) || null
+    : (base && Array.isArray(base.modules) && base.modules.length ? base : null);
   return { base, golden };
 }
 
@@ -189,9 +366,9 @@ export function selectedSkill(loadout, chess, getChess) {
   return skillRecord(chess, r.skillIndex) || chess?.skill || null;
 }
 
-/** Selected ModuleRecord of an elite under a loadout (null: none / normal chess). */
+/** Selected ModuleRecord of an elite under a loadout (null: none / a chess without module choices / '不装备'). */
 export function selectedModule(loadout, chess, getChess) {
-  if (!chess || !chess.isGolden) return null;
+  if (!chess || !(chess.isGolden || (Array.isArray(chess.modules) && chess.modules.length))) return null;
   const r = resolveLoadout(loadout, chess, getChess);
   return moduleRecord(chess, r.moduleId);
 }
@@ -202,13 +379,30 @@ export function selectedModule(loadout, chess, getChess) {
  * Visible normal chess (the loadout slots), in shop order: tier, then shopSortId.
  * @param {any[]} list data.list('chess')
  */
-/** Whether a chess record is a loadout slot (a visible normal chess — what the server's checkLoadout accepts). */
-export const isLoadoutSlot = (c) => !!c && !c.isGolden && c.visible !== false && !c.isHidden && !c.isDiy && (!c.baseId || c.baseId === c.chessId);
+/**
+ * Whether a chess record is a loadout slot (what the server's `checkLoadout` accepts): a visible season chess, or a
+ * 自选候选 of the free-pick roster (DESIGN §21 — invisible + hidden by design so the shop pool never offers it, yet its
+ * owner picks it and configures its skill like any other operator).
+ */
+export const isLoadoutSlot = (c) => !!c && !c.isGolden && !c.isDiy && (!c.baseId || c.baseId === c.chessId)
+  && (c.freePick === true || (c.visible !== false && !c.isHidden));
 
 export function rosterOf(list) {
   return (Array.isArray(list) ? list : [])
     .filter(isLoadoutSlot)
     .sort((a, b) => (a.tier ?? 0) - (b.tier ?? 0) || (a.shopSortId ?? 0) - (b.shopSortId ?? 0) || String(a.chessId).localeCompare(String(b.chessId)));
+}
+
+/**
+ * The 自由位置 candidates a 调度中心 level may draw from (DESIGN §21): the 自选候选 records of `data/freePicks.json`.
+ * The season pool never appears — a candidate is by definition an operator it does NOT offer [user] — and the level gate
+ * is `freePickLevelsOf`, the same function the server checks with. Sorted 6★ first (the 4★ 预备干员 last).
+ * @param {any[]} list data.list('freePicks') @param {number} level 5 or 6
+ */
+export function freePickRosterOf(list, level) {
+  return (Array.isArray(list) ? list : [])
+    .filter((c) => isLoadoutSlot(c) && freePickLevelsOf(c).includes(Number(level)))
+    .sort((a, b) => (b.rarity ?? 0) - (a.rarity ?? 0) || (a.tier ?? 0) - (b.tier ?? 0) || String(a.name).localeCompare(String(b.name), 'zh'));
 }
 
 /**
@@ -226,7 +420,7 @@ export function filterRoster(roster, f = {}, entries = {}, getChess = () => null
     if (f.prof && c.profession !== f.prof) return false;
     if (f.bond && !(Array.isArray(c.bonds) && c.bonds.includes(f.bond))) return false;
     if (f.changedOnly) {
-      const golden = c.goldenId ? getChess(c.goldenId) : null;
+      const { golden } = recordsOf(c.chessId, getChess);
       if (!effectiveChoice(entries, c, golden).changed) return false;
     }
     if (q) {

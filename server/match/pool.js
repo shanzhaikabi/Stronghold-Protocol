@@ -90,14 +90,33 @@ export class SharedPool {
     return k;
   }
 
-  /** Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`). */
-  _eligible({ maxTier = 6, tier = null, filter = null } = {}) {
+  /**
+   * Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`), PLUS the caller's `extra` entries — the
+   * player's 自选干员 (DESIGN §21, PlayerState.freePickEntries).
+   *
+   * `extra` ids obey the **same tier gate as a shared chess**: shop level L offers operators of tier ≤ L (research 01
+   * §6; user report 2026-10-03 "自选干员会忽略他的等级出现 … 5 级干员需要到 5 级以后才进入池子"), so a 6★ pick is not
+   * drawable at 调度中心 5 级 and a 5★ one not at 4 级 — exactly like a season operator of that tier. An exact-`tier`
+   * request is how a lower level legitimately reaches one tier above: the merge promotion reward rolls
+   * `tier = min(shopLevel + 1, 6)` (research 01 §7, PlayerState.pushRewardOffer). The caller's `filter` applies to them
+   * too, and they never appear in `this.entries` — they are outside the shared copy economy, so a weight here is
+   * "copies this pick may still yield", not a shared pool count.
+   * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean,
+   *   extra?: Array<{ id: string, tier: number, left: number }>|null }} [opts]
+   */
+  _eligible({ maxTier = 6, tier = null, filter = null, extra = null } = {}) {
     const out = [];
     for (const [id, e] of this.entries) {
       if (e.left <= 0) continue;
       if (tier != null ? e.tier !== tier : e.tier > maxTier) continue;
       if (filter && !filter(id, e)) continue;
       out.push([id, e.left]);
+    }
+    for (const x of extra || []) {
+      if (!x || !(x.left > 0)) continue;
+      if (tier != null ? x.tier !== tier : x.tier > maxTier) continue;   // the shared chess gate above, verbatim
+      if (filter && !filter(x.id, x)) continue;
+      out.push([x.id, x.left]);
     }
     return out;
   }

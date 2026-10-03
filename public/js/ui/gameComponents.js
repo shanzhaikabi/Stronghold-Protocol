@@ -13,7 +13,10 @@ const cx = (...p) => p.flat().filter(Boolean).join(' ');
 
 /** Data files the in-match screens use. */
 export const GAME_FILES = ['config', 'assets', 'chess', 'bonds', 'items', 'bands', 'enemies', 'bosses', 'stages', 'tokens',
-  'choices', 'effects', 'garrisons', 'factions', 'local'];
+  'choices', 'effects', 'garrisons', 'factions', 'local',
+  // 自选干员 (DESIGN §21): chess-shaped records that are NOT in chess.json, so the match UI needs this file to resolve the
+  // operators a 自由位置 brings in (cards, detail panel, board) — it lives outside chess.json on purpose.
+  'freePicks'];
 
 /**
  * Load every in-match data file; returns lookups (sync, null until loaded).

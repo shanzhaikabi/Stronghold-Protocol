@@ -5,8 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ERR, PHASE } from '../../shared/constants.js';
-import { validateC2S, checkLoadout, loadoutOptions, resolveLoadout, isLoadoutEntries, MODULE_NONE, LOADOUT_LIMITS } from '../../shared/protocol.js';
+import { validateC2S, checkLoadout, loadoutOptions, resolveLoadout, isLoadoutEntries, MODULE_NONE, LOADOUT_LIMITS, isFreePicks, checkFreePicks, freePickLevelsOf, FREE_PICK_LIMITS } from '../../shared/protocol.js';
 import { buildBattleSpec } from '../../server/sim/spec.js';
+import { resolveRecordLoadout, loadoutRecord } from '../../shared/loadoutRecord.js';
 import { DATA, makeMatch } from './harness.js';
 
 const chess = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : null);
@@ -116,6 +117,64 @@ test('resolveLoadout: normal chess → moduleId null; elite → the chosen modul
   assert.deepEqual(resolveLoadout(lo, other, chess), { skillIndex: other.skill.index, moduleId: null });
   // a stale entry (not selectable any more) falls back to the defaults, never throws
   assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 7, module: 'gone' } }, g, chess), { skillIndex: 1, moduleId: 'uniequip_002_inside' });
+});
+
+// ---- 自选干员 模组 (DESIGN §21): a 自选候选 is its own elite, so 模组相关规则和普通干员一致 ---------------------------
+
+/** A 自选候选 record by id (data/freePicks.json). */
+const freePick = (id) => (DATA.freePicks && Object.hasOwn(DATA.freePicks, id) ? DATA.freePicks[id] : null);
+const getFree = (id) => freePick(id) || chess(id);
+const TULIP = 'chess_free_char_608_acpion';   // 郁金香: SOL-X 郁金香证章
+
+test('自选干员 模组: loadoutOptions / checkLoadout / resolveLoadout treat the record as its own elite', () => {
+  const rec = freePick(TULIP);
+  const mod = rec.modules.find((m) => m.isDefault);
+  assert.ok(mod && mod.uniEquipId, 'the record carries its own modules[]');
+  assert.equal(rec.module.active, true, 'its default module is equipped (like a golden chess)');
+  // the 干员调配 options: the character's modules + 不装备, default = the module the backup 编队 marks
+  const opt = loadoutOptions(rec, null);
+  assert.deepEqual(opt.modules, [...rec.modules.map((m) => m.uniEquipId), MODULE_NONE]);
+  assert.equal(opt.defaultModule, mod.uniEquipId);
+  assert.deepEqual(opt.skills, rec.skills.map((s) => s.index));
+  assert.equal(opt.defaultSkill, rec.skills.find((s) => s.isDefault).index);
+  // checkLoadout accepts the module (and 不装备), rejects an unknown one / a golden id for it
+  const okLo = checkLoadout({ [TULIP]: { skill: 0, module: mod.uniEquipId } }, getFree);
+  assert.deepEqual(okLo, { ok: true, loadout: { [TULIP]: { skill: 0, module: mod.uniEquipId } } });
+  assert.deepEqual(checkLoadout({ [TULIP]: { module: MODULE_NONE } }, getFree),
+    { ok: true, loadout: { [TULIP]: { skill: opt.defaultSkill, module: MODULE_NONE } } });
+  assert.equal(checkLoadout({ [TULIP]: { module: 'nope' } }, getFree).error, ERR.BAD_TARGET);
+  assert.equal(checkLoadout({ [TULIP]: { module: 'uniequip_002_acpion_b' } }, getFree).error, ERR.BAD_TARGET, 'only its own modules');
+  // resolveLoadout (what the battle input / PlayerState use): the choice, 不装备, and the default
+  assert.deepEqual(resolveLoadout(okLo.loadout, rec, getFree), { skillIndex: 0, moduleId: mod.uniEquipId });
+  assert.deepEqual(resolveLoadout({ [TULIP]: { module: MODULE_NONE } }, rec, getFree), { skillIndex: opt.defaultSkill, moduleId: MODULE_NONE });
+  assert.deepEqual(resolveLoadout(null, rec, getFree), { skillIndex: opt.defaultSkill, moduleId: mod.uniEquipId });
+  // a 自选候选 without modules (the 4★ 预备干员) keeps the module-less behaviour
+  const four = Object.values(DATA.freePicks).find((r) => !(r.modules || []).length);
+  assert.equal(loadoutOptions(four, null).modules.length, 0);
+  assert.equal(loadoutOptions(four, null).defaultModule, null);
+  assert.equal(checkLoadout({ [four.chessId]: { module: 'none' } }, getFree).error, ERR.BAD_TARGET, 'still no module choice');
+  assert.deepEqual(resolveLoadout(null, four, getFree), { skillIndex: four.skills.find((s) => s.isDefault).index, moduleId: null });
+});
+
+test('模组: a season operator keeps its golden record (same options, default and composition)', () => {
+  const base = chess(INSIDE), golden = chess(base.goldenId);
+  const opt = loadoutOptions(base, golden);
+  assert.deepEqual(opt.modules, [...golden.modules.map((m) => m.uniEquipId), MODULE_NONE], 'the golden modules only');
+  assert.equal(opt.defaultModule, (golden.modules.find((m) => m.isDefault) || {}).uniEquipId);
+  assert.deepEqual(loadoutOptions(base, null), { skills: opt.skills, defaultSkill: opt.defaultSkill, modules: [], defaultModule: null },
+    'a normal chess alone offers no module');
+  // normal piece → moduleId null; golden → the chosen / default module (byte-identical to the pre-自选干员 behaviour)
+  assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 0, module: MODULE_NONE } }, base, chess), { skillIndex: 0, moduleId: null });
+  assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 0, module: MODULE_NONE } }, golden, chess), { skillIndex: 0, moduleId: MODULE_NONE });
+  assert.deepEqual(resolveLoadout(null, golden, chess), { skillIndex: opt.defaultSkill, moduleId: opt.defaultModule });
+  // the composition is the golden record's, unchanged by this feature
+  const lo = resolveRecordLoadout(golden, { moduleId: opt.modules[0] });
+  const composed = loadoutRecord(golden, lo);
+  for (const [k, v] of Object.entries(golden.modules.find((m) => m.uniEquipId === opt.modules[0]).attr)) {
+    assert.equal(composed.stats[k], golden.statsBase[k] + v, `${k} = statsBase + module attr`);
+  }
+  assert.equal(composed.module.id, opt.modules[0]);
+  assert.deepEqual(loadoutRecord(golden, resolveRecordLoadout(golden, { moduleId: MODULE_NONE })).stats, golden.statsBase);
 });
 
 // ---- match side ------------------------------------------------------------------------------------------------------------
@@ -301,3 +360,78 @@ test('a skill summon is a hand card only with that skill (user playtest #6): 赫
     h.m.dispose();
   }
 });
+
+// ---- 自选干员 / 自由位置 (DESIGN §21) -------------------------------------------------------------------------------
+//
+// `room.loadout.picks` rides along with the loadout: `{ [调度中心 level]: chessId[] }`, at most 2 per level. The ids
+// come from data/freePicks.json (`freePick: true`, each with its own `freePickLevels`) — a separate file on purpose, so
+// a season chess id is a valid SHAPE but not a valid pick.
+
+const free = DATA.freePicks || {};
+const freeIds = Object.keys(free).sort();
+const free6 = freeIds.filter((id) => free[id].rarity === 6);
+const free4 = freeIds.filter((id) => free[id].rarity === 4);
+/** Lookup over the season chess AND the 自选候选 (what GameData.chess does). */
+const getAny = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : (Object.hasOwn(free, id) ? free[id] : null));
+
+test('自选干员: 候选数据齐备(六星与四星各若干) — 后续测试的前置条件', () => {
+  assert.ok(free6.length >= 2, `need at least 2 六星 自选候选, got ${free6.length}`);
+  assert.ok(free4.length >= 1, `need at least 1 四星 自选候选, got ${free4.length}`);
+  assert.ok(!freeIds.includes(INSIDE) && Object.hasOwn(DATA.chess, INSIDE), 'the season fixture is a season chess');
+});
+
+test('自选干员: isFreePicks 只做结构校验(等级键 / 每级 ≤2 / id 形状)', () => {
+  assert.ok(isFreePicks({}));
+  assert.ok(isFreePicks({ 5: [free6[0]], 6: [free6[1]] }));
+  assert.ok(isFreePicks({ '5': [free6[0]] }), 'string level keys (a JSON round trip)');
+  assert.ok(!isFreePicks({ 4: [free6[0]] }), 'only 调度中心 5 / 6');
+  assert.ok(!isFreePicks({ 5: [free6[0], free6[1], free6[0]] }), 'at most 2 per level');
+  assert.ok(!isFreePicks({ 5: free6[0] }), 'arrays only');
+  assert.ok(!isFreePicks({ 5: ['bad id!'] }), 'id-shaped entries');
+  assert.ok(!isFreePicks(null));
+  assert.equal(FREE_PICK_LIMITS.perLevel, 2);
+  assert.deepEqual([...FREE_PICK_LIMITS.levels], [5, 6]);
+});
+
+test('自选干员: checkFreePicks 校验候选身份、自身等级门槛与重复选取', () => {
+  assert.deepEqual(checkFreePicks({ 5: [free6[0]], 6: [free6[1]] }, getAny),
+    { ok: true, picks: { 5: [free6[0]], 6: [free6[1]] } });
+  assert.deepEqual(checkFreePicks({ 5: [free4[0]] }, getAny), { ok: true, picks: { 5: [free4[0]] } }, '4★ 预备干员 at 5 级');
+  assert.deepEqual(checkFreePicks({ '5': [free6[0]] }, getAny).picks, { 5: [free6[0]] }, 'keys normalise to strings');
+  assert.deepEqual(checkFreePicks({}, getAny), { ok: true, picks: {} }, 'nothing picked is valid');
+  assert.equal(checkFreePicks({ 6: [free4[0]] }, getAny).error, ERR.BAD_TARGET, 'a 4★ is not selectable at 6 级');
+  assert.equal(checkFreePicks({ 5: [INSIDE] }, getAny).error, ERR.BAD_TARGET, 'a season chess is not a 自选候选');
+  assert.equal(checkFreePicks({ 5: [free6[0]], 6: [free6[0]] }, getAny).error, ERR.BAD_TARGET, 'no duplicate across levels');
+  assert.equal(checkFreePicks({ 5: [free6[0], free6[0]] }, getAny).error, ERR.BAD_TARGET, 'no duplicate within a level');
+  assert.equal(checkFreePicks({ 7: [free6[0]] }, getAny).error, ERR.BAD_MSG, 'structural problems stay BAD_MSG');
+});
+
+test('room.loadout: picks 随调配一起发送,可缺省(老客户端),结构非法即拒', () => {
+  const picks = { 5: [free6[0]], 6: [free6[1]] };
+  assert.equal(validateC2S({ t: 'room.loadout', entries: {}, picks }), null);
+  assert.equal(validateC2S({ t: 'room.loadout', entries: {} }), null, 'picks is optional');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 7: [free6[0]] } }), null, 'unknown level');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 5: free6[0] } }), null, 'not an array');
+  assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 5: [free6[0], free6[1], free6[0]] } }), null, '3 picks');
+});
+
+test('自选干员: 可选范围 = 自选候选记录;本赛季棋子一律不可选(池内不可重复)', () => {
+  const normal6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'NORMAL' && c.rarity === 6 && c.visible);
+  const preset6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 6);
+  const preset5 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 5 && c.visible);
+  assert.ok(normal6 && preset6 && preset5, 'fixtures exist');
+
+  assert.deepEqual(freePickLevelsOf(free[free6[0]]), [5, 6], 'a 六星 自选候选');
+  assert.deepEqual(freePickLevelsOf(free[free4[0]]), [5], 'a 四星 自选候选: 5 级 only');
+  // a season chess is never pickable: a 自选候选 is by definition an operator the pool does NOT offer [user]
+  assert.deepEqual(freePickLevelsOf(normal6), [], 'a season 六星 NORMAL chess is already in the pool');
+  assert.deepEqual(freePickLevelsOf(preset6), [], '预设干员 too, even at 6★');
+  assert.deepEqual(freePickLevelsOf(preset5), [], 'a non-6★ season operator');
+  assert.deepEqual(freePickLevelsOf(null), []);
+
+  assert.equal(checkFreePicks({ 5: [free6[0]] }, getAny).ok, true, 'a 自选候选 is a valid pick');
+  assert.equal(checkFreePicks({ 5: [normal6.chessId] }, getAny).error, ERR.BAD_TARGET, 'a season chess is not');
+  assert.equal(checkFreePicks({ 5: [preset6.chessId] }, getAny).error, ERR.BAD_TARGET, 'a PRESET is not');
+  assert.equal(checkFreePicks({ 5: [preset5.chessId] }, getAny).error, ERR.BAD_TARGET, 'a 5★ season operator is not');
+});
+
