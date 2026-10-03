@@ -356,21 +356,22 @@ test('room.loadout: picks 随调配一起发送,可缺省(老客户端),结构�
   assert.notEqual(validateC2S({ t: 'room.loadout', entries: {}, picks: { 5: [free6[0], free6[1], free6[0]] } }), null, '3 picks');
 });
 
-test('自选干员: 可选范围 = 六星 NORMAL 棋子 + 自选候选;预设干员与非六星一律不可选', () => {
+test('自选干员: 可选范围 = 自选候选记录;本赛季棋子一律不可选(池内不可重复)', () => {
   const normal6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'NORMAL' && c.rarity === 6 && c.visible);
   const preset6 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 6);
   const preset5 = Object.values(DATA.chess).find((c) => !c.isGolden && c.chessType === 'PRESET' && c.rarity === 5 && c.visible);
   assert.ok(normal6 && preset6 && preset5, 'fixtures exist');
 
-  assert.deepEqual(freePickLevelsOf(normal6), [5, 6], 'a season 六星 NORMAL chess — "玩家拥有的六星干员" — is pickable at 5 and 6');
-  assert.deepEqual(freePickLevelsOf(free[free6[0]]), [5, 6], 'a 六星 prototype');
-  assert.deepEqual(freePickLevelsOf(free[free4[0]]), [5], 'a 四星 prototype: 5 级 only');
-  assert.deepEqual(freePickLevelsOf(preset6), [], '预设干员 are excluded from the 自由位置 roster, even at 6★');
-  assert.deepEqual(freePickLevelsOf(preset5), [], 'a non-6★ season operator is not pickable');
+  assert.deepEqual(freePickLevelsOf(free[free6[0]]), [5, 6], 'a 六星 自选候选');
+  assert.deepEqual(freePickLevelsOf(free[free4[0]]), [5], 'a 四星 自选候选: 5 级 only');
+  // a season chess is never pickable: a 自选候选 is by definition an operator the pool does NOT offer [user]
+  assert.deepEqual(freePickLevelsOf(normal6), [], 'a season 六星 NORMAL chess is already in the pool');
+  assert.deepEqual(freePickLevelsOf(preset6), [], '预设干员 too, even at 6★');
+  assert.deepEqual(freePickLevelsOf(preset5), [], 'a non-6★ season operator');
   assert.deepEqual(freePickLevelsOf(null), []);
 
-  assert.equal(checkFreePicks({ 5: [normal6.chessId] }, getAny).ok, true, 'a season 六星 NORMAL is a valid pick');
-  assert.equal(checkFreePicks({ 6: [normal6.chessId] }, getAny).ok, true, 'at either level');
+  assert.equal(checkFreePicks({ 5: [free6[0]] }, getAny).ok, true, 'a 自选候选 is a valid pick');
+  assert.equal(checkFreePicks({ 5: [normal6.chessId] }, getAny).error, ERR.BAD_TARGET, 'a season chess is not');
   assert.equal(checkFreePicks({ 5: [preset6.chessId] }, getAny).error, ERR.BAD_TARGET, 'a PRESET is not');
   assert.equal(checkFreePicks({ 5: [preset5.chessId] }, getAny).error, ERR.BAD_TARGET, 'a 5★ season operator is not');
 });

@@ -242,18 +242,27 @@ them up by accident. Records carry the same shape as §2 plus:
 | `chessId` | `chess_free_char_608_acpion` | synthetic id (`chess_free_<charId>`) |
 | `freePick` | `true` | the 自由位置 flag (the picker filters on it) |
 | `freePickLevels` | `[5,6]` / `[5]` | 调度中心 levels it may be selected at: every 6★ at 5 **and** 6, the 4★ 预备干员 at 5 only (and never 先锋 / 特种) |
-| `chessType` | `PROTOTYPE` | the 原型干员 family — never `PRESET` / `NORMAL` / `DIY` |
+| `chessType` | `PROTOTYPE` | never `PRESET` / `NORMAL` / `DIY` |
 | `visible` / `isHidden` | `false` / `true` | the shop never offers them on its own |
-| `bonds` | `["emptyShip"]` | 协防干员 only: the official records of the 原型干员 carry no faction (`nationId` / `groupId` / `teamId` are all null) |
+| `bonds` | `["yanShip"]` / `["emptyShip"]` | the **single 主盟约** — the core faction bond PRTS gives the operator, else 协防干员. One entry only: the ban filter drops a pick by its 主盟约 alone |
+| `bondSource` | `prts` / `hint:lungmen` / `none` | where that bond came from (build diagnostics) |
 | `garrisonIds` | `[]` | 自选干员 不拥有特质 |
 | `charId`, `assets` | `char_608_acpion`, … | the operator's own art (avatar / portrait / spine / skill icon) |
 | `tier` | `6` / `4` | **provisional** (= rarity); the 自由位置 shop-tier gate is settled together with the pool work |
 | `tokens` | `[]` | empty until these operators' skills get kits — their summons belong to that step |
 
-Built from `FREE_PICK_CHARS` in `tools/build-data.mjs` (the 原型干员 the season's `backupCharId` data points at).
-**Extensible by design**: append charIds there to offer further Arknights operators — each addition needs assets
-(`docs/research/07-assets.md` §0 lists the sources and hit rates per class) and a kit spec for every skill it exposes.
-`test/freePicks.test.js` locks the invariants (not in the season pool, 协防 only, no 特质, art present).
+**The roster is derived, not listed** (`freePickCharIds` in `tools/build-data.mjs`): every 6★ operator of
+`character_table` that **no season chess record uses** — so a candidate can never duplicate one the shop already offers
+("已经在干员池内的干员不应该进入自选池" [user]), and the roster follows the game data by itself — plus the 4★ 预备干员 of
+the season's own `backup` data (`docs/research/03-operators.json`).
+
+**主盟约** (`freePickMainBond`): `docs/research/12-free-pick-factions.json` (checked against PRTS) wins where it has an
+entry — including a `null` entry, meaning "checked, none of the 8" — then the client-data hints `nationId` / `groupId` /
+`teamId` (`FACTION_BOND`: 阿戈尔 / 卡西米尔 / 拉特兰 / 萨尔贡 / 维多利亚 / 谢拉格 / 叙拉古 / 炎, where 龙门 and every 炎
+sub-faction count as 炎), else 协防干员. Hints alone are not enough: the client data carries no 隐藏势力 and disagrees with
+PRTS for many operators. Addition of assets (`docs/research/07-assets.md` §0) and a kit spec per skill are the follow-up
+work for newly added operators — an operator without art renders as its first character rather than breaking.
+`test/freePicks.test.js` locks the invariants (roster derived + no pool duplicate, one 主盟约, no 特质, prototype art).
 
 ---
 
@@ -557,7 +566,7 @@ Glyph legend (`rows`):
 
 `chess 266 (112 visible; 283 selectable skills over the visible chess, 184 module choices over 129 goldens)`, `bonds 23`, `garrisons 249 (43 effect keys)`, `items 115`, `bands 40`, `effects 361`,
 `enemies 249`, `factions 67 entries`, `waves 38`, `stages 11 (8 active)`, `bosses 10`, `tokens 22`, `choice events 109`,
-`bounty cards 129`, `tactic cards 43`, `自选干员 15` (§2.3 — outside `chess.json` on purpose).
+`bounty cards 129`, `tactic cards 43`, `自选干员 93` (§2.3 — outside `chess.json` on purpose).
 
 ## 17. Integrity guarantees (checked by the builder and `test/data.test.js`)
 
@@ -571,7 +580,8 @@ stages are 19 × 21 with known glyphs and contiguous helper paths; bosses/factio
 variants carry `sources`; enemies have `maxHp`/`bat` > 0, `aspd`/`moveSpeed`/`lpr` ≥ 0 and `rangeRadius` ≥ 0 (0 for
 MELEE); no non-finite numbers; total size < 6 MB. 自选干员 (§2.3) are checked too: every `FREE_PICK_CHARS` entry builds
 a record that is **not** a season chess, stays `visible:false` / `chessType 'PROTOTYPE'` / `freePick:true`, carries stats,
-exactly one default skill, an attack range and a 自由位置 level, is 协防干员 only (`bonds:["emptyShip"]`) and owns no 特质
+exactly one default skill, an attack range and a 自由位置 level, carries exactly ONE 主盟约 (a core faction bond or
+协防干员 `emptyShip`, never a bond that is not in `bonds.json`) and owns no 特质
 (`garrisonIds:[]`). `test/data.test.js` additionally re-derives every chess/enemy stat
 from the raw official tables (incl. the float32 `attrPower`) and rebuilds offline to prove `data/` is not stale (both
 skipped without the cache); faction entries carry no `k` copies and share one movement class; every device's

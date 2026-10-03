@@ -195,17 +195,15 @@ export const isFreePicks = (v) => isPlain(v)
 /**
  * 调度中心 levels a chess record may be **picked** at for a 自由位置 (DESIGN §21), `[]` when it is not selectable:
  *   - a 自选候选 record of data/freePicks.json (`freePick: true`): its own `freePickLevels`
- *   - a season NORMAL 6★ chess — "除所有预设干员以外的玩家拥有的六星干员": 5 级 and 6 级
- *   - every PRESET / DIY chess (预设干员) and every non-6★ season chess: never
+ *   - every season chess: never — a 自选候选 is by construction an operator the season pool does NOT offer, so offering
+ *     a season chess here would duplicate one that is already in the pool ("已经在干员池内的干员不应该进入自选池" [user])
  * Shared by the server check (`checkFreePicks`) and the 干员调配 picker, so the two can never disagree.
  * @param {any} rec a chess record (season or 自选候选)
  * @returns {number[]}
  */
 export function freePickLevelsOf(rec) {
-  if (!rec || typeof rec !== 'object') return [];
-  if (rec.freePick === true) return Array.isArray(rec.freePickLevels) ? rec.freePickLevels.filter((n) => FREE_PICK_LIMITS.levels.includes(n)) : [];
-  if (!rec.isGolden && rec.chessType === 'NORMAL' && rec.rarity === 6) return [...FREE_PICK_LIMITS.levels];
-  return [];
+  if (!rec || typeof rec !== 'object' || rec.freePick !== true) return [];
+  return Array.isArray(rec.freePickLevels) ? rec.freePickLevels.filter((n) => FREE_PICK_LIMITS.levels.includes(n)) : [];
 }
 
 /**

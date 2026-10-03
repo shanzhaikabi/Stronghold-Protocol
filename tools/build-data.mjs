@@ -327,10 +327,13 @@ async function loadContext() {
   const research = {
     core: await loadResearch('01-core-data.json'),
     bonds: await loadResearch('02-bonds.json'),
+    operators: await loadResearch('03-operators.json'),
     items: await loadResearch('04-items.json'),
     enemies: await loadResearch('05-enemies.json'),
     maps: await loadResearch('05-maps.json'),
     assets: await loadResearch('07-assets.json'),
+    // 自选干员 主盟约 verified against PRTS (docs/research/12-free-pick-factions.json): { bonds: { charId: bondId|null } }
+    freePicks: await loadResearch('12-free-pick-factions.json'),
   };
 
   return {
@@ -950,24 +953,79 @@ function buildChess(ctx) {
 // ===== 自选干员 (free picks, DESIGN §21) =========================================================
 
 /**
- * charIds a 自由位置 (自选干员) may bring into the player's own shop pool. They get a record in data/freePicks.json
- * that is NOT a season chess and never enters the season pool (visible:false, chessType 'PROTOTYPE').
+ * 所属势力 / 分组 / 小队 (client `nationId` / `groupId` / `teamId`) → the core bond it grants (user rule): 阿戈尔,
+ * 卡西米尔, 拉特兰, 萨尔贡, 维多利亚, 谢拉格, 叙拉古 and 炎 — **龙门 and every 炎 sub-faction count as 炎** (龙门近卫局,
+ * 李氏, 岁 …). Anything else (罗德岛, 哥伦比亚, 莱塔尼亚, 乌萨斯, 东国, 伊比利亚, 萨米, 米诺斯, 雷姆必拓, 黑钢国际,
+ * 汐斯塔, the collaboration teams …) grants no core bond, so the operator is 协防干员.
  *
- * Seeded with the 原型干员 the season's `backupCharId` data points at (docs/research/03-operators.json `backup`):
- * the 6★ 罗德岛特派高级干员 char_608..617 and the 4★ 预备干员 char_600..607. The official character_table carries
- * no team/faction for them (nationId/groupId/teamId are all null), so their only bond is 协防
- * (constData.fallbackBondId `emptyShip`) and they carry no 特质 [user playtest].
- *
- * Extensible by design: append charIds here to offer further Arknights operators. Each addition needs (a) assets —
- * the pipeline and its per-class hit rates are in docs/research/07-assets.md §0 — and (b) a kit spec for every skill
- * it exposes (enforced by the kit coverage test), so add them in small batches.
+ * These are only HINTS: the client data does not carry the 隐藏势力 the PRTS tables record, and the two disagree often
+ * (能天使 is 龙门 by nationId but 拉特兰, 水月 is 东国 but 阿戈尔, 卡涅利安 is 莱塔尼亚 but 萨尔贡, 缄默德克萨斯 is 龙门
+ * but 叙拉古 — all four confirmed by the game's own autochess bond data). `PRTS_FACTION_BONDS` below overrides them for
+ * every operator that has been checked against PRTS.
  */
-const FREE_PICK_CHARS = Object.freeze([
-  'char_600_cpione', 'char_601_cguard', 'char_602_cdfend', 'char_603_csnipe',
-  'char_604_ccast', 'char_605_cmedic', 'char_606_csuppo', 'char_607_cspec',
-  'char_608_acpion', 'char_609_acguad', 'char_610_acfend', 'char_611_acnipe', 'char_612_accast',
-  'char_613_acmedc', 'char_614_acsupo', 'char_615_acspec', 'char_617_sharp2',
-]);
+const FACTION_BOND = Object.freeze({
+  egir: 'egirShip', kazimierz: 'kazimierzShip', kjerag: 'kjeragShip', laterano: 'lateranoShip',
+  sargon: 'sargonShip', siracusa: 'siracusaShip', victoria: 'victoriaShip', yan: 'yanShip', lungmen: 'yanShip',
+  // 炎国 sub-factions (龙门 etc.)
+  sui: 'yanShip', lgd: 'yanShip', lee: 'yanShip',
+  // 维多利亚 sub-factions
+  glasgow: 'victoriaShip', tara: 'victoriaShip',
+});
+
+/**
+ * The 自选候选 roster (DESIGN §21), DERIVED from the client data instead of hand-listed [user]:
+ *
+ *   1. every 6★ operator of character_table that no season chess record uses — so a candidate can never duplicate one the
+ *      shop already offers ("已经在干员池内的干员不应该进入自选池") and the roster grows on its own when the game adds
+ *      operators;
+ *   2. the 4★ 预备干员 of the season's own backup data (docs/research/03-operators.json `backup`, the same data the
+ *      season uses for its substitute operators) — the 6★ ones are already covered by (1).
+ *
+ * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
+ * @returns {string[]} charIds, sorted
+ */
+function freePickCharIds(ctx, seasonChess) {
+  const used = new Set();
+  for (const rec of Object.values(seasonChess)) if (rec.charId) used.add(rec.charId);
+  const out = [];
+  for (const id of Object.keys(ctx.charTable).sort(naturalCmp)) {
+    const c = ctx.charTable[id];
+    if (!c || c.rarity !== 'TIER_6' || !id.startsWith('char_') || !c.profession || c.profession === 'TOKEN') continue;
+    if (used.has(id)) continue;
+    out.push(id);
+  }
+  const seen = new Set(out);
+  const backups = new Set();
+  for (const rec of ctx.research.operators?.chess || []) {
+    if (rec && rec.backup && typeof rec.backup.charId === 'string') backups.add(rec.backup.charId);
+  }
+  for (const id of [...backups].sort(naturalCmp)) {
+    if (seen.has(id) || used.has(id) || !ctx.charTable[id]) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * The 主盟约 of a 自选候选 (DESIGN §21): the core bond of the faction PRTS records, else 协防干员 (`emptyShip`).
+ * `PRTS_FACTION_BONDS` (docs/research/12-free-pick-factions.json) is authoritative where it has an entry — including a
+ * `null` entry, which means "checked, belongs to none of the 8" — and the client-data hints decide the rest.
+ * @param {object} ctx build context
+ * @param {string} charId @param {any} char the character_table record
+ * @returns {{ bond: string, source: string }}
+ */
+function freePickMainBond(ctx, charId, char) {
+  const table = ctx.research.freePicks?.bonds;
+  if (table && Object.hasOwn(table, charId)) {
+    const v = table[charId];
+    return v ? { bond: v, source: 'prts' } : { bond: 'emptyShip', source: 'prts' };
+  }
+  for (const key of [char.nationId, char.groupId, char.teamId]) {
+    if (key && FACTION_BOND[key]) return { bond: FACTION_BOND[key], source: `hint:${key}` };
+  }
+  return { bond: 'emptyShip', source: 'none' };
+}
 
 /**
  * 自由位置 levels a free pick is selectable at: every 6★ at 5 级 and 6 级, the 4★ 预备干员 at 5 级 only — and among
@@ -980,22 +1038,28 @@ function freePickLevels(rarity, profession) {
 }
 
 /**
- * Build data/freePicks.json: one record per FREE_PICK_CHARS charId, shaped like a chess record (the client, the sim
- * and the pool logic can then treat it as one) but explicitly marked as a 自选候选 rather than a season chess.
+ * Build data/freePicks.json: one record per 自选候选 charId (freePickCharIds: every 6★ the season pool does not offer,
+ * plus the 4★ 预备干员), shaped like a chess record (the client, the sim and the pool logic can then treat it as one) but
+ * explicitly marked as a 自选候选 rather than a season chess.
  *
- * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4 — all 53 visible NORMAL
- * chess use it). `tier` is provisional (= rarity): the 自由位置 shop-tier gate is settled with the pool work.
- * `tokens` stays empty until the operators' skills get kits (their summons belong to that step).
+ * `bonds` carries the operator's 主盟约 alone (freePickMainBond): PRTS's faction where it has been checked, else the
+ * client-data hints, else 协防干员 — never a second bond, because the ban filter drops a pick by its single 主盟约 [user].
+ * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4). `tier` is provisional
+ * (= rarity). `tokens` stays empty until these operators' skills get kits (their summons belong to that step).
+ * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
  */
-function buildFreePicks(ctx) {
+function buildFreePicks(ctx, seasonChess) {
   const { charTable, uniequip } = ctx;
   const out = {};
-  for (const charId of FREE_PICK_CHARS) {
+  const bondStats = {};
+  for (const charId of freePickCharIds(ctx, seasonChess)) {
     const char = charTable[charId];
     if (!char) { warn(`freePick ${charId}: missing from character_table`); continue; }
     const rarity = Number(String(char.rarity).replace('TIER_', '')) || null;
     const levels = freePickLevels(rarity, char.profession);
     if (!levels.length) { warn(`freePick ${charId}: no 自由位置 level (rarity ${rarity}, ${char.profession})`); continue; }
+    const mainBond = freePickMainBond(ctx, charId, char);
+    bondStats[mainBond.source] = (bondStats[mainBond.source] || 0) + 1;
     const chessId = `chess_free_${charId}`;
     const phase = 2;      // E2: every NORMAL chess of the season is fielded at phase 2
     const level = 1;
@@ -1034,7 +1098,9 @@ function buildFreePicks(ctx) {
       subProfessionName: uniequip.subProfDict?.[char.subProfessionId]?.subProfessionName || null,
       position: char.position,
       nationId: char.nationId || null,
-      bonds: ['emptyShip'], // 协防干员: the prototypes carry no faction [user]
+      // the single 主盟约 of this 自选候选 (never a second bond: the ban filter drops a pick by its 主盟约 alone)
+      bonds: [mainBond.bond],
+      bondSource: mainBond.source,
       garrisonIds: [],      // 不拥有特质 [user]
       price: null, sellPrice: null,
       upgradeNum: null, upgradeChessId: null,
@@ -1057,6 +1123,10 @@ function buildFreePicks(ctx) {
     Object.assign(rec, traitDefault.classify);
     if (!out[chessId]) out[chessId] = rec;
   }
+  const byBond = {};
+  for (const rec of Object.values(out)) byBond[rec.bonds[0]] = (byBond[rec.bonds[0]] || 0) + 1;
+  log(`freePicks: ${Object.keys(out).length} 自选候选 — 主盟约 ${Object.entries(byBond).sort().map(([b, n]) => `${b}:${n}`).join(' ')}`);
+  log(`freePicks: bond source ${Object.entries(bondStats).sort().map(([s, n]) => `${s}:${n}`).join(' ')}`);
   return out;
 }
 
@@ -2904,17 +2974,21 @@ function validateAll(f) {
     for (const id of [...(p.items || []), ...(p.weighted || []).map((x) => x[0])]) if (!id || !(items[id] || chess[id])) err(`pool ${pid}: unresolved entry ${id}`);
   }
   for (const id of Object.keys(SHOP_EXCLUDED_ITEMS)) if (!items[id] || items[id].itemType !== 'EQUIP' || items[id].isGolden) err(`SHOP_EXCLUDED_ITEMS: ${id} is not a normal EQUIP item`);
-  // 自选干员 (DESIGN §21): every FREE_PICK_CHARS entry must build, stay out of the season pool and be 协防-only.
-  if (!Object.keys(freePicks).length) err('freePicks: FREE_PICK_CHARS produced no record');
+  // 自选干员 (DESIGN §21): every 自选候选 must build, stay out of the season pool, own no 特质 and carry exactly ONE 主盟约.
+  if (!Object.keys(freePicks).length) err('freePicks: the derived 自选候选 roster is empty');
+  const seasonCharIds = new Set();
+  for (const rec of Object.values(chess)) if (rec.charId) seasonCharIds.add(rec.charId);
   for (const [id, r] of Object.entries(freePicks)) {
     if (chess[id]) err(`freePicks ${id}: also a season chess (the shop pool would pick it up)`);
+    if (r.charId && seasonCharIds.has(r.charId)) err(`freePicks ${id}: its operator ${r.charId} already has a season chess (duplicate)`);
     if (r.visible || r.chessType !== 'PROTOTYPE' || !r.freePick) err(`freePicks ${id}: bad pool flags (visible ${r.visible}, type ${r.chessType})`);
     if (!r.stats || !(r.stats.maxHp > 0) || !(r.stats.atk > 0)) err(`freePicks ${id}: bad stats`);
     if (!Array.isArray(r.skills) || !r.skills.length) err(`freePicks ${id}: no skill`);
     if (r.skills?.filter((s) => s.isDefault).length !== 1) err(`freePicks ${id}: needs exactly one default skill`);
     if (!Array.isArray(r.rangeGrid) || !r.rangeGrid.length) err(`freePicks ${id}: no attack range`);
     if (r.garrisonIds.length) err(`freePicks ${id}: 自选干员 own no 特质`);
-    if (r.bonds.length !== 1 || r.bonds[0] !== 'emptyShip') err(`freePicks ${id}: must be 协防干员 only (${r.bonds.join(',')})`);
+    if (r.bonds.length !== 1) err(`freePicks ${id}: exactly one 主盟约, got ${r.bonds.join(',')}`);
+    else if (!bonds[r.bonds[0]]) err(`freePicks ${id}: unknown 主盟约 ${r.bonds[0]}`);
     if (!r.freePickLevels.length) err(`freePicks ${id}: no 自由位置 level`);
   }
   for (const [id, fl] of Object.entries(TOKEN_ABNORMAL)) {
@@ -2942,7 +3016,7 @@ async function main() {
   const ctx = await loadContext();
   log('building…');
   const { chess, tokenOwners } = buildChess(ctx);
-  const freePicks = buildFreePicks(ctx);
+  const freePicks = buildFreePicks(ctx, chess);
   const effects = buildEffects(ctx);
   const bonds = buildBonds(ctx, chess, effects);
   const garrisons = buildGarrisons(ctx, chess);

@@ -112,7 +112,10 @@ button.lo-free__slot:disabled { opacity: .5; cursor: default; }
 .lo-free__x:disabled { opacity: .4; cursor: default; }
 .lo-free__x .icon { width: max(.15rem, 10px); height: max(.15rem, 10px); }
 
-.lo-free__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(1.2rem, 1fr)); gap: .1rem; max-height: 54vh; overflow-y: auto; }
+.lo-free__bar { display: flex; align-items: center; gap: .12rem; margin-bottom: .1rem; flex-wrap: wrap; }
+.lo-free__search { flex: none; width: 3.2rem; }
+.lo-free__found { flex: none; font-size: max(.15rem, 10px); }
+.lo-free__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(1.2rem, 1fr)); gap: .1rem; max-height: 50vh; overflow-y: auto; }
 .lo-free__pick {
   display: flex; flex-direction: column; align-items: center; gap: .04rem; padding: .08rem .05rem;
   border: 1px solid var(--line); border-radius: .06rem; background: rgba(16, 20, 19, .72);
