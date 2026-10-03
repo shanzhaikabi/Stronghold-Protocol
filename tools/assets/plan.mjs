@@ -189,6 +189,33 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
 // plan
 
 /**
+ * Art locations of an operator research 07 does not list — the 自选干员 the free-pick roster adds (DESIGN §21). They are
+ * derived from the documented patterns (research 07 §3) instead of a research pass: avatar / portrait are
+ * `{charId}[_2].png` in the yuanyan dump, the battle Spine is `spine/{charId}/{charId}/{Front,Back}/{charId}.{skel,
+ * atlas,png}` in the fexli dump, and the skill icons come from the built game data (already-resolved iconIds, brackets
+ * percent-encoded exactly like every other skill icon). A wrong guess costs one 404: a missing file is tolerated, and
+ * the client falls back to its letter glyph.
+ * @param {string} id charId
+ * @param {{ skills?: Array<{ index: number, skillId?: string, iconId?: string }> }} [extra] built skill records
+ */
+function syntheticOperator(id, extra) {
+  const spine = (dir) => ({
+    skel: { url: `${RAW.fexli}spine/${id}/${id}/${dir}/${id}.skel` },
+    atlas: { url: `${RAW.fexli}spine/${id}/${id}/${dir}/${id}.atlas` },
+    png: { url: `${RAW.fexli}spine/${id}/${id}/${dir}/${id}.png` },
+  });
+  return {
+    avatar: { e0e1: { url: `${RAW.yuanyan}avatar/${id}.png` }, e2: { url: `${RAW.yuanyan}avatar/${id}_2.png` } },
+    portrait: { e0e1: { url: `${RAW.yuanyan}portrait/${id}_1.png` }, e2: { url: `${RAW.yuanyan}portrait/${id}_2.png` } },
+    battleSpine: { front: spine('Front'), back: spine('Back') },
+    skills: (extra?.skills || []).map((s) => {
+      const iconId = s.iconId || s.skillId;
+      return { index: s.index, skillId: s.skillId, iconId, icon: { url: `${RAW.yuanyan}skill/skill_icon_${encodeURIComponent(iconId)}.png` } };
+    }),
+  };
+}
+
+/**
  * Build the asset plan.
  * @param {object} p
  * @param {any} p.assets07 docs/research/07-assets.json
@@ -200,9 +227,12 @@ export function collectEnemyIds({ assets07, enemies05, maps05, ops03 }) {
  * @param {string[]} [p.extraEnemyIds] more enemy ids that can spawn (e.g. keys of data/enemies.json)
  * @param {string[]} [p.extraTokenIds] more token ids (e.g. token_* keys of data/tokens.json)
  * @param {Record<string,string>} [p.extraHandbook] enemyId → handbook/model id (e.g. from data/bosses.json)
+ * @param {Record<string,{skills?: Array<{index:number,skillId?:string,iconId?:string}>}>} [p.extraOperators]
+ *   operators outside research 07 — the 自选干员 of data/freePicks.json (DESIGN §21): their art locations are derived
+ *   (syntheticOperator) and their skill icons come from the built records
  * @returns {{ template: any, models: Map<string, any>, notes: string[] }}
  */
-export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, extraEnemyIds = [], extraTokenIds = [], extraHandbook = {} }) {
+export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsData, extraEnemyIds = [], extraTokenIds = [], extraHandbook = {}, extraOperators = {} }) {
   const notes = [];
   /** @type {Map<string, any>} */
   const models = new Map();
@@ -231,13 +261,16 @@ export function buildPlan({ assets07, ops03, enemies05, maps05, audio, modelsDat
   const skills = {};
   const skillsById = {};
   const unitsSfx = {};
-  const charIds = Object.keys(assets07?.operators || {}).sort();
+  // research 07's operators + the 自选干员 the free-pick roster adds (DESIGN §21), whose locations are derived
+  const extraIds = Object.keys(extraOperators).filter((id) => id && !assets07?.operators?.[id]);
+  const charIds = [...new Set([...Object.keys(assets07?.operators || {}), ...extraIds])].sort();
+  if (extraIds.length) notes.push(`${extraIds.length} 自选干员 outside research 07: art locations derived (patterns of research 07 §3)`);
   for (const id of charIds) {
-    const o = assets07.operators[id];
+    const o = assets07?.operators?.[id] || syntheticOperator(id, extraOperators[id]);
     // DESIGN §16 operator loadouts: any skill of the character can be equipped — the icons, skill SFX and Spine skill
     // clips of every skill index (the pool's primary index first, as before)
-    const idx0 = skillIdx.get(id) || [0];
-    const idx = [...idx0, ...(o.skills || []).map((k) => k.index).filter((i) => Number.isInteger(i) && i >= 0 && !idx0.includes(i)).sort((a, b) => a - b)];
+    const idx0 = assets07?.operators?.[id] ? (skillIdx.get(id) || [0]) : (extraOperators[id]?.skills || []).map((s) => s.index).filter((i) => Number.isInteger(i) && i >= 0).sort((a, b) => a - b);
+    const idx = [...(idx0.length ? idx0 : [0]), ...(o.skills || []).map((k) => k.index).filter((i) => Number.isInteger(i) && i >= 0 && !idx0.includes(i)).sort((a, b) => a - b)];
     const c = {};
     c.avatar = leaf(alt(`char/avatar/${id}.png`, o.avatar?.e0e1?.url, o.avatar?.e0e1?.bytes));
     if (o.avatar?.e2?.url) c.avatarE2 = leaf(alt(`char/avatar/${id}_2.png`, o.avatar.e2.url, o.avatar.e2.bytes));
