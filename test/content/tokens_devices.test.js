@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { hasGeneratedData, getDefaultSource } from '../../server/sim/simdata.js';
 import { genericKit } from '../../server/sim/content/generic.js';
-import { spawnYanyou, spawnMapChar, TOKEN_IDS, wolfShadows, tileFree, findSummonTile, summonToken } from '../../server/sim/content/tokens.js';
+import { spawnYanyou, spawnMapChar, TOKEN_IDS, WANG_STONE_SKILLS, kits as TOKEN_KITS, wolfShadows, tileFree, findSummonTile, summonToken } from '../../server/sim/content/tokens.js';
 import { startColdWind, kjeragColdWind, activateTurrets, terrainAt, deviceOverridesOf } from '../../server/sim/content/devices.js';
 
 const REAL = { skip: !hasGeneratedData() };
@@ -359,8 +359,101 @@ test('香槟炸弹: the first ground enemy on its tile takes owner ATK × atk_sc
   checkInvariants(h.b);
 });
 
-test('从不混淆的方向: marker of the owner\'s tile; when the skill ends it vanishes and the owner walks back', REAL, () => {
-  const kit = () => ({ talents: [], skill: { kind: 'duration', duration: 3, trigger: 'SP_FULL', spCost: 1, initSp: 1,
+// =================================================================================================================
+// 棋子 (望 铸子, `token_10064_wang_stone1`) — the first hand-authored free-pick summon (DESIGN §21.11)
+
+const WANG = 'chess_free_char_2027_wang';
+const STONE = TOKEN_IDS.wangStone;
+
+/** True while the battle is set up with 望 (`slot` = its skillIndex: 0 取势 / 1 连星 / 2 天下劫, its default). */
+const wangUnits = (slot, stones) => [{ chessId: WANG, row: 12, col: 3, uid: 1, skillIndex: slot },
+  ...stones.map(([r, c], i) => ({ kind: 'token', tokenId: STONE, row: r, col: c, uid: 11 + i, ownerUid: 1, dir: 'RIGHT' }))];
+
+/** A 棋子 battle: `stones` = [row, col] of each piece placed by hand, `enemies` as usual. */
+function stoneBattle({ slot = 2, stones = [], enemies = [], hooks = ['damaged', 'death'] } = {}) {
+  const h = makeBattle({
+    defs: { enemies: { enemy_dummy: dummy({ res: 0, atk: 0 }) } },
+    units: wangUnits(slot, stones), enemies, autoFinish: false, timeLimit: 30, hooks, captureNoisy: true,
+  });
+  h.step();
+  const owner = h.b.units.find((u) => u.defId === WANG);
+  return { h, owner, def: h.b.tokenDef(STONE, owner), stones: h.b.allyUnits.filter((u) => u.defId === STONE) };
+}
+
+test('棋子 (望 铸子): 天下劫 — the skill grid is the trigger AND the damage range, and the fired stone is used up', REAL, () => {
+  // the stone at (10,5) covers the radius-2 plus: (12,5) and (10,7) inside, (10,8) one tile beyond it
+  const { h, owner, def } = stoneBattle({ slot: 2, stones: [[10, 5]], enemies: [{ key: 'enemy_dummy', pos: [12, 5] }, { key: 'enemy_dummy', pos: [10, 7] }, { key: 'enemy_dummy', pos: [10, 8] }] });
+  assert.equal(def.skill.id, WANG_STONE_SKILLS.tianxiajie, '望 S3 (its default) gives the stone 天下劫');
+  const bb = def.skill.bb;
+  const stone = h.b.allyUnits.find((u) => u.defId === STONE);
+  assert.equal(stone.kit.fromTokens, true, 'the hand-authored token kit runs');
+  assert.ok(stone.kit.generic !== true);
+  assert.ok(h.runUntil(() => !stone.alive, 5), 'an enemy in the grid fired the stone');
+  const [near, near2, far] = h.enemies();
+  // 望's 料敌机先 talent: +13 % damage and 12 flat RES penetration per stone on the fired stone's line (1 here)
+  const per = owner.s.atk * bb.atk_scale * (1 + 0.13);
+  approx(1e7 - near.hp, per, 1e-9, '半径2的十字: 2 tiles away');
+  approx(1e7 - near2.hp, per, 1e-9, 'every enemy in the grid takes it');
+  assert.equal(far.hp, 1e7, 'a third tile away is outside the grid');
+  const dealt = h.hooksOf('damaged').filter((c) => c.target === near);
+  assert.equal(dealt.length, 1);
+  assert.equal(dealt[0].type, 'arts', '法术伤害');
+  assert.equal(dealt[0].dmg.resIgnoreFlat, 12, '料敌机先 ignores 12 RES per line stack');
+  // used up: the blast fx marks it consumed and the retreat is no knock-out (香槟炸弹 precedent)
+  const fx = h.events.find((e) => e[0] === 'fx' && e[4] && e[4].id === stone.id);
+  assert.ok(fx && fx[4].consumed === true, 'its explosion is a consumed blast');
+  const death = h.hooksOf('death').find((c) => c.unit === stone);
+  assert.equal(death.reason, 'expired', 'a used-up stone is not knocked out');
+  checkInvariants(h.b);
+});
+
+test('棋子: 取势 — the triggering enemy is 停顿 and burns 望 ATK × 1.05 arts per second for 6.5 s, the stone being gone', REAL, () => {
+  // two adjacent stones: the firing one reads 2 料敌机先 stacks off its line, and only IT is used up
+  const { h, owner, def, stones } = stoneBattle({ slot: 0, stones: [[10, 5], [10, 6]], enemies: [{ key: 'enemy_dummy', pos: [10, 5] }] });
+  assert.equal(def.skill.id, WANG_STONE_SKILLS.qushi, '望 S1 gives the stone 取势');
+  const bb = def.skill.bb;
+  const [fired, spare] = stones;
+  assert.ok(h.runUntil(() => !fired.alive, 5), 'the stone the enemy stepped on fired');
+  assert.ok(spare.alive, 'the other stone stays');
+  const e = h.enemy('enemy_dummy');
+  const slug = e.findBuff('sluggish');
+  assert.ok(slug, '停顿');
+  assert.ok(slug.timeLeft > 5 && slug.timeLeft <= 6.5 + 1e-6, `6.5 s of 停顿 (${slug.timeLeft})`);
+  h.run(8);
+  const ticks = h.hooksOf('damaged').filter((c) => c.target === e);
+  assert.equal(ticks.length, 6, 'one tick per second over 6.5 s');
+  assert.equal(ticks[0].dmg.sourceless, true, 'the DoT is 无来源 (PRTS: 由望…以无来源的形式施加给目标)');
+  approx(1e7 - e.hp, 6 * owner.s.atk * bb.atk_scale * (1 + 0.13 * 2), 1e-9, 'the DoT outlives the stone');
+  checkInvariants(h.b);
+});
+
+test('棋子: 连星 — the connected line (3 tiles each side) takes 望 ATK × 4.2 arts and moves at ×0.65 for 6 s', REAL, () => {
+  // stones (10,4) (10,5) (10,6) = one horizontal line; the enemy triggers the middle one, so the line's 3 stacks apply
+  const { h, owner, def, stones } = stoneBattle({
+    slot: 1, stones: [[10, 4], [10, 5], [10, 6]],
+    enemies: [{ key: 'enemy_dummy', pos: [10, 5] }, { key: 'enemy_dummy', pos: [10, 7] }, { key: 'enemy_dummy', pos: [9, 5] }, { key: 'enemy_dummy', pos: [10, 9] }],
+  });
+  assert.equal(def.skill.id, WANG_STONE_SKILLS.lianxing, '望 S2 gives the stone 连星');
+  const bb = def.skill.bb;
+  const mid = stones.find((s) => s.tileR === 10 && s.tileC === 5);
+  assert.ok(h.runUntil(() => !mid.alive, 5), 'the middle stone fired');
+  const [onIt, along, aside, beyond] = h.enemies();
+  const per = owner.s.atk * bb.atk_scale * (1 + 0.13 * 3);
+  approx(1e7 - onIt.hp, per, 1e-9, 'the triggering enemy');
+  approx(1e7 - along.hp, per, 1e-9, '2 tiles along the line');
+  assert.equal(aside.hp, 1e7, 'a stone off the line is not hit');
+  assert.equal(beyond.hp, 1e7, '4 tiles along the line is past the 3-tile range');
+  assert.equal(h.hooksOf('damaged').find((c) => c.target === onIt).dmg.resIgnoreFlat, 36, '3 料敌机先 stacks = 36 RES');
+  for (const e of [onIt, along]) {
+    const slow = e.findBuff(`wang:stone:slow:${mid.id}`);
+    assert.ok(slow, '移动速度降低');
+    assert.equal(slow.mods.moveMul, Math.max(0, 1 + bb.move_speed), '×0.65');
+    approx(slow.timeLeft, bb.duration, 0.05, '6 s');
+  }
+  checkInvariants(h.b);
+});
+
+test('从不混淆的方向: marker of the owner\'s tile; when the skill ends it vanishes and the owner walks back', REAL, () => {  const kit = () => ({ talents: [], skill: { kind: 'duration', duration: 3, trigger: 'SP_FULL', spCost: 1, initSp: 1,
     onStart({ battle, unit }) {
       const [r, c] = [unit.tileR, unit.tileC];
       if (battle.relocate(unit, 10, 7)) battle.spawnToken(unit, TOKEN_IDS.ulpiaMarker, r, c);
@@ -437,7 +530,8 @@ test('every token of data/tokens.json spawns with data defaults and runs without
     assert.ok(t, `${id} spawned`);
     assert.ok(t.kit && t.kit.fromTokens, `${id} uses its token kit`);
   }
-  // the free-pick summons spawn with their data too (no kit: the generic one, a stated gap), and run cleanly
+  // the free-pick summons spawn with their data too; the hand-authored ones (棋子 first, DESIGN §21.11) run their own
+  // token kit, the rest still fall back to the generic one — that gap is pinned here instead of hidden
   const freeIds = Object.keys(raw).filter((id) => id !== TOKEN_IDS.yanyou && isFree(id));
   assert.ok(freeIds.length >= 20, `${freeIds.length} 自选干员 summons in tokens.json`);
   const h2 = makeBattle({ defs: { chess: { test_owner: summoner() } }, units: [{ chessId: 'test_owner', row: 12, col: 2 }], autoFinish: false, timeLimit: 60 });
@@ -450,7 +544,7 @@ test('every token of data/tokens.json spawns with data defaults and runs without
     // spawn with the record's own defaults (`def:`): a free pick's variant is keyed by ITS chess id, not by test_owner
     const t = h2.b.spawnToken(o2, id, r, c, { def: raw[id] });
     assert.ok(t, `${id} spawned`);
-    assert.equal(t.kit?.fromTokens, undefined, `${id}: no hand-authored token kit yet`);
+    assert.equal(t.kit?.fromTokens, TOKEN_KITS[id] ? true : undefined, `${id}: hand-authored token kit ⇔ its kit runs`);
   }
   h2.run(10);
   assert.deepEqual(h2.b.errors.filter((e) => /tokens\.js|devices\.js/.test(String(e.stack))), [], 'a free-pick summon runs cleanly');

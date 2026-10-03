@@ -3,9 +3,10 @@
 // ── WHAT THIS IS ────────────────────────────────────────────────────────────────────────────────────────────────
 // An env-gated, obviously-temporary debug path: it creates one fixed-code room whose matches hand every human a
 // 自选干员 (default 望, `chess_free_char_2027_wang`) at round 1 — so the user can verify the 自选干员 battle fix
-// without playing to 调度中心 5 级 first. Three more opt-in knobs open a match up from its FIRST prep (added
-// 2026-10-03 for the "do 自选干员 show up in the shop / pool" test): the 调度中心 level, bond layers and the
-// members that make a bond actually active. Everything is default-off and bots are never touched.
+// without playing to 调度中心 5 级 first. Four more opt-in knobs open a match up from its FIRST prep (added
+// 2026-10-03 for the "do 自选干员 show up in the shop / pool" test): the 调度中心 level, bond layers, the members that
+// make a bond actually active, and an open pool (no drawn bond bans). Everything is default-off, bots are never
+// touched, and unsetting the new variables leaves the original behaviour exactly as it was.
 //
 // ── HOW TO TURN IT ON ───────────────────────────────────────────────────────────────────────────────────────────
 //   SP_DEBUG_ROOM=WANG              ← the room code handed out (any 4 letters of ABCDEFGHJKLMNPQRSTUVWXYZ; "1" = WANG)
