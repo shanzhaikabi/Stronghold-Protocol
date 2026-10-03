@@ -13,8 +13,9 @@ import { PHASE } from '../../shared/constants.js';
 import {
   parseStored, toStored, chessOptions, effectiveChoice, setChoice, resetChoice, sanitizeEntries, rosterOf, filterRoster,
   changedCount, moduleBadge, attrRows, skillTags, skillLabel, selectedSkill, selectedModule, recordsOf,
+  exportPayload, serializeExport, parseImport, LOADOUT_EXPORT_KIND, LOADOUT_VERSION,
 } from '../../public/js/ui/loadoutModel.js';
-import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS } from '../../public/js/ui/loadoutSync.js';
+import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS, applyLoadoutEntries, setEntries, loadoutStore } from '../../public/js/ui/loadoutSync.js';
 import { createStore } from '../../public/js/store.js';
 import { shouldAutoClose } from '../../public/js/screens/loadout.js';
 
@@ -37,6 +38,56 @@ test('parseStored: tolerant of junk, keeps structurally valid entries; toStored 
   assert.deepEqual(parseStored({ [INSIDE]: { skill: 1 } }), { [INSIDE]: { skill: 1 } }, 'bare map (older build)');
   const e = { [INSIDE]: { skill: 0 } };
   assert.deepEqual(parseStored(JSON.parse(JSON.stringify(toStored(e)))), e);
+});
+
+test('exportPayload / serializeExport: versioned envelope, entries copied; parseImport round trip', () => {
+  const entries = { [INSIDE]: { skill: 0 }, [SWIRE]: { module: SWIRE_ALT } };
+  const p = exportPayload(entries, { now: Date.UTC(2026, 9, 3, 4, 5, 6), name: '我的调配' });
+  assert.equal(p.kind, LOADOUT_EXPORT_KIND);
+  assert.equal(p.v, LOADOUT_VERSION);
+  assert.equal(p.count, 2);
+  assert.equal(p.exportedAt, '2026-10-03T04:05:06.000Z');
+  assert.equal(p.name, '我的调配');
+  assert.deepEqual(p.entries, entries);
+  assert.notEqual(p.entries, entries, 'a copy — later edits must not mutate an already-built payload');
+  assert.notEqual(p.entries[INSIDE], entries[INSIDE]);
+  assert.equal(exportPayload(entries).name, null, 'no name by default');
+  assert.equal(exportPayload(null).count, 0);
+
+  const back = parseImport(serializeExport(entries, { now: 0 }));
+  assert.equal(back.ok, true);
+  assert.deepEqual(back.entries, entries);
+  assert.equal(back.meta.kind, LOADOUT_EXPORT_KIND);
+  assert.equal(back.meta.v, LOADOUT_VERSION);
+});
+
+test('parseImport: accepts the envelope, the stored form, a bare map and JSON text; refuses junk and newer data', () => {
+  const entries = { [INSIDE]: { skill: 0 } };
+  assert.deepEqual(parseImport(exportPayload(entries)).entries, entries, 'envelope');
+  assert.deepEqual(parseImport(toStored(entries)).entries, entries, 'stored { v, entries }');
+  assert.deepEqual(parseImport(entries).entries, entries, 'bare map (hand-written / older build)');
+  assert.deepEqual(parseImport(JSON.stringify(exportPayload(entries))).entries, entries, 'JSON text');
+  assert.deepEqual(parseImport(`\n  ${JSON.stringify(entries)}  \n`).entries, entries, 'padded JSON text');
+
+  for (const junk of ['', '   ', 'not json', '{', 42, null, undefined, [], true]) {
+    assert.equal(parseImport(junk).ok, false, `${JSON.stringify(junk)} is refused`);
+  }
+  assert.equal(parseImport({ v: LOADOUT_VERSION + 1, entries }).ok, false, 'a NEWER payload is refused, never mis-read');
+  assert.match(parseImport({ v: LOADOUT_VERSION + 1, entries }).error, new RegExp(`v${LOADOUT_VERSION}`));
+  assert.equal(parseImport({ kind: 'some.other.tool', entries }).ok, false, "another tool's payload");
+  assert.equal(parseImport({ v: LOADOUT_VERSION, entries: {} }).ok, false, 'nothing to import');
+  assert.equal(parseImport({ v: LOADOUT_VERSION, entries: { 'bad id': { skill: 0 } } }).ok, false, 'no structurally valid entry');
+});
+
+test('applyLoadoutEntries: sanitises against the loaded data and reports what was dropped', () => {
+  const before = loadoutStore.get().entries;
+  try {
+    const res = applyLoadoutEntries({ [INSIDE]: { skill: 0 }, chess_nope_999: { skill: 0 } }, get);
+    assert.deepEqual(res, { applied: 1, dropped: 1 }, 'the unknown chess is dropped, the real one applied');
+    assert.deepEqual(loadoutStore.get().entries, { [INSIDE]: { skill: 0 } }, 'the store got the sanitised entries');
+  } finally {
+    setEntries(before);
+  }
 });
 
 test('options: skill records at Lv4 (normal) and Lv7 (elite); modules + 不装备 with defaults flagged', () => {
