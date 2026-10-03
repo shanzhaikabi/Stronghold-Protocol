@@ -1038,20 +1038,115 @@ function freePickLevels(rarity, profession) {
 }
 
 /**
+ * 模组 block of one 自选候选 (DESIGN §16 / §21; user rule "模组相关规则和普通干员一致"): a 自选候选 has no
+ * charShopChessDatas row, so it is its own elite — the record carries the choices a season operator's GOLDEN chess
+ * carries (`modules[]` + `statsBase`/`traitBase`/`talentsBase` + the default module applied to `stats`/`trait`/`talents`
+ * and `module.active`). The default module is the one the season's backup 编队 marks for the character
+ * (`backupCharUniEquipId`), else the first ADVANCED module, else 不装备; the module level follows the season's chess
+ * tier (every tier-6 golden chess uses level 3, tiers 1–5 level 1 — 111 / 22 of the 133 golden chess), and its
+ * trait / talent candidates are read at the level the season fields a golden chess of that tier at (tier 1 → 50,
+ * 2 → 55, 3+ → 60: the 模组's own unlock level) — the operator's own stats / base talents keep the record's level.
+ * Returns null when the character has no ADVANCED module at that level: the record then keeps the module-less shape.
+ * @param {{ talentList: object[], traitDefault: object, attrs: object, backupEquip: Map<string, string>, tierLevels: Map<number, number> }} base
+ * @returns {{ equipLevel: number, module: object, modules: object[], stats: object, trait: object, talents: object[],
+ *             statsBase: object, traitBase: object, talentsBase: object[] }|null}
+ */
+function freePickModuleBlock(ctx, char, charId, tier, phase, level, base) {
+  const { uniequip, battleEquip } = ctx;
+  const { talentList, traitDefault, attrs, backupEquip, tierLevels } = base;
+  const label = `freePick ${charId}`;
+  const equipLevel = tier >= 6 ? 3 : 1;
+  const modLevel = tierLevels.get(tier) ?? 60;   // the 模组 candidate unlock level of that tier (see the header)
+  const allIds = (uniequip.charEquip?.[charId] || []).filter((id) => {
+    const meta = uniequip.equipDict?.[id];
+    return !!meta && meta.type !== 'INITIAL';
+  });
+  const phaseOf = (id) => battleEquip[id]?.phases?.find((p) => p.equipLevel === equipLevel) || null;
+  const ids = allIds.filter((id) => phaseOf(id));
+  for (const id of allIds) if (!phaseOf(id)) warn(`${label}: module ${id} has no level ${equipLevel} (not selectable)`);
+  if (!ids.length) return null;
+  const wanted = backupEquip.get(charId);
+  const modId = wanted && ids.includes(wanted) ? wanted : ids[0];
+  if (wanted && !ids.includes(wanted)) warn(`${label}: backup module ${wanted} is not selectable at level ${equipLevel}`);
+  const modulePhase = phaseOf(modId);
+  const parts = splitModuleParts(modulePhase);
+  const bonus = {};
+  for (const b of modulePhase?.attributeBlackboard || []) bonus[b.key] = (bonus[b.key] || 0) + b.value;
+  const traitOf = (opParts) => {
+    if (!opParts.some((pt) => bestCandidate(pt.overrideTraitDataBundle?.candidates, phase, modLevel))) return null;
+    const tr = traitRecord(ctx, char, phase, modLevel, opParts, charId);
+    if (JSON.stringify(tr.classify) !== JSON.stringify(traitDefault.classify)) {
+      warn(`${label}: module changes the combat classification (not applied by loadouts)`);
+    }
+    return tr;
+  };
+  const modules = [];
+  for (const id of ids) {
+    const meta = uniequip.equipDict?.[id];
+    const ph = phaseOf(id);
+    const pt = splitModuleParts(ph);
+    const tr = traitOf(pt.op);
+    modules.push({
+      uniEquipId: id, name: meta.uniEquipName || null,
+      typeName: `${meta.typeName1 || ''}${meta.typeName2 ? '-' + meta.typeName2 : ''}`,
+      typeIcon: meta.typeIcon || null, icon: meta.uniEquipIcon || id,
+      isDefault: id === modId, level: equipLevel,
+      attr: moduleAttr(ph),
+      traitOverride: tr ? tr.trait : null,
+      talentChanges: moduleTalentChanges(ctx, pt.op, phase, modLevel, label),
+    });
+  }
+  const meta = uniequip.equipDict?.[modId];
+  const tr = traitOf(parts.op);
+  return {
+    equipLevel,
+    module: {
+      id: modId, name: meta?.uniEquipName || null,
+      type: meta ? `${meta.typeName1 || ''}${meta.typeName2 ? '-' + meta.typeName2 : ''}` : null,
+      level: equipLevel, active: true,
+    },
+    modules,
+    stats: statsFrom(attrs, bonus),
+    trait: (tr && tr.trait) || traitDefault.trait,
+    talents: mergeTalentChanges(talentList, moduleTalentChanges(ctx, parts.op, phase, modLevel, label)),
+    statsBase: statsFrom(attrs, {}),
+    traitBase: traitDefault.trait,
+    talentsBase: mergeTalentChanges(talentList, []),
+  };
+}
+
+/**
  * Build data/freePicks.json: one record per 自选候选 charId (freePickCharIds: every 6★ the season pool does not offer,
  * plus the 4★ 预备干员), shaped like a chess record (the client, the sim and the pool logic can then treat it as one) but
  * explicitly marked as a 自选候选 rather than a season chess.
  *
  * `bonds` carries the operator's 主盟约 alone (freePickMainBond): PRTS's faction where it has been checked, else the
  * client-data hints, else 协防干员 — never a second bond, because the ban filter drops a pick by its single 主盟约 [user].
- * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4). `tier` is provisional
- * (= rarity). `tokens` stays empty until these operators' skills get kits (their summons belong to that step).
+ * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4); a record whose character
+ * has ADVANCED 模组 additionally carries its own module choices (freePickModuleBlock: 模组相关规则和普通干员一致) and
+ * then reports them in `status.equipLevel`, exactly like a golden chess. `tier` is provisional (= rarity). `tokens`
+ * stays empty until these operators' skills get kits (their summons belong to that step).
  * @param {object} ctx build context @param {Record<string, any>} seasonChess the built data/chess.json map
  */
 function buildFreePicks(ctx, seasonChess) {
   const { charTable, uniequip } = ctx;
   const out = {};
   const bondStats = {};
+  // The season's backup 编队 marks one 模组 per 原型干员 (`backupCharUniEquipId`) — the character's default module
+  // (every 原型干员 of the season is somebody's backup; a character outside them falls back to its first ADVANCED 模组).
+  const backupEquip = new Map();
+  for (const row of Object.values(ctx.act?.charShopChessDatas || {})) {
+    if (row?.backupCharId && row.backupCharUniEquipId) backupEquip.set(row.backupCharId, row.backupCharUniEquipId);
+  }
+  // The E2 level the season fields a golden chess of each tier at (tier 1 → 50, 2 → 55, 3+ → 60): the level a 模组's
+  // trait / talent candidates are unlocked at, so freePickModuleBlock reads them there.
+  const tierLevels = new Map();
+  for (const [chessId, cd] of Object.entries(ctx.act?.charChessDataDict || {})) {
+    if (!cd?.isGolden || !(cd.status?.charLevel > 0)) continue;
+    const shop = ctx.act.charShopChessDatas?.[ctx.act.chessNormalIdLookupDict?.[chessId] || chessId];
+    const t = shop?.chessLevel;
+    if (Number.isInteger(t)) tierLevels.set(t, Math.max(tierLevels.get(t) ?? 0, cd.status.charLevel));
+  }
   for (const charId of freePickCharIds(ctx, seasonChess)) {
     const char = charTable[charId];
     if (!char) { warn(`freePick ${charId}: missing from character_table`); continue; }
@@ -1082,6 +1177,9 @@ function buildFreePicks(ctx, seasonChess) {
     // These operators have no charShopChessDatas row, so there is no official defaultSkillIndex: the highest unlocked
     // index is the signature skill, the convention every 3-skill operator of the season follows.
     const defaultIdx = skillRecs.length ? skillRecs[skillRecs.length - 1].index : null;
+    const talentList = baseTalentList(ctx, char, phase, level, `freePick ${charId}`);
+    // 模组 (user rule "模组相关规则和普通干员一致"): this record is its own elite — see freePickModuleBlock.
+    const mod = freePickModuleBlock(ctx, char, charId, rarity, phase, level, { talentList, traitDefault, attrs, backupEquip, tierLevels });
     const rec = {
       chessId, baseId: chessId, goldenId: null, isGolden: false,
       tier: rarity, // provisional: see the 自由位置 shop-tier gate note above
@@ -1104,22 +1202,28 @@ function buildFreePicks(ctx, seasonChess) {
       garrisonIds: [],      // 不拥有特质 [user]
       price: null, sellPrice: null,
       upgradeNum: null, upgradeChessId: null,
-      status: { phase, level, skillLevel, equipLevel: 0 },
-      stats: statsFrom(attrs, {}),
+      status: { phase, level, skillLevel, equipLevel: mod ? mod.equipLevel : 0 },
+      stats: mod ? mod.stats : statsFrom(attrs, {}),
       immunities: attrs ? immunitiesOf(attrs) : null,
       rangeId, rangeGrid: rangeGrid(ctx, rangeId),
       dmgType: null, attackKind: null, projectile: null, canHitFly: false, targetPriority: null,
-      trait: traitDefault.trait,
+      trait: mod ? mod.trait : traitDefault.trait,
       skill: skillRecs.find((s) => s.index === defaultIdx) || null,
       skills: skillRecs.map((s) => ({ ...s, isDefault: s.index === defaultIdx })),
-      talents: mergeTalentChanges(baseTalentList(ctx, char, phase, level, `freePick ${charId}`), []),
-      tokens: [], module: null,
+      talents: mod ? mod.talents : mergeTalentChanges(talentList, []),
+      tokens: [], module: mod ? mod.module : null,
       assets: {
         avatar: charId, portrait: `${charId}_1`, spine: charId,
         skillIcon: (skillRecs.find((s) => s.index === defaultIdx) || {}).iconId || null,
         subProfIcon: `sub_${char.subProfessionId}_icon`,
       },
     };
+    if (mod) {
+      rec.statsBase = mod.statsBase;
+      rec.traitBase = mod.traitBase;
+      rec.talentsBase = mod.talentsBase;
+      rec.modules = mod.modules;
+    }
     Object.assign(rec, traitDefault.classify);
     if (!out[chessId]) out[chessId] = rec;
   }
@@ -2990,6 +3094,15 @@ function validateAll(f) {
     if (r.bonds.length !== 1) err(`freePicks ${id}: exactly one 主盟约, got ${r.bonds.join(',')}`);
     else if (!bonds[r.bonds[0]]) err(`freePicks ${id}: unknown 主盟约 ${r.bonds[0]}`);
     if (!r.freePickLevels.length) err(`freePicks ${id}: no 自由位置 level`);
+    // 模组 choices of a 自选候选 (it is its own elite): the same contract the golden chess of the season follows
+    if (r.modules) {
+      const eq = r.status?.equipLevel ?? 0;
+      if (r.modules.filter((m) => m.isDefault).length !== (r.module?.active ? 1 : 0)) err(`freePicks ${id}: module choices without exactly one default`);
+      if (!r.statsBase || !r.traitBase || !r.talentsBase) err(`freePicks ${id}: module choices without the no-module base`);
+      if (!r.module?.active || !r.modules.some((m) => m.uniEquipId === r.module.id && m.isDefault)) err(`freePicks ${id}: the default module is not an active module of the record`);
+      if (r.modules.some((m) => !(m.level > 0) || m.level !== eq)) err(`freePicks ${id}: module level ≠ status.equipLevel`);
+      if (r.stats && r.statsBase && (r.stats.maxHp < r.statsBase.maxHp || r.stats.atk < r.statsBase.atk)) err(`freePicks ${id}: the default module does not raise the base stats`);
+    } else if (r.module || r.status?.equipLevel) err(`freePicks ${id}: a module without module choices`);
   }
   for (const [id, fl] of Object.entries(TOKEN_ABNORMAL)) {
     if (!tokens[id]) err(`TOKEN_ABNORMAL: ${id} is not a token`);

@@ -85,34 +85,43 @@ function skillIndexesOf(c) {
 }
 
 /**
+ * The record that carries a chess's 模组 choices: its own GOLDEN chess when the data has one, else a record that brings
+ * its own `modules[]` — a 自选候选 (DESIGN §21) has `goldenId: null` and no `_b` sibling (`gamedata.goldenIdOf` falls
+ * back to the id itself), so the record IS its own elite and offers its modules like a golden chess does.
+ * @param {any} rec a chess record @returns {any|null}
+ */
+const eliteRecord = (rec) => (rec && Array.isArray(rec.modules) && rec.modules.length ? rec : null);
+
+/**
  * What the 干员调配 screen may choose for one chess (DESIGN §16).
  *   skills: skill indexes unlocked at BOTH the normal and the elite status (identical sets in the official data)
  *   defaultSkill: `defaultSkillIndex` (data: the skills[] entry flagged isDefault, else `skill.index`)
- *   modules: the elite's modules (uniEquipId…) + 'none'; [] when the chess has no elite record
+ *   modules: the elite's modules (uniEquipId…) + 'none'; [] when the chess has no elite / no module record
  *   defaultModule: the elite's default module (`defaultUniEquipId`), 'none' for module-less elites, null without elite
  * @param {any} base normal chess record
- * @param {any} [golden] its elite record (null when absent)
+ * @param {any} [golden] its elite record (null when absent; a 自选候选 is passed as its own, or resolved here)
  * @returns {{ skills: number[], defaultSkill: number|null, modules: string[], defaultModule: string|null }}
  */
 export function loadoutOptions(base, golden = null) {
   const n = skillIndexesOf(base);
-  const g = golden ? skillIndexesOf(golden) : null;
+  const elite = golden && typeof golden === 'object' ? golden : eliteRecord(base);
+  const g = elite ? skillIndexesOf(elite) : null;
   const skills = g && g.length ? n.filter((i) => g.includes(i)) : n;
   const flagged = Array.isArray(base?.skills) ? base.skills.find((s) => s && s.isDefault && isInt(s.index, 0, LOADOUT_LIMITS.skillIndex)) : null;
   let defaultSkill = flagged ? flagged.index : isInt(base?.skill?.index, 0, LOADOUT_LIMITS.skillIndex) ? base.skill.index : null;
   if (defaultSkill == null || !skills.includes(defaultSkill)) defaultSkill = skills.length ? skills[0] : defaultSkill;
   let modules = [];
   let defaultModule = null;
-  if (golden) {
+  if (elite) {
     let def = null;
-    if (Array.isArray(golden.modules)) {
-      modules = [...new Set(golden.modules.map((m) => m && m.uniEquipId).filter((id) => isId(id) && id !== MODULE_NONE))];
-      const d = golden.modules.find((m) => m && m.isDefault && isId(m.uniEquipId));
+    if (Array.isArray(elite.modules)) {
+      modules = [...new Set(elite.modules.map((m) => m && m.uniEquipId).filter((id) => isId(id) && id !== MODULE_NONE))];
+      const d = elite.modules.find((m) => m && m.isDefault && isId(m.uniEquipId));
       def = d ? d.uniEquipId : null;
-    } else if (golden.module && golden.module.active && isId(golden.module.id)) {
-      modules = [golden.module.id];
+    } else if (elite.module && elite.module.active && isId(elite.module.id)) {
+      modules = [elite.module.id];
     }
-    if (def == null && golden.module && golden.module.active && modules.includes(golden.module.id)) def = golden.module.id;
+    if (def == null && elite.module && elite.module.active && modules.includes(elite.module.id)) def = elite.module.id;
     modules.push(MODULE_NONE);
     defaultModule = def || MODULE_NONE;
   }
@@ -122,9 +131,9 @@ export function loadoutOptions(base, golden = null) {
 /**
  * Semantic check + normalisation of a loadout against the game data (DESIGN §16). Strict: any unknown / hidden / elite
  * chess id, illegal skill index or module rejects the whole loadout. Entries equal to the defaults are dropped, the
- * rest are stored complete: `{ skill, module }` (module null for a chess without an elite record). A 自选候选 record
+ * rest are stored complete: `{ skill, module }` (module null for a chess without a module record). A 自选候选 record
  * (`freePick: true`, DESIGN §21) is accepted although it is invisible + hidden — its owner picked it, so it is theirs to
- * configure; every other invisible / hidden chess stays rejected.
+ * configure, and it offers its own modules like a golden chess; every other invisible / hidden chess stays rejected.
  * @param {any} entries `room.loadout.entries`
  * @param {(id: string) => any} getChess chess record lookup (normal and golden ids)
  * @returns {{ ok: true, loadout: Record<string, { skill: number, module: string|null }> } | { error: 'BAD_MSG'|'BAD_TARGET', detail: string }}
@@ -142,7 +151,7 @@ export function checkLoadout(entries, getChess) {
       || (!freePick && (base.visible === false || base.isHidden))) {
       return { error: 'BAD_TARGET', detail: `unknown chess ${id}` };
     }
-    const golden = base.goldenId ? getChess(base.goldenId) || null : null;
+    const golden = base.goldenId ? getChess(base.goldenId) || null : eliteRecord(base);
     const opt = loadoutOptions(base, golden);
     const skill = e.skill ?? opt.defaultSkill;
     if (!opt.skills.includes(skill)) return { error: 'BAD_TARGET', detail: `skill ${e.skill} not available for ${id}` };
@@ -158,9 +167,10 @@ export function checkLoadout(entries, getChess) {
 /**
  * The skill index / module a board chess fights with under a (checked) loadout (DESIGN §16 PlayerBattleInput units):
  * normal chess → `{ skillIndex, moduleId: null }` (normal chess have no module); elite → `moduleId` = uniEquipId or
- * 'none'. Chess the loadout does not mention use their defaults.
+ * 'none'. A 自选候选 (DESIGN §21) is its own elite, so its module choice applies to its pieces too. Chess the loadout
+ * does not mention use their defaults.
  * @param {Record<string, { skill: number, module: string|null }> | null | undefined} loadout
- * @param {any} chess the piece's chess record (normal or golden)
+ * @param {any} chess the piece's chess record (normal or golden / a 自选候选)
  * @param {(id: string) => any} getChess
  * @returns {{ skillIndex: number|null, moduleId: string|null }}
  */
@@ -168,12 +178,15 @@ export function resolveLoadout(loadout, chess, getChess) {
   if (!chess || typeof chess !== 'object') return { skillIndex: null, moduleId: null };
   const baseId = chess.baseId || chess.chessId;
   const base = chess.isGolden ? (getChess(baseId) || chess) : chess;
-  const golden = chess.isGolden ? chess : null;
-  const opt = loadoutOptions(base, chess.isGolden ? chess : (base.goldenId ? getChess(base.goldenId) || null : null));
+  // `elite` = the record the module CHOICE belongs to: the golden piece itself, or a 自选候选 (its own elite, DESIGN §21).
+  // A season normal chess owns no module choice ⇒ moduleId null, exactly as before (its elite record only feeds the
+  // skill / default-module options below).
+  const elite = chess.isGolden ? chess : eliteRecord(chess);
+  const opt = loadoutOptions(base, elite || (base.goldenId ? getChess(base.goldenId) || null : null));
   const e = loadout && Object.hasOwn(loadout, baseId) ? loadout[baseId] : null;
   const skillIndex = e && opt.skills.includes(e.skill) ? e.skill : opt.defaultSkill;
   let moduleId = null;
-  if (golden) moduleId = e && opt.modules.includes(e.module) ? e.module : opt.defaultModule;
+  if (elite) moduleId = e && opt.modules.includes(e.module) ? e.module : opt.defaultModule;
   return { skillIndex, moduleId };
 }
 

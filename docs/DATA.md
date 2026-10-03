@@ -165,10 +165,10 @@ Top level: `{ season, seasonName, modes, economy, lpCapPerRound, bossOvertimeAft
 | `trait` | `{"desc":"优先攻击空中单位","descRaw":"…","bb":{"atk_scale":1.1},"bbStr":{},"rangeGrid":null,"moduleDesc":"攻击空中单位时攻击力提升至110%","moduleDescRaw":"…"}` | profession trait (+ golden module trait upgrade merged into `bb`; `rangeGrid` = trait-effect area, e.g. 散射手 front row — **not** the attack range) |
 | `skill` | see below | default skill at `status.skillLevel` (normal 4, golden 7) |
 | `skills[]` | `[{…skill record…, "index":0, "isDefault":false}, {…, "index":1, "isDefault":true}]` | **loadout choices** (DESIGN §16): every skill unlocked at `status` (E1 ⇒ S1–S2, E2 ⇒ S1–S3; the default is always listed), same shape as `skill` + `isDefault`, at the chess skill level, `trigger` resolved **for that skill index** (§2.2). The `isDefault` entry equals `skill` |
-| `modules[]`, `statsBase`, `traitBase`, `talentsBase` | see §2.2 | golden chess with `equipLevel > 0` only: selectable modules + the no-module base they apply to |
+| `modules[]`, `statsBase`, `traitBase`, `talentsBase` | see §2.2 | golden chess with `equipLevel > 0`, and a 自选候选 whose operator has ADVANCED 模组 (§2.3): selectable modules + the no-module base they apply to |
 | `talents[]` | `{"index":0,"name":"火力支援","desc":"…","descRaw":"…","bb":{"self_ammo":3,"duration":20,"ally_ammo":1},"bbStr":{},"rangeGrid":null,"tokenKey":null,"hidden":false,"fromModule":false}` | best unlocked candidate at `status` (potential 0); golden: module talent upgrades applied (`fromModule`); module data-only talents have `name:null, hidden:true`. A module upgrade of an existing talent **merges** blackboards (module keys win, base keys it does not restate are kept — e.g. 宴 keeps `min_attack_speed`; 仇白's upgrade adds `atk_scale_t` next to the old `atk_scale`: prefer the key the text uses). Module parts flagged `isToken` are **not** applied to the operator; they upgrade its summons (tokens.json variants). `containerTokenKey`: the official talent token id when it is a container missing from character_table (凛御银灰), `tokenKey` then holds the default skill's token |
 | `tokens[]` | `["token_10028_vigil_wolf"]` | summons (→ `tokens.json`): displayTokenDict + default-skill `overrideTokenKey` + talent `tokenKey`; `tokens.json → variants[chessId].sources` tells which (a `display`-only token is not produced by this chess's default skill or talents) |
-| `module` | `{"id":"uniequip_002_inside","name":"“最初的惊喜”","type":"MAR-X","level":1,"active":true}` | active only on golden chess |
+| `module` | `{"id":"uniequip_002_inside","name":"“最初的惊喜”","type":"MAR-X","level":1,"active":true}` | active only on golden chess, and on a 自选候选 with 模组 (§2.3 — such a record is its own elite: `goldenId: null`, no `_b` sibling) |
 | `assets` | `{"avatar":"char_498_inside_2","portrait":"char_498_inside_2","spine":"char_498_inside","skillIcon":"skchr_inside_2","subProfIcon":"sub_fastshot_icon"}` | asset **ids** (URLs in `data/assets.json`); golden uses the E2 art when it exists |
 | `diyRequirement` | `"TIER_6"` | DIY only |
 
@@ -224,7 +224,11 @@ everything needed to resolve a unit for `(chessId, skillIndex, moduleId)` (`simd
 - `statsBase` / `traitBase` / `talentsBase` — the golden record **without** any module (`stats` / `trait` / `talents`
   keep the default module, unchanged). `test/data.test.js` proves that composing the default module onto the base
   reproduces `stats`, `trait` and `talents` exactly for every golden chess.
-- Module-less goldens (蒂比, 凛御银灰): `modules: []`, base = own values. Normal chess have none of these fields.
+- Module-less goldens (蒂比, 凛御银灰): `modules: []`, base = own values. Normal chess have none of these fields. A
+  自选候选 (§2.3) whose operator has ADVANCED 模组 carries the whole block too (its record is its own elite); the build
+  reads the module's trait / talent candidates at the level the season fields a golden chess of that tier at
+  (T1 50, T2 55, T3+ 60 — the 模组's own unlock level), so the module's trait / talent upgrade applies like a normal
+  operator's, while the record's own stats keep the 自选候选 baseline.
 - Module parts flagged `isToken` and the per-token attribute blackboards go to the summons: `tokens.json →
   variants[owner].byModule` (§14). Module choices never change the combat classification (`dmgType`…; the build warns
   if one ever would).
@@ -249,6 +253,7 @@ them up by accident. Records carry the same shape as §2 plus:
 | `garrisonIds` | `[]` | 自选干员 不拥有特质 |
 | `charId`, `assets` | `char_608_acpion`, … | the operator's own art (avatar / portrait / spine / skill icon) |
 | `tier` | `6` / `4` | **provisional** (= rarity); the 自由位置 shop-tier gate is settled together with the pool work |
+| `module`, `modules[]`, `status.equipLevel`, `statsBase` / `traitBase` / `talentsBase` | see §2.2 | 模组 of the operator (user rule 模组相关规则和普通干员一致): the record is **its own elite** (no `_b` sibling), so it carries the same block a golden chess does — default = the season's `backupCharUniEquipId` for that character, else the first ADVANCED 模组, else 不装备; level = the season's tier rule (6★ ⇒ 3). A character with no ADVANCED 模组 (all six 4★ 预备干员) keeps `module: null`, `equipLevel: 0` and no `modules[]` — `checkLoadout` then refuses a module for it |
 | `tokens` | `[]` | empty until these operators' skills get kits — their summons belong to that step |
 
 **The roster is derived, not listed** (`freePickCharIds` in `tools/build-data.mjs`): every 6★ operator of

@@ -99,16 +99,17 @@ export function loadoutRecord(rec, lo) {
 }
 
 /**
- * The attack range a (loadout-resolved) chess record fights with: an elite whose equipped module reads "攻击范围扩大"
+ * The attack range a (loadout-resolved) chess record fights with: a chess whose equipped module reads "攻击范围扩大"
  * uses that module's own grid — its range-only talent change (talentIndex −1), e.g. SPC-X = the 3×3 caster range + the
  * centre tile [0,3] — as the kits do (tier4 moduleRangeGrid, tier5 moduleRangeUp); anything else its `rangeGrid`.
+ * The module is read from `rec.modules`, so a 自选候选 (its own elite, DESIGN §21) is covered like a golden chess.
  * @param {object|null} rec loadoutRecord(…) output (or a data/chess.json record: its default module)
  * @returns {number[][]|null}
  */
 export function attackRangeGrid(rec) {
   if (!rec || typeof rec !== 'object') return null;
   const m = rec.module;
-  if (rec.isGolden && m && m.active && m.id && /攻击范围扩大/.test(String(rec.trait?.moduleDesc ?? ''))) {
+  if (m && m.active && m.id && /攻击范围扩大/.test(String(rec.trait?.moduleDesc ?? ''))) {
     const mod = (Array.isArray(rec.modules) ? rec.modules : []).find((x) => x && x.uniEquipId === m.id);
     const g = (mod?.talentChanges || []).find((t) => t && t.talentIndex === -1 && Array.isArray(t.rangeGrid) && t.rangeGrid.length)?.rangeGrid;
     if (g) return g;

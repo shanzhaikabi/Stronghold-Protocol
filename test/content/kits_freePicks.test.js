@@ -11,13 +11,21 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { DataSource, getDefaultSource } from '../../server/sim/simdata.js';
 import { KITS, skillSpecSource } from '../../server/sim/content/index.js';
+import { attackRangeGrid } from '../../shared/loadoutRecord.js';
 
 const FREE = JSON.parse(readFileSync(new URL('../../data/freePicks.json', import.meta.url), 'utf8'));
 const ds = new DataSource({ chess: FREE }, getDefaultSource());
+/** Resolved def of a freePick record for a skill index / module choice (moduleId omitted ⇒ the default module). */
+const DM = (id, skillIndex = null, moduleId) => ds.getChess(id, {
+  ...(skillIndex == null ? {} : { skillIndex }),
+  ...(moduleId === undefined ? {} : { moduleId }),
+});
 /** Resolved def of a freePick record for a skill index. */
-const D = (id, skillIndex = null) => ds.getChess(id, skillIndex == null ? null : { skillIndex });
+const D = (id, skillIndex = null) => DM(id, skillIndex);
 /** The selected skill's blackboard. */
 const bbOf = (id, skillIndex) => D(id, skillIndex).skill.bb;
+/** ModuleRecord of a freePick record by uniEquipId. */
+const modRec = (id, uniEquipId) => (FREE[id].modules || []).find((m) => m.uniEquipId === uniEquipId);
 
 const TULIP = 'chess_free_char_608_acpion', SHARP = 'chess_free_char_609_acguad', MECH = 'chess_free_char_610_acfend';
 const STORM = 'chess_free_char_611_acnipe', PITH = 'chess_free_char_612_accast', TOUCH = 'chess_free_char_613_acmedc';
@@ -221,7 +229,7 @@ test('Sharp talents: 隐匿刀刃 ATK +15 % / 30 % physical dodge; 寸步不退 
 
 test('Mechanist S1 结构稳定: max HP +26 %, DEF +26 % (on top of 精研材料)', () => {
   const id = MECH, b = bbOf(id, 0), t = D(id).talents;
-  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 0, carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 0, moduleId: 'none', carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
   const u = h.unit(id);
   assert.ok(h.runUntil(() => u.skill.active, 25), 'TAKE_DAMAGE: cast by the first hit');
   approx(u.s.maxHp, u.base.maxHp * (1 + b.max_hp), '最大生命值+26%');
@@ -232,7 +240,7 @@ test('Mechanist S1 结构稳定: max HP +26 %, DEF +26 % (on top of 精研材料
 
 test('Mechanist S2 不变性原理: DEF +50 % and 反馈装甲 doubled to ASPD −14 on the blocked enemy', () => {
   const id = MECH, b = bbOf(id, 1), t = D(id).talents;
-  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 1, carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 1, moduleId: 'none', carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
   const u = h.unit(id);
   h.step();
   const e = h.enemy('enemy_e_mob');
@@ -248,7 +256,7 @@ test('Mechanist S2 不变性原理: DEF +50 % and 反馈装甲 doubled to ASPD �
 
 test('Mechanist S3 应力倒置: DEF +50 %, block +1, 40 % ATK arts per second on the blocked enemies', () => {
   const id = MECH, b = bbOf(id, 2), t = D(id).talents;
-  const h = battle([{ chessId: id, row: 9, col: 4, carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const h = battle([{ chessId: id, row: 9, col: 4, moduleId: 'none', carryState: READY }], { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
   const u = h.unit(id);
   assert.ok(h.runUntil(() => u.skill.active, 25), 'TAKE_DAMAGE');
   const t1 = t[0].bb.def + (u.hpRatio < t[0].bb.hp_ratio ? t[0].bb['acfend_t_1[extra].def'] : 0);
@@ -464,7 +472,7 @@ test('Touch S2 宛如天启: 攻击范围扩大, 2 heal targets, every 【医疗
 test('Touch S3 恳切福音: 135 % on ≤ half HP allies, 2 targets, +30 % of the main heal to the lowest-HP unit', () => {
   const id = TOUCH, b = bbOf(id, 2);
   const h = battle([
-    { chessId: id, row: 11, col: 4, skillIndex: 2, carryState: READY, uid: 1 },
+    { chessId: id, row: 11, col: 4, skillIndex: 2, moduleId: 'none', carryState: READY, uid: 1 },
     { chessId: 't_ally', row: 11, col: 5, uid: 2 },
     { chessId: 't_ally', row: 11, col: 6, uid: 3 },
   ], { chess: { t_ally: chessRec({ id: 't_ally', stats: { maxHp: 3e5, atk: 0 } }) } });
@@ -605,7 +613,7 @@ test('Misery S1 物理的服从 (passive): 45 % physical dodge and the 2nd talen
 
 test('Misery S2 战争的恭顺 (passive): ATK +30 % and ASPD +15 for 10 s after the deployment', () => {
   const id = MISERY, b = bbOf(id, 1);
-  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 1 }], { spawns: [{ key: 'e_still', pos: [9, 6] }] });
+  const h = battle([{ chessId: id, row: 9, col: 4, skillIndex: 1, moduleId: 'none' }], { spawns: [{ key: 'e_still', pos: [9, 6] }] });
   const u = h.unit(id);
   h.step();
   approx(u.s.atk, u.base.atk * (1 + b.atk), '部署后攻击力+30%');
@@ -640,7 +648,7 @@ test('Misery S3 空间的归依 (passive): 210 % ATK phys on the ground enemies 
 
 test('Misery talents: 二象命末 10 % double hit; 四维分离 ATK +10 % with exactly one enemy around', () => {
   const id = MISERY, t = D(id).talents;
-  const h = battle([{ chessId: id, row: 9, col: 4 }], { spawns: [{ key: 'e_still', pos: [9, 6] }] });
+  const h = battle([{ chessId: id, row: 9, col: 4, moduleId: 'none' }], { spawns: [{ key: 'e_still', pos: [9, 6] }] });
   const u = h.unit(id);
   h.run(1);
   approx(u.s.atk, u.base.atk, 'no 四维分离 ATK (the enemy stands 2 tiles ahead, not around him)');
@@ -751,4 +759,233 @@ test('4★ 预备干员: the stat talent adds to the selected `skcom_*` skill (b
     assert.equal(rec.skills.filter((s) => s.isDefault).length, 1);
     done(h);
   }
+});
+
+// =================================================================================================================
+// 模组 (user rule "模组相关规则和普通干员一致"): a 自选候选 is its own elite — its record carries `modules[]` and the
+// no-module bases, so a 干员调配 screen can offer its 模组 and the battle composes attr / trait / talents from it.
+
+test('freePicks 模组: the record is its own elite (modules[] + bases); the equipped module composes attr/trait/talents', () => {
+  for (const id of BATCH) {
+    const rec = FREE[id];
+    assert.ok(Array.isArray(rec.modules) && rec.modules.length >= 1, `${id}: modules[]`);
+    assert.equal(rec.modules.filter((m) => m.isDefault).length, 1, `${id}: exactly one default module`);
+    assert.ok(rec.statsBase && rec.traitBase && rec.talentsBase, `${id}: the no-module bases`);
+    const defMod = rec.modules.find((m) => m.isDefault);
+    assert.equal(rec.module.id, defMod.uniEquipId, `${id}: module.id is the default module`);
+    assert.equal(rec.module.active, true);
+    assert.equal(rec.status.equipLevel, defMod.level, `${id}: the module level is the record's equipLevel`);
+    assert.equal(defMod.level, 3, `${id}: a tier-6 operator gets the season's level-3 module`);
+    assert.equal(rec.goldenId, null, `${id}: no _b sibling — the record itself is the elite`);
+    // 模组不装备 ⇒ the record's own no-module bases
+    const on = D(id), off = DM(id, null, 'none');
+    assert.equal(off.raw.module.active, false, `${id}: 不装备`);
+    assert.equal(off.raw.module.id, null);
+    for (const k of Object.keys(off.stats)) approx(off.stats[k], rec.statsBase[k], `${id}: ${k} without a module`);
+    // the default module adds its attr, its trait and its talent changes
+    for (const [k, v] of Object.entries(defMod.attr)) approx(on.stats[k], off.stats[k] + v, `${id}: ${k} = base + module attr`);
+    assert.equal(on.raw.module.id, defMod.uniEquipId, `${id}: the default module is equipped`);
+    if (defMod.traitOverride) {
+      // the module's trait part: an override of the whole text (SOL-X …) or an added sentence (`moduleDesc`), plus bb
+      const rec2 = on.raw.trait;
+      assert.equal(rec2.desc, defMod.traitOverride.desc, `${id}: the module's trait text`);
+      assert.equal(rec2.moduleDesc ?? null, defMod.traitOverride.moduleDesc ?? null, `${id}: the module sentence`);
+      assert.ok(String(rec2.moduleDesc || rec2.desc).length > 0, `${id}: the module trait has text`);
+      for (const [k, v] of Object.entries(defMod.traitOverride.bb || {})) approx(on.traitBb[k], v, `${id}: trait bb ${k}`);
+      assert.notDeepEqual(rec2, off.raw.trait, `${id}: 不装备 uses the no-module trait`);
+    } else {
+      assert.equal(DM(id).raw.trait.desc, off.raw.trait.desc, `${id}: the module adds no trait part`);
+    }
+    assert.notDeepEqual(on.talents, off.talents, `${id}: the module's talent upgrade / hidden talent applies`);
+    for (const m of rec.modules) {
+      assert.ok(m.uniEquipId && m.name && m.typeName, `${id}: a selectable module record`);
+      assert.ok(m.attr && Object.keys(m.attr).length, `${id} ${m.uniEquipId}: module attr`);
+    }
+  }
+});
+
+test('模组 SOL-X 郁金香: 阻挡敌人时攻击力和防御力各+8% (阻挡 on, 不装备 off) + 无垠之心 +1/秒', () => {
+  const mk = (moduleId) => battle([{ chessId: TULIP, row: 9, col: 4, ...(moduleId ? { moduleId } : {}) }],
+    { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(TULIP), uOff = off.unit(TULIP);
+  on.step(); off.step();
+  approx(uOn.s.spRecovery, uOn.base.spRecovery + 1, '模组: 无垠之心 技力自然回复速度+1/秒');
+  approx(uOff.s.spRecovery, uOff.base.spRecovery + 0.6, '不装备: +0.6/秒');
+  assert.equal(uOn.findBuff('acpion:module'), null, 'not blocking yet');
+  approx(uOn.s.atk, uOn.base.atk * 1.1, '浪潮之心 only while not blocking');
+  assert.ok(on.runUntil(() => uOn.blocking.length > 0, 25), 'the mob reaches her');
+  on.run(0.2); off.run(25);
+  assert.deepEqual(uOn.findBuff('acpion:module').mods, { atkPct: 0.08, defPct: 0.08 }, '阻挡敌人时攻击力和防御力各+8%');
+  approx(uOn.s.atk, uOn.base.atk * (1 + 0.1 + 0.08), 'ATK +8% while blocking');
+  approx(uOn.s.def, uOn.base.def * 1.08, 'DEF +8% while blocking');
+  assert.equal(uOff.findBuff('acpion:module'), null, '不装备: no module buff');
+  approx(uOff.s.atk, uOff.base.atk * 1.1);
+  approx(uOff.s.def, uOff.base.def, '不装备: no DEF bonus');
+  done(on); done(off);
+});
+
+test('模组 PRO-X Mechanist: 阻挡敌人时防御力+20%, 精研材料 +0.2 below half HP', () => {
+  const mk = (moduleId) => battle([{ chessId: MECH, row: 9, col: 4, ...(moduleId ? { moduleId } : {}) }],
+    { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(MECH), uOff = off.unit(MECH);
+  assert.ok(on.runUntil(() => uOn.blocking.length > 0, 25), 'the mob reaches her');
+  on.run(0.2); off.run(25);
+  assert.deepEqual(uOn.findBuff('acfend:module').mods, { defPct: 0.2 }, '阻挡敌人时防御力+20%');
+  approx(uOn.s.def, uOn.base.def * (1 + 0.1 + 0.2), '精研材料 +10% (≥ half HP) and the module +20%');
+  assert.equal(uOff.findBuff('acfend:module'), null, '不装备: no module buff');
+  approx(uOff.s.def, uOff.base.def * 1.1);
+  done(on); done(off);
+  // 精研材料's below-half-HP part is the module's upgraded 0.2 (the base talent has 0.1)
+  for (const [h, expected] of [[on, 0.2], [off, 0.1]]) {
+    const u = h.unit(MECH);
+    u.hp = u.s.maxHp * 0.4;
+    h.run(0.3);
+    approx(u.findBuff('acfend:t1').mods.defPct, 0.1 + expected, `${expected === 0.2 ? '模组' : '不装备'}: 生命值低于50%时 +${expected}`);
+    done(h);
+  }
+});
+
+test('模组 DRE-X Sharp: 攻击被阻挡的敌人时攻击力提升至115% (不装备: 100%)', () => {
+  const mk = (moduleId) => battle([{ chessId: SHARP, row: 9, col: 4, ...(moduleId ? { moduleId } : {}) }],
+    { spawns: [{ key: 'e_mob', pos: [9, 7], route: walk(9, 7) }] });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(SHARP), uOff = off.unit(SHARP);
+  const plain = (h, u) => dealt(h, u, (c) => c.dmg.isAttack && !c.dmg.isSplash);
+  let tOn = null, tOff = null;
+  assert.ok(on.runUntil(() => { if (!tOn && uOn.blocking.length) tOn = on.b.time; return !!tOn; }, 25), 'the mob blocks her');
+  assert.ok(off.runUntil(() => { if (!tOff && uOff.blocking.length) tOff = off.b.time; return !!tOff; }, 25));
+  on.run(4); off.run(4);
+  const blockedOn = plain(on, uOn).filter((c) => c.t >= tOn), blockedOff = plain(off, uOff).filter((c) => c.t >= tOff);
+  assert.ok(blockedOn.length >= 2 && blockedOff.length >= 2, 'she attacks the blocked enemy');
+  for (const c of blockedOn) approx(c.amount, uOn.s.atk * 1.15, '攻击被阻挡的敌人时攻击力提升至115%');
+  for (const c of blockedOff) approx(c.amount, uOff.s.atk, '不装备: 100%');
+  // …and the hits on the still-walking enemy (1 tile away, in range but NOT blocked) stay 100 % with the module
+  const walking = plain(on, uOn).filter((c) => c.t < tOn);
+  for (const c of walking) approx(c.amount, uOn.s.atk, 'not blocked yet: 100 %');
+  done(on); done(off);
+});
+
+test('模组 MAR-X Stormeye: 攻击空中单位时攻击力提升至110% (+ 风坠 ×1.9, 不装备 ×1.8)', () => {
+  const mk = (moduleId) => battle([{ chessId: STORM, row: 11, col: 4, ...(moduleId ? { moduleId } : {}) }], {
+    recs: { e_fly: enemyRec({ key: 'e_fly', hp: 1e7, speed: 0, atk: 0, motion: 'FLY' }) },
+    spawns: [{ key: 'e_fly', pos: [11, 6] }],
+  });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(STORM), uOff = off.unit(STORM);
+  on.step(); off.step();
+  assert.equal(uOn.profile.flyScale, 1.1, '攻击空中单位时攻击力提升至110%');
+  assert.equal(uOff.profile.flyScale, 1, '不装备: no fly bonus');
+  approx(D(STORM).talents[0].bb.atk_scale, 1.9, '风坠 ×1.9 with the module');
+  approx(DM(STORM, null, 'none').talents[0].bb.atk_scale, 1.8, '×1.8 without');
+  assert.ok(on.runUntil(() => dealt(on, uOn, (c) => c.dmg.isAttack && !c.dmg.isSplash).length >= 1, 12));
+  off.run(12);
+  const ratios = (h, u) => new Set(dealt(h, u, (c) => c.dmg.isAttack && !c.dmg.isSplash).map((c) => Math.round((c.amount / u.s.atk) * 1000) / 1000));
+  for (const r of ratios(on, uOn)) assert.ok([1.1, 2.09].some((x) => Math.abs(r - x) < 1e-3), `模组 vs a flyer: ${r} (×1.1, ×1.1×1.9 on a 风坠 proc)`);
+  for (const r of ratios(off, uOff)) assert.ok([1, 1.8].some((x) => Math.abs(r - x) < 1e-3), `不装备 vs a flyer: ${r}`);
+  done(on); done(off);
+});
+
+test('模组 SPC-X Pith: 攻击范围扩大 — the module grid replaces her own (+ 授我所授 20%)', () => {
+  const mod = modRec(PITH, 'uniequip_002_accast');
+  const grid = (mod.talentChanges.find((t) => t.talentIndex === -1 && Array.isArray(t.rangeGrid)) || {}).rangeGrid;
+  assert.ok(Array.isArray(grid) && grid.length, 'the module range-only talent change');
+  const on = battle([{ chessId: PITH, row: 11, col: 4 }]);
+  const off = battle([{ chessId: PITH, row: 11, col: 4, moduleId: 'none' }]);
+  const uOn = on.unit(PITH), uOff = off.unit(PITH);
+  on.step(); off.step();
+  assert.equal(grid.length, 10, '攻击范围扩大: the 3×3 caster range + the centre tile');
+  assert.equal(uOn.rangeKeys.length, grid.length, 'the module range in battle');
+  assert.equal(uOff.rangeKeys.length, 9, '不装备: her own 3×3');
+  assert.deepEqual(attackRangeGrid(D(PITH).raw), grid, 'the client-facing range helper agrees');
+  approx(D(PITH).talents[1].bb.atk, 0.2, '授我所授 +20% with the module');
+  approx(DM(PITH, null, 'none').talents[1].bb.atk, 0.1, '+10% without');
+  done(on); done(off);
+});
+
+test('模组 PHY-X Touch: 治疗生命值低于50%的友方单位时治疗量提升15% (+ 超脱 8 SP)', () => {
+  const mk = (moduleId) => battle([
+    { chessId: TOUCH, row: 11, col: 4, uid: 1, ...(moduleId ? { moduleId } : {}) },
+    { chessId: 't_ally', row: 11, col: 6, uid: 2 },
+  ], { chess: { t_ally: chessRec({ id: 't_ally', stats: { maxHp: 3e5, atk: 0 } }) } });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(1), uOff = off.unit(1);
+  for (const h of [on, off]) { h.step(); const a = h.unit(2); a.hp = a.s.maxHp * 0.4; }
+  assert.ok(on.runUntil(() => heals(on, uOn).length >= 1, 10), 'Touch heals');
+  off.run(10);
+  approx(heals(on, uOn)[0].amount, uOn.s.atk * 1.15, '治疗量提升15%');
+  approx(heals(off, uOff)[0].amount, uOff.s.atk, '不装备: a plain heal');
+  approx(D(TOUCH).talents[1].bb.sp, 8, '超脱 8 点技力 with the module');
+  approx(DM(TOUCH, null, 'none').talents[1].bb.sp, 5, '5 without');
+  done(on); done(off);
+});
+
+test('模组 DEC-X Raidian: 攻击范围内存在敌人时技力自然恢复速度+0.2/秒 (+ 同调 +20/+12)', () => {
+  const mk = (moduleId) => battle([
+    { chessId: RAIDIAN, row: 11, col: 5, ...(moduleId ? { moduleId } : {}) },
+    { chessId: TULIP, row: 12, col: 5, uid: 2 },
+  ], { spawns: [{ key: 'e_still', pos: [11, 7] }] });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(RAIDIAN), uOff = off.unit(RAIDIAN);
+  on.run(0.3); off.run(0.3);
+  assert.equal(uOn.rangeKeySet.size > 0, true);
+  approx(uOn.s.aspd, uOn.base.aspd + 20, '同调 攻击速度+20 with the module');
+  approx(uOff.s.aspd, uOff.base.aspd + 15, '+15 without');
+  approx(on.unit(2).s.aspd, on.unit(2).base.aspd + 12, '相邻的干员 +12 with the module');
+  approx(off.unit(2).s.aspd, off.unit(2).base.aspd + 10, '+10 without');
+  const sp = (h, u) => { const s0 = u.skill.sp; h.run(3); return u.skill.sp - s0; };
+  const dOn = sp(on, uOn), dOff = sp(off, uOff);
+  approx(dOn, (uOn.s.spRecovery + 0.2) * 3, '攻击范围内存在敌人时 技力自然恢复速度+0.2/秒', 0.05);
+  approx(dOff, uOff.s.spRecovery * 3, '不装备: the plain recovery', 0.05);
+  assert.ok(dOn > dOff, 'the module SP tick is the difference');
+  done(on); done(off);
+});
+
+test('模组 EXE-X Misery: 周围四格没有友方干员时攻击力+10% (+ 二象命末 +5%/15%)', () => {
+  const mk = (moduleId, ally = false) => battle([
+    { chessId: MISERY, row: 9, col: 4, ...(moduleId ? { moduleId } : {}) },
+    ...(ally ? [{ chessId: TULIP, row: 10, col: 4, uid: 2 }] : []),
+  ], { spawns: [{ key: 'e_still', pos: [9, 6] }] });
+  const on = mk(), off = mk('none'), withAlly = mk(undefined, true);
+  const uOn = on.unit(MISERY), uOff = off.unit(MISERY);
+  on.run(0.3); off.run(0.3); withAlly.run(0.3);
+  assert.deepEqual(uOn.findBuff('acspec:module').mods, { atkPct: 0.1 }, '周围四格没有友方干员时攻击力+10%');
+  approx(uOn.s.atk, uOn.base.atk * (1 + 0.1 + 0.05), 'the module trait + 二象命末 (0.05 with the module)');
+  assert.equal(uOff.findBuff('acspec:module'), null, '不装备: no module buff');
+  approx(uOff.s.atk, uOff.base.atk, '不装备: no bonus');
+  assert.equal(withAlly.unit(MISERY).findBuff('acspec:module'), null, 'an ally on the 4 tiles turns it off');
+  approx(withAlly.unit(MISERY).s.atk, withAlly.unit(MISERY).base.atk * 1.05, 'only 二象命末');
+  done(on); done(off); done(withAlly);
+});
+
+test('freePicks 二象命末: the proc chance comes from `attack@prob` — it procs on its own (10 %, 15 % with the module)', () => {
+  // regression: the kit read `prob` (undefined ⇒ never procced) instead of the data key `attack@prob`
+  for (const moduleId of [undefined, 'none']) {
+    const h = battle([{ chessId: MISERY, row: 9, col: 4, ...(moduleId ? { moduleId } : {}) }],
+      { spawns: [{ key: 'e_still', pos: [9, 5] }] });   // in her 2-tile range, so she attacks it
+    const u = h.unit(MISERY);
+    assert.ok(h.runUntil(() => dealt(h, u, tagged('doubleHit')).length >= 1, 40),
+      `${moduleId ? '不装备' : '模组'}: 二象命末 procs with the default skill`);
+    done(h);
+  }
+  approx(D(MISERY).talents[0].bb['attack@prob'], 0.15, 'the module X-3 raises it to 15 %');
+  approx(DM(MISERY, null, 'none').talents[0].bb['attack@prob'], 0.1, '10 % without');
+});
+
+test('模组 LOR-X 领主·Sharp: 攻击附带10%攻击力的法术伤害 (+ 无声之锋 +25%/35%)', () => {
+  const mk = (moduleId) => battle([{ chessId: LORD, row: 11, col: 4, ...(moduleId ? { moduleId } : {}) }],
+    { spawns: [{ key: 'e_still', pos: [11, 6] }] });
+  const on = mk(), off = mk('none');
+  const uOn = on.unit(LORD), uOff = off.unit(LORD);
+  on.step(); off.step();
+  approx(uOn.s.dodgeArts, 0.35, '无声之锋 25% → 35% with the module');
+  approx(uOff.s.dodgeArts, 0.25, '25% without');
+  assert.ok(on.runUntil(() => dealt(on, uOn, (c) => c.dmg.isAttack).length >= 1, 12), 'she attacks');
+  off.run(12);
+  const rider = dealt(on, uOn, (c) => c.dmg.type === 'arts' && (c.dmg.tags || []).includes('module'));
+  assert.ok(rider.length >= 1, '攻击附带10%攻击力的法术伤害');
+  for (const c of rider) { approx(c.amount, uOn.s.atk * 0.1, '10 % of her ATK'); assert.equal(c.target.side, 'enemy'); }
+  assert.equal(dealt(off, uOff, (c) => c.dmg.type === 'arts').length, 0, '不装备: no arts rider');
+  done(on); done(off);
 });

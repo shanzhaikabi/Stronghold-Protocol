@@ -233,13 +233,17 @@ export function parseImport(input) {
 
 /**
  * The chess records of one loadout slot.
+ * A 自选候选 (DESIGN §21, `freePick: true`) has `goldenId: null` and no `_b` sibling but carries its own `modules[]`
+ * (DATA.md / tools/build-data.mjs freePickModuleBlock), so the record is returned as its own elite — the detail panel
+ * then shows its 模组 section exactly like a season operator's (模组相关规则和普通干员一致).
  * @param {string} baseId normal chess id
  * @param {(id: string) => any} getChess
  * @returns {{ base: any, golden: any }}
  */
 export function recordsOf(baseId, getChess) {
   const base = getChess(baseId) || null;
-  const golden = base && base.goldenId ? getChess(base.goldenId) || null : null;
+  const golden = base && base.goldenId ? getChess(base.goldenId) || null
+    : (base && Array.isArray(base.modules) && base.modules.length ? base : null);
   return { base, golden };
 }
 
@@ -362,9 +366,9 @@ export function selectedSkill(loadout, chess, getChess) {
   return skillRecord(chess, r.skillIndex) || chess?.skill || null;
 }
 
-/** Selected ModuleRecord of an elite under a loadout (null: none / normal chess). */
+/** Selected ModuleRecord of an elite under a loadout (null: none / a chess without module choices / '不装备'). */
 export function selectedModule(loadout, chess, getChess) {
-  if (!chess || !chess.isGolden) return null;
+  if (!chess || !(chess.isGolden || (Array.isArray(chess.modules) && chess.modules.length))) return null;
   const r = resolveLoadout(loadout, chess, getChess);
   return moduleRecord(chess, r.moduleId);
 }
@@ -416,7 +420,7 @@ export function filterRoster(roster, f = {}, entries = {}, getChess = () => null
     if (f.prof && c.profession !== f.prof) return false;
     if (f.bond && !(Array.isArray(c.bonds) && c.bonds.includes(f.bond))) return false;
     if (f.changedOnly) {
-      const golden = c.goldenId ? getChess(c.goldenId) : null;
+      const { golden } = recordsOf(c.chessId, getChess);
       if (!effectiveChoice(entries, c, golden).changed) return false;
     }
     if (q) {

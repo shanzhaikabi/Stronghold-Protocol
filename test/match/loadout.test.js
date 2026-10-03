@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { ERR, PHASE } from '../../shared/constants.js';
 import { validateC2S, checkLoadout, loadoutOptions, resolveLoadout, isLoadoutEntries, MODULE_NONE, LOADOUT_LIMITS, isFreePicks, checkFreePicks, freePickLevelsOf, FREE_PICK_LIMITS } from '../../shared/protocol.js';
 import { buildBattleSpec } from '../../server/sim/spec.js';
+import { resolveRecordLoadout, loadoutRecord } from '../../shared/loadoutRecord.js';
 import { DATA, makeMatch } from './harness.js';
 
 const chess = (id) => (Object.hasOwn(DATA.chess, id) ? DATA.chess[id] : null);
@@ -116,6 +117,64 @@ test('resolveLoadout: normal chess → moduleId null; elite → the chosen modul
   assert.deepEqual(resolveLoadout(lo, other, chess), { skillIndex: other.skill.index, moduleId: null });
   // a stale entry (not selectable any more) falls back to the defaults, never throws
   assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 7, module: 'gone' } }, g, chess), { skillIndex: 1, moduleId: 'uniequip_002_inside' });
+});
+
+// ---- 自选干员 模组 (DESIGN §21): a 自选候选 is its own elite, so 模组相关规则和普通干员一致 ---------------------------
+
+/** A 自选候选 record by id (data/freePicks.json). */
+const freePick = (id) => (DATA.freePicks && Object.hasOwn(DATA.freePicks, id) ? DATA.freePicks[id] : null);
+const getFree = (id) => freePick(id) || chess(id);
+const TULIP = 'chess_free_char_608_acpion';   // 郁金香: SOL-X 郁金香证章
+
+test('自选干员 模组: loadoutOptions / checkLoadout / resolveLoadout treat the record as its own elite', () => {
+  const rec = freePick(TULIP);
+  const mod = rec.modules.find((m) => m.isDefault);
+  assert.ok(mod && mod.uniEquipId, 'the record carries its own modules[]');
+  assert.equal(rec.module.active, true, 'its default module is equipped (like a golden chess)');
+  // the 干员调配 options: the character's modules + 不装备, default = the module the backup 编队 marks
+  const opt = loadoutOptions(rec, null);
+  assert.deepEqual(opt.modules, [...rec.modules.map((m) => m.uniEquipId), MODULE_NONE]);
+  assert.equal(opt.defaultModule, mod.uniEquipId);
+  assert.deepEqual(opt.skills, rec.skills.map((s) => s.index));
+  assert.equal(opt.defaultSkill, rec.skills.find((s) => s.isDefault).index);
+  // checkLoadout accepts the module (and 不装备), rejects an unknown one / a golden id for it
+  const okLo = checkLoadout({ [TULIP]: { skill: 0, module: mod.uniEquipId } }, getFree);
+  assert.deepEqual(okLo, { ok: true, loadout: { [TULIP]: { skill: 0, module: mod.uniEquipId } } });
+  assert.deepEqual(checkLoadout({ [TULIP]: { module: MODULE_NONE } }, getFree),
+    { ok: true, loadout: { [TULIP]: { skill: opt.defaultSkill, module: MODULE_NONE } } });
+  assert.equal(checkLoadout({ [TULIP]: { module: 'nope' } }, getFree).error, ERR.BAD_TARGET);
+  assert.equal(checkLoadout({ [TULIP]: { module: 'uniequip_002_acpion_b' } }, getFree).error, ERR.BAD_TARGET, 'only its own modules');
+  // resolveLoadout (what the battle input / PlayerState use): the choice, 不装备, and the default
+  assert.deepEqual(resolveLoadout(okLo.loadout, rec, getFree), { skillIndex: 0, moduleId: mod.uniEquipId });
+  assert.deepEqual(resolveLoadout({ [TULIP]: { module: MODULE_NONE } }, rec, getFree), { skillIndex: opt.defaultSkill, moduleId: MODULE_NONE });
+  assert.deepEqual(resolveLoadout(null, rec, getFree), { skillIndex: opt.defaultSkill, moduleId: mod.uniEquipId });
+  // a 自选候选 without modules (the 4★ 预备干员) keeps the module-less behaviour
+  const four = Object.values(DATA.freePicks).find((r) => !(r.modules || []).length);
+  assert.equal(loadoutOptions(four, null).modules.length, 0);
+  assert.equal(loadoutOptions(four, null).defaultModule, null);
+  assert.equal(checkLoadout({ [four.chessId]: { module: 'none' } }, getFree).error, ERR.BAD_TARGET, 'still no module choice');
+  assert.deepEqual(resolveLoadout(null, four, getFree), { skillIndex: four.skills.find((s) => s.isDefault).index, moduleId: null });
+});
+
+test('模组: a season operator keeps its golden record (same options, default and composition)', () => {
+  const base = chess(INSIDE), golden = chess(base.goldenId);
+  const opt = loadoutOptions(base, golden);
+  assert.deepEqual(opt.modules, [...golden.modules.map((m) => m.uniEquipId), MODULE_NONE], 'the golden modules only');
+  assert.equal(opt.defaultModule, (golden.modules.find((m) => m.isDefault) || {}).uniEquipId);
+  assert.deepEqual(loadoutOptions(base, null), { skills: opt.skills, defaultSkill: opt.defaultSkill, modules: [], defaultModule: null },
+    'a normal chess alone offers no module');
+  // normal piece → moduleId null; golden → the chosen / default module (byte-identical to the pre-自选干员 behaviour)
+  assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 0, module: MODULE_NONE } }, base, chess), { skillIndex: 0, moduleId: null });
+  assert.deepEqual(resolveLoadout({ [INSIDE]: { skill: 0, module: MODULE_NONE } }, golden, chess), { skillIndex: 0, moduleId: MODULE_NONE });
+  assert.deepEqual(resolveLoadout(null, golden, chess), { skillIndex: opt.defaultSkill, moduleId: opt.defaultModule });
+  // the composition is the golden record's, unchanged by this feature
+  const lo = resolveRecordLoadout(golden, { moduleId: opt.modules[0] });
+  const composed = loadoutRecord(golden, lo);
+  for (const [k, v] of Object.entries(golden.modules.find((m) => m.uniEquipId === opt.modules[0]).attr)) {
+    assert.equal(composed.stats[k], golden.statsBase[k] + v, `${k} = statsBase + module attr`);
+  }
+  assert.equal(composed.module.id, opt.modules[0]);
+  assert.deepEqual(loadoutRecord(golden, resolveRecordLoadout(golden, { moduleId: MODULE_NONE })).stats, golden.statsBase);
 });
 
 // ---- match side ------------------------------------------------------------------------------------------------------------

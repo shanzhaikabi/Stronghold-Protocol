@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { checkLoadout, MODULE_NONE } from '../../shared/protocol.js';
+import { checkLoadout, loadoutOptions, MODULE_NONE } from '../../shared/protocol.js';
 import { PHASE } from '../../shared/constants.js';
 import {
   parseStored, toStored, chessOptions, effectiveChoice, setChoice, resetChoice, sanitizeEntries, rosterOf, filterRoster,
@@ -520,6 +520,43 @@ test('自选干员: freePickSlots 补空槽(界面直接渲染);sanitizePicks �
   assert.deepEqual(sanitizePicks({ 6: [FREE4[0]] }, getAny), {}, 'a 四星 filed at 6 级 is dropped');
   assert.deepEqual(sanitizePicks({ 5: ['gone'] }, getAny), {}, 'an unknown id is dropped');
   assert.deepEqual(sanitizePicks(picks, () => null), {}, 'without data nothing is kept (never send junk)');
+});
+
+test('自选干员 模组: 记录自带 modules[](自成一档精锐),详情面板因此渲染 模组 选项;赛季干员不受影响', () => {
+  const withMod = FREE6.find((id) => (FREE[id].modules || []).length);
+  const rec = FREE[withMod];
+  const mod = rec.modules.find((m) => m.isDefault);
+  // recordsOf: a 自选候选 has goldenId null and no `_b` sibling ⇒ the record IS the elite
+  assert.equal(rec.goldenId, null);
+  const { base, golden } = recordsOf(withMod, getAny);
+  assert.equal(base, rec);
+  assert.equal(golden, rec, 'the record is its own elite');
+  // chessOptions: the module options the screen renders (模组 区), plus 不装备 and the default
+  const opt = chessOptions(base, golden);
+  assert.deepEqual(opt.modules, [...rec.modules.map((m) => m.uniEquipId), MODULE_NONE]);
+  assert.equal(opt.defaultModule, mod.uniEquipId);
+  assert.deepEqual(opt.moduleOptions.map((o) => o.id), opt.modules);
+  assert.equal(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).rec.typeName, mod.typeName);
+  assert.equal(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).isDefault, true);
+  assert.equal(opt.moduleOptions.find((o) => o.id === MODULE_NONE).rec, null);
+  // effectiveChoice / setChoice round trip: 不装备 is a change, and setChoice stores it
+  assert.deepEqual(effectiveChoice({}, base, golden), { skill: opt.defaultSkill, module: opt.defaultModule, changed: false });
+  const none = setChoice({}, base, golden, { module: MODULE_NONE });
+  assert.deepEqual(none, { [withMod]: { module: MODULE_NONE } }, 'only the changed half is stored');
+  assert.deepEqual(effectiveChoice(none, base, golden), { skill: opt.defaultSkill, module: MODULE_NONE, changed: true });
+  assert.equal(changedCount(none, getAny), 1, 'the 干员调配 screen counts it');
+  assert.equal(moduleBadge(opt.moduleOptions.find((o) => o.id === mod.uniEquipId).rec), moduleBadge(mod), 'the badge the card shows');
+  // a 自选候选 without modules stays module-less (the 4★ 预备干员)
+  const four = FREE4.find((id) => !(FREE[id].modules || []).length);
+  const f = recordsOf(four, getAny);
+  assert.equal(f.golden, null, 'no modules ⇒ not an elite');
+  assert.deepEqual(chessOptions(f.base, f.golden).modules, []);
+  // …and a season operator keeps its own golden record
+  const season = recordsOf(INSIDE, get);
+  assert.equal(season.base.chessId, INSIDE);
+  assert.equal(season.golden.chessId, CHESS[INSIDE].goldenId);
+  assert.deepEqual(chessOptions(season.base, season.golden).modules,
+    loadoutOptions(season.base, season.golden).modules, 'the golden module list, unchanged');
 });
 
 test('自选干员: setPicks 进 store,setEntries 不会洗掉选取,反之亦然', () => {
