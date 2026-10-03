@@ -31,6 +31,10 @@
 //                 after duration_switch s on the field) and sluggish; the bomb is used up ('expired', never a knock-out;
 //                 its blast fx carries `consumed: true` so clients play the explosion, not a death sound)
 //   从不混淆的方向 untargetable marker; when the owner's skill ends it vanishes and the owner returns to its tile
+//   棋子 (望, the first hand-authored free-pick summon)  a hand piece (data `placeable`): placeable during prep, fires
+//                 its skill when an enemy enters its trigger tile and is used up with a `consumed` blast; the skill
+//                 follows 望's selected slot (取势 停顿+DoT / 连星 line arts+slow / 天下劫 widened trigger+damage grid)
+//                 and 望's 料敌机先 stacks every instance — see wangStone / fireWangStone
 //   黄金盟誓      attacks deal true damage (trait); lasts while the owner's skill runs
 //   防护单元      untargetable, invulnerable device placed by the player (a hand piece, user playtest #6): shield =
 //                 凯瑟琳 max HP × max_shield_ratio on the operator in its range (range 1-1: the tile it faces; effects do
@@ -72,7 +76,7 @@
 // makes the token (Battle.spawnToken also refuses summons the owner's loadout does not produce).
 //
 // Exports for other content: spawnYanyou, spawnMapChar, findSummonTile, summonToken, tacticalPoint, wolfShadows,
-// releaseSkillSummon, SKILL_SUMMON_START_DEPLOY, CAT_SHIELD_KEY, TOKEN_IDS.
+// releaseSkillSummon, SKILL_SUMMON_START_DEPLOY, CAT_SHIELD_KEY, TOKEN_IDS, WANG_STONE_SKILLS.
 
 import { COLS, ROWS, MOVE_SCALE } from '../constants.js';
 import { absoluteRangeKeys, sortEnemyTargets, canTargetEnemy } from '../targeting.js';
@@ -100,6 +104,7 @@ export const TOKEN_IDS = Object.freeze({
   wolfPack: 'token_10028_vigil_wolf',
   manifold: 'token_10030_mlyss_wtrman',
   champagne: 'token_10031_swire2_gdtrap',
+  wangStone: 'token_10064_wang_stone1',
   ulpiaMarker: 'token_10039_ulpia_block',
   goldenOath: 'token_10040_siege2_vlion',
   catShield: 'token_10041_cathy_catsld',
@@ -899,6 +904,175 @@ function champagne(bb) {
   };
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// 棋子 (望 铸子 — the first hand-authored free-pick summon, DESIGN §21.11; the pattern for the rest of the batch)
+
+/** Skills of 望's 棋子 (data/tokens.json `variants[chess_free_char_2027_wang].bySkill`, picked by 望's skill slot). */
+export const WANG_STONE_SKILLS = Object.freeze({
+  qushi: 'sktok_wang_1',       // 取势 (S1): 停顿 + per-second arts on the enemy that triggered the stone
+  lianxing: 'sktok_wang_2',    // 连星 (S2): arts + a slow on the connected line, 3 tiles each side
+  tianxiajie: 'sktok_wang_3',  // 天下劫 (S3, the record's default): the skill grid is trigger AND damage range
+});
+/** 连星 "连线方向上两侧3格范围": 3 tiles each side of the fired stone. */
+const STONE_LINE_SIDE = 3;
+/** Axis vectors [dRow, dCol] of a stone line ('v' = up/down, 'h' = left/right). */
+const STONE_AXIS = Object.freeze({ v: Object.freeze([1, 0]), h: Object.freeze([0, 1]) });
+const STONE_KEY = (r, c) => r * COLS + c;
+
+/** Whether `t` is a stone of the same 望 as `unit` (the official 跟子 is a projectile and has no unit here). */
+const sameStone = (t, unit) => !!t && t.defId === unit.defId && !!t.ownerUnit && t.ownerUnit === unit.ownerUnit;
+
+/** Another stone of the same 望 next to `unit` along `axis` (PRTS 连星 备注: 相连 ⇒ that axis is activated). */
+function stoneNeighbour(battle, unit, axis) {
+  const [dr, dc] = STONE_AXIS[axis];
+  return battle.allyUnits.some((t) => t !== unit && t.alive && t.deployed && sameStone(t, unit)
+    && ((t.tileR === unit.tileR + dr && t.tileC === unit.tileC + dc) || (t.tileR === unit.tileR - dr && t.tileC === unit.tileC - dc)));
+}
+
+/**
+ * The axes a stone's line runs along: vertical when a stone stands above/below, horizontal when left/right (PRTS 连星
+ * 备注 — "若相连棋子/跟子在上下侧则激活垂直效果范围（自身及上下3格），左右侧则激活水平效果范围"; 效果范围不因相连棋子/跟子
+ * 消失而取消激活, so a placement-time line stays the line). Without any neighbour the stone's own facing decides
+ * [ASSUMED: 铸子's 跟子 — which always accompanies a manual placement — is not modelled].
+ */
+function stoneAxes(battle, unit) {
+  const out = [];
+  if (stoneNeighbour(battle, unit, 'v')) out.push('v');
+  if (stoneNeighbour(battle, unit, 'h')) out.push('h');
+  if (!out.length) out.push(Array.isArray(unit.fwd) && unit.fwd[0] === 0 ? 'h' : 'v');
+  return out;
+}
+
+/** Contiguous run of the same 望's stones through `unit` along `axis`, `unit` included (料敌机先's 连续直线). */
+function stoneRun(battle, unit, axis) {
+  const [dr, dc] = STONE_AXIS[axis];
+  let n = 1;
+  for (const sign of [1, -1]) {
+    for (let i = 1; i < ROWS; i++) {
+      const r = unit.tileR + dr * i * sign, c = unit.tileC + dc * i * sign;
+      if (!battle.allyUnits.some((t) => t.alive && t.deployed && sameStone(t, unit) && t.tileR === r && t.tileC === c)) break;
+      n++;
+    }
+  }
+  return n;
+}
+
+/** Absolute tile keys of the line through `unit`: itself + up to `side` tiles each way, inside the board. */
+function stoneLineKeys(unit, axis, side) {
+  const [dr, dc] = STONE_AXIS[axis];
+  const keys = [STONE_KEY(unit.tileR, unit.tileC)];
+  for (const sign of [1, -1]) {
+    for (let i = 1; i <= side; i++) {
+      const r = unit.tileR + dr * i * sign, c = unit.tileC + dc * i * sign;
+      if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+      keys.push(STONE_KEY(r, c));
+    }
+  }
+  return keys;
+}
+
+/** 料敌机先 (望 talent 1) as the stone reads it: per-line-stone damage / RES penetration and the stack cap. */
+function stoneTalent(unit) {
+  const b = talentWith(unit.ownerUnit?.def ?? null, 'attack@per_atk_scale')?.bb ?? {};
+  return {
+    scale: num(b['attack@per_atk_scale'], 0),
+    pen: num(b['attack@per_magic_resist_penetrate_fixed'], 0),
+    max: Math.max(1, Math.floor(num(b['attack@max_trigger_cnt'], 3))),
+  };
+}
+
+/**
+ * Fire a 棋子: `here` = the enemies that stood on its trigger tiles (earliest spawned first).
+ * 料敌机先 (望 talent 1) scales every instance: +`attack@per_atk_scale` damage and
+ * `attack@per_magic_resist_penetrate_fixed` flat RES penetration per stone on the fired stone's line, capped.
+ */
+function fireWangStone(battle, unit, here, o) {
+  const tal = stoneTalent(unit);
+  const axes = stoneAxes(battle, unit);
+  const stacks = Math.min(tal.max, Math.max(1, ...axes.map((a) => stoneRun(battle, unit, a))));
+  const amount = ownerAtk(unit) * o.scale * (1 + tal.scale * stacks);
+  const pen = tal.pen * stacks;
+  const hit = (e, n, tags) => battle.dealDamage(unit, e, { amount: n, type: 'arts', isSkill: true, resIgnoreFlat: pen, tags });
+  if (o.mode === 'qushi') {
+    // 取势: the triggering enemy is 停顿 and burns for bb.sluggish s. PRTS: the DoT is pre-computed from 望's attributes
+    // and applied 无来源 ("由望依自身属性预计算伤害后、以无来源的形式施加给目标"), and each stone's instance stacks
+    // independently ("法术伤害效果可独立叠加生效") — hence the per-stone buff key.
+    const e = here[0];
+    if (o.sluggish > 0) battle.applyStatus(e, 'sluggish', { duration: o.sluggish, source: unit });
+    battle.addBuff(e, {
+      key: `wang:stone:dot:${unit.id}`, duration: Math.max(0.1, o.sluggish), interval: 1, source: unit, visible: true,
+      onTick: ({ unit: v }) => { if (v.alive) battle.dealDamage(unit, v, { amount, type: 'arts', isSkill: true, resIgnoreFlat: pen, sourceless: true, tags: ['summon', 'trap', 'dot'] }); },
+    });
+  } else {
+    const keys = o.mode === 'lianxing' ? axes.flatMap((a) => stoneLineKeys(unit, a, STONE_LINE_SIDE)) : o.triggerKeys;
+    for (const e of enemiesOnKeys(battle, keys)) {
+      hit(e, amount, ['summon', 'trap']);
+      // 连星: "并使其6秒内移动速度降低35%" — a direct multiplier, stacking per stone (PRTS 备注)
+      if (o.mode === 'lianxing' && o.slowFor > 0 && o.slowMul < 1 && e.alive) {
+        battle.addBuff(e, { key: `wang:stone:slow:${unit.id}`, duration: o.slowFor, mods: { moveMul: o.slowMul }, visible: true, source: unit });
+      }
+    }
+  }
+  // used-up trap: the blast fx marks it `consumed` (clients play the explosion, never a knock-out sound)
+  battle.fx('summonBurst', { x: unit.x, y: unit.y, id: unit.id, target: here[0] ? here[0].id : null, consumed: true });
+}
+
+/**
+ * 棋子 (望's 铸子 summon, `token_10064_wang_stone1`; the first hand-authored free-pick summon — DESIGN §21.11).
+ *
+ * The stone is a HAND PIECE (data `placeable`, count 6 / max 7, deployLimit 7): the player places the pieces of a 望's
+ * stack during prep, and each one sits on its tile. PRTS 铸子: "棋子相连时相互激活，敌人进入激活的棋子所在地块时触发其
+ * 效果" — an enemy entering a stone's trigger tile fires the stone's effect, and the stone is used up (陷阱: 望 S3 counts
+ * its stones as ammunition — "棋子耗尽后技能结束" — and a used-up stone leaves with the `consumed` blast fx, like
+ * 香槟炸弹, never as a knock-out). Which effect fires is the stone's own skill, i.e. 望's selected skill slot
+ * (data `variants[owner].bySkill[skillIndex]`):
+ *   取势 (S1)             the triggering enemy is 停顿 for bb.sluggish s and takes 望 ATK × bb.atk_scale arts per second
+ *   连星 (S2)             every enemy on the connected line (itself + 3 tiles each way along an activated axis) takes
+ *                         望 ATK × bb.atk_scale arts and moves at ×(1 + bb.move_speed) for bb.duration s
+ *   天下劫 (S3, default)  the skill's own rangeGrid (the 9-tile radius-2 plus) is the trigger AND the damage range;
+ *                         every enemy in it takes 望 ATK × bb.atk_scale arts (air included — "可响应飞行单位")
+ * The damage uses the OWNER's ATK ("技能伤害始终借用持有者的攻击力计算") but is dealt by the stone itself, and 望's
+ * 料敌机先 (talent 1) applies through `fireWangStone`. The stone neither attacks nor blocks (`trait.noAttack`, data
+ * blockCnt 0) and it is not untargetable: data gives it 1000 HP and a redeploy time, so enemies may shoot it.
+ * [ASSUMED] Activation ("棋子相连时相互激活") is modelled as always-on: 铸子's second half auto-places a 跟子 in an
+ * adjacent tile for every manual placement ("手动部署棋子时，望在相邻位置额外部署一枚棋子"), so a stone a player places
+ * in the real game is always connected to one — and a 跟子 is a projectile entity (it occupies no tile and can sit on
+ * an undeployable one), which this engine has no equivalent of. Without it a lone stone would be entirely inert, i.e.
+ * the reported "望的棋子不会爆炸". The line itself (连星's axis, 料敌机先's stacks) is read from the real neighbouring
+ * stones; a stone with no neighbour falls back to its own facing axis, and the missing 跟子 would add one more stone
+ * to that line (so a real-game lone placement is usually one stack richer than here).
+ */
+function wangStone(bb, raw, def) {
+  const skillId = String(def?.skill?.id ?? raw?.skill?.skillId ?? '');
+  const mode = skillId === WANG_STONE_SKILLS.qushi ? 'qushi' : skillId === WANG_STONE_SKILLS.lianxing ? 'lianxing' : 'tianxiajie';
+  const grid = Array.isArray(def?.skill?.rangeGrid) && def.skill.rangeGrid.length ? def.skill.rangeGrid : null;
+  const o = {
+    mode,
+    scale: num(bb.atk_scale, 0),
+    sluggish: num(bb.sluggish, 0),
+    slowFor: num(bb.duration, 0),
+    slowMul: Math.max(0, 1 + num(bb.move_speed, 0)),
+  };
+  return {
+    skill: {
+      kind: 'passive',
+      onTick({ battle, unit }) {
+        if (!unit.alive || !unit.deployed || unit.mem.wangFired) return;
+        // 天下劫 widens the trigger to the skill's grid; 取势 / 连星 trigger on the stone's own tile (range 0-1)
+        const triggerKeys = mode === 'tianxiajie' && grid
+          ? absoluteRangeKeys(grid, unit.tileR, unit.tileC, unit.dir)
+          : [STONE_KEY(unit.tileR, unit.tileC)];
+        const here = enemiesOnKeys(battle, triggerKeys).sort((a, b) => a.spawnSeq - b.spawnSeq);
+        if (!here.length) return;
+        unit.mem.wangFired = true;
+        fireWangStone(battle, unit, here, { ...o, triggerKeys });
+        battle.retreat(unit, { reason: 'expired', permanent: true });
+      },
+    },
+    trait: { noAttack: true },
+  };
+}
+
 /** 从不混淆的方向 (乌尔比安 S3): marker of the owner's original tile; the owner returns there when the skill ends. */
 function ulpiaMarker() {
   return {
@@ -1354,6 +1528,7 @@ const RAW_KITS = {
   [TOKEN_IDS.wolfPack]: wolfPack,
   [TOKEN_IDS.manifold]: manifold,
   [TOKEN_IDS.champagne]: champagne,
+  [TOKEN_IDS.wangStone]: wangStone,
   [TOKEN_IDS.ulpiaMarker]: ulpiaMarker,
   [TOKEN_IDS.goldenOath]: goldenOath,
   [TOKEN_IDS.catShield]: catShield,
