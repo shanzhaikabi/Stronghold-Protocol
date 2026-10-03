@@ -499,11 +499,16 @@ export function freezeDef(d) {
 
 /**
  * A DataSource resolves ids to normalised defs. `raw` is `{ chess, enemies, tokens, stages, waves }`.
+ *
+ * `raw.freePicks` (data/freePicks.json, DESIGN §21) is merged into the chess map: a 自选候选 is a chess-shaped record
+ * of that separate file, and the sim has to resolve it like any chess — otherwise `getChess(id)` is null and
+ * `Battle._addAllyFromInput` drops the unit ("unknown chess") the moment a battle starts. A season chess always wins
+ * the (impossible) id collision; the browser runner fetches the file through `SIM_DATA_FILES` (runner.js).
  */
 export class DataSource {
   constructor(raw = {}, fallback = null) {
     this.raw = {
-      chess: asMap(unwrap(raw.chess, 'chess'), 'chessId') ?? {},
+      chess: { ...(asMap(unwrap(raw.chess, 'chess'), 'chessId') ?? {}), ...(asMap(unwrap(raw.freePicks, 'freePicks'), 'chessId') ?? {}) },
       enemies: asMap(unwrap(raw.enemies, 'enemies'), 'key') ?? {},
       tokens: asMap(unwrap(raw.tokens, 'tokens'), 'tokenId') ?? {},
       stages: asMap(unwrap(raw.stages, 'stages'), 'id') ?? {},

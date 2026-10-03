@@ -384,6 +384,7 @@ test('fitResult: an oversized b.result is trimmed under the frame budget without
 
 test('loadBrowserSim: a data file that cannot be fetched fails the loader (no battle on partial data); all files → a working sim', async () => {
   const { loadBrowserSim, SIM_DATA_FILES } = await import('../../public/js/battle/runner.js');
+  const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (数据文件 data/freePicks.json, DESIGN §21)
   const base = new URL('../../server/sim/', import.meta.url).href;
   const served = (fail = new Set()) => async (url) => {
     const name = String(url).replace(/^.*\//, '').replace(/\.json$/, '');
@@ -399,9 +400,14 @@ test('loadBrowserSim: a data file that cannot be fetched fails the loader (no ba
   const once = served();
   const sim = await loadBrowserSim({ base, fetchFn: (u, o) => { if (first && /enemies/.test(u)) { first = false; return Promise.reject(new Error('net')); } return once(u, o); } });
   assert.ok(sim.spec && sim.ds);
+  // data/freePicks.json is a sim data file too (DESIGN §21): without it every deployed 自选干员 resolved to no def and the
+  // battle dropped the unit ("unknown chess") — user report 2026-10-03. This asserts the browser list itself.
+  assert.ok(SIM_DATA_FILES.includes('freePicks'), 'the browser sim fetches the free-pick file');
+  assert.ok(sim.ds.getChess(WANG), 'and resolves a 自选候选 like any chess');
   const spec = buildBattleSpec({ battleId: 'l1', fieldId: 'n:p', kind: 'normal', seed: 5, round: 1, stageId: Object.keys(DATA.stages)[0], timeLimit: 30,
-    players: [{ playerId: 'p', units: [], bonds: {} }], spawns: [{ enemyKey: plainKey, count: 1, time: 1 }], flags: { layerGainsEnabled: true } });
+    players: [{ playerId: 'p', units: [{ uid: 1, chessId: WANG, row: 10, col: 5, dir: 'RIGHT', skillIndex: 0 }], bonds: {} }], spawns: [{ enemyKey: plainKey, count: 1, time: 1 }], flags: { layerGainsEnabled: true } });
   const b = sim.spec.createBattleFromSpec(spec, sim.ds, { quiet: true, recordEvents: false });
+  assert.ok(b.allyUnits.some((u) => u.uid === 1), 'the 自选干员 is on the field in the browser sim');
   b.runToEnd(100);
   assert.ok(b.finished);
 });
