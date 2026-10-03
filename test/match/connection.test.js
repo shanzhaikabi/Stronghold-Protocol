@@ -182,8 +182,11 @@ test('onLeave: a quitter has no place in the Final Assault pairing or the boss p
   assert.ok(!alive.includes(first));
   h.drive(() => m.phase === PHASE.FINAL_ASSAULT);
   assert.deepEqual(m.fields.map((f) => f.players), [alive], 'one boss field for the two players left');
-  assert.equal(m.bossPool.maxHp, bossPoolHp(m.gd, m.bossId, 2), 'the co-op boss pool of two alive players');
-  assert.equal(m.bossPool.maxHp, m.gd.boss(m.bossId).bloodPoint[m.gd.difficulty], 'bloodPoint, no alive-player factor (DESIGN §20.10)');
+  // the pool is sized once from the SEATS the match runs with (3 here), so a quitter / an elimination never shrinks it
+  // (DESIGN §20.9 "保持固定血量"); a smaller ROOM does (user report 2026-10-03, config bossHpScale.playerScaling)
+  assert.equal(m.bossPool.maxHp, m.gd.bossPoolHp(m.bossId, m.players.size), 'the pool of the match\'s seats');
+  assert.equal(m.bossPool.maxHp, Math.round((m.gd.boss(m.bossId).bloodPoint[m.gd.difficulty] * 3) / 4), 'three seats: the room factor, not the two alive players');
+  assert.notEqual(m.bossPool.maxHp, bossPoolHp(m.gd, m.bossId, 2), 'not the two alive players');
   const end = h.runToEnd();
   assert.equal(end.victory, true);
   assert.equal(end.players.find((p) => p.playerId === first).roundsPassed, 0);

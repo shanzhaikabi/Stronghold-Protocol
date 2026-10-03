@@ -2835,7 +2835,9 @@ export class Match {
     }
     const bossId = hidden ? this.hiddenBossId : this.bossId;
     const hitSteps = new Map();
-    this.bossPool = new SharedBossPool(bossPoolHp(this.gd, bossId, alive.length), {
+    // the pool is sized by the players the MATCH runs with (seats, so an eliminated player never shrinks it, §20.9);
+    // the alive count is only read with bossHpScale.aliveScaling (off)
+    this.bossPool = new SharedBossPool(bossPoolHp(this.gd, bossId, this.players.size, alive.length), {
       onHit: (pid, dmg) => {
         const ps = this.players.get(pid);
         if (!ps) return;
