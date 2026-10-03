@@ -303,6 +303,30 @@ describe('placement mirror (canPlace)', () => {
     assert.deepEqual(canPlace(ctx, m.uid, { area: 'board', row: 9, col: 3 }), { ok: true, action: 'orient' });
     assert.deepEqual(dropIntent(ctx, m.uid, { area: 'board', row: 9, col: 3 }), { t: 'g.move', fields: { uid: m.uid, to: { area: 'board', row: 9, col: 3 } } });
   });
+  test('a board→board swap re-checks the 援军 战术点 rule on both sides (mirrors PlayerState._placeable)', () => {
+    // 伺夜 turned UP: its 狼群 at (9,5) has left the owner's attack range (facing UP it covers rows 10-13 × cols 4-6)
+    const sire = { ...piece('chess_char_3_19_a'), row: 10, col: 5, dir: 'UP' };
+    const wolf = { uid: ++uid, kind: 'token', id: 'token_10028_vigil_wolf', count: 1, ownerUid: sire.uid, row: 9, col: 5, dir: 'RIGHT' };
+    const mate = { ...piece(MELEE), row: 9, col: 4 };
+    const ctx = ctxFor(privWith({ board: [sire, wolf, mate] }));
+    // (9,5) ⇄ (9,4) are both legal MELEE tiles, so terrain alone would offer the swap — the summon's own rule refuses it
+    assert.equal(canPlace(ctx, mate.uid, { area: 'board', row: 9, col: 5 }).code, 'BAD_TILE', 'the summoned occupant would land off its 战术点');
+    assert.equal(canPlace(ctx, wolf.uid, { area: 'board', row: 9, col: 4 }).code, 'BAD_TILE', 'the summon would be dragged off its 战术点');
+    // …while an in-place re-orientation is not a placement: the server accepts it too (same turn, both sides agree)
+    assert.deepEqual(canPlace(ctx, wolf.uid, { area: 'board', row: 9, col: 5 }), { ok: true, action: 'orient' });
+    // the very same swap for a NON-tactician owner (赫默's 医疗探机 is not a 援军) is still offered
+    const healer = { ...piece('chess_char_2_02_a'), row: 10, col: 5, dir: 'UP' }; // physician
+    const drone = { uid: ++uid, kind: 'token', id: 'token_10000_silent_healrb', count: 1, ownerUid: healer.uid, row: 9, col: 5, dir: 'RIGHT' };
+    const ctx2 = ctxFor(privWith({ board: [healer, drone, mate] }));
+    assert.deepEqual(canPlace(ctx2, mate.uid, { area: 'board', row: 9, col: 5 }), { ok: true, action: 'swap' });
+    assert.deepEqual(canPlace(ctx2, drone.uid, { area: 'board', row: 9, col: 4 }), { ok: true, action: 'swap' });
+    // …and the rule follows the owner's facing: with 伺夜 facing LEFT, (9,4) is inside its range again
+    const face = { ...sire, dir: 'LEFT' };
+    const wolf2 = { ...wolf, uid: ++uid };
+    const ctx3 = ctxFor(privWith({ board: [face, wolf2, mate] }));
+    assert.deepEqual(canPlace(ctx3, mate.uid, { area: 'board', row: 9, col: 5 }), { ok: true, action: 'swap' });
+    assert.deepEqual(canPlace(ctx3, wolf2.uid, { area: 'board', row: 9, col: 4 }), { ok: true, action: 'swap' });
+  });
   test('hand targets: move, swap, same slot, board unit vs hand item', () => {
     const b = { ...piece(RANGED), row: 10, col: 4 };
     const h0 = piece(MELEE);

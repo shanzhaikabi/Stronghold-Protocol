@@ -1174,10 +1174,13 @@ export class PlayerState {
 
   _moveTokenToBoard(loc, r, c, dir = 'RIGHT') {
     const piece = loc.piece;
-    if (!inField(r, c) || !this._placeable(piece, r, c)) return fail(ERR.BAD_TILE);
+    if (!inField(r, c)) return fail(ERR.BAD_TILE);
     const key = tileKey(r, c);
     const occ = this.board.get(key) || null;
+    // onto its own tile: a re-orientation, which the 战术点 rule does not constrain — the summon keeps the tile the
+    // player already placed it on even after its owner turns away (that is why `_placeable` stays out of `_legal`).
     if (occ === piece) return this._reorient(piece, dir);
+    if (!this._placeable(piece, r, c)) return fail(ERR.BAD_TILE);
     if (loc.area === 'board') {
       // board → board: move or swap; an operator swapped onto the summon's old tile changed its tile, so its other
       // summons go back onto their stacks like any moved operator (_liftTokensOf; the summon just placed stays)
