@@ -115,6 +115,62 @@ describe('干员调配 overlay (real server, headless Chrome)', { skip: !ENABLED
     await ctx.close();
   });
 
+  test('desktop: 导出 hands out a versioned payload; 导入 restores it and refuses junk', async () => {
+    const { ctx, page, problems } = await open();
+    await clickSel(page, '.lobby-screen [data-testid="loadout-open"]');
+    await page.waitForSelector('.lo .lo-card', { visible: true, timeout: 15000 });
+    // one edit, so there is something to export
+    await page.type('.lo-search input', '隐现');
+    await page.waitForFunction(() => document.querySelectorAll('.lo-card').length === 1, { timeout: 5000 });
+    await page.click('.lo-card');
+    await page.waitForSelector('.lo-detail .lo-skill[data-skill="0"]', { visible: true });
+    await page.click('.lo-detail .lo-skill[data-skill="0"]');
+    const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')));
+    assert.deepEqual(stored.entries, { [INSIDE]: { skill: 0 } });
+
+    // 导出: a centred dialog (a full-viewport overlay, not a flex item of the screen) with the payload in the textarea
+    await clickSel(page, '[data-testid="loadout-export"]');
+    await page.waitForSelector('.modal [data-testid="loadout-io-text"]', { visible: true, timeout: 5000 });
+    const box = await page.evaluate(() => {
+      const m = document.querySelector('.modal');
+      const b = document.querySelector('.modal__box').getBoundingClientRect();
+      return { position: getComputedStyle(m).position, y: b.y, h: b.height, vh: innerHeight };
+    });
+    assert.equal(box.position, 'fixed', 'the screen\'s `.lo > *` rule must not clobber the modal');
+    assert.ok(Math.abs(box.y + box.h / 2 - box.vh / 2) < 2, 'centred vertically');
+    const payload = JSON.parse(await page.$eval('[data-testid="loadout-io-text"]', (t) => t.value));
+    assert.equal(payload.kind, 'stronghold.loadout');
+    assert.equal(payload.v, 1);
+    assert.deepEqual(payload.entries, stored.entries, 'what is exported is what is stored');
+    await page.screenshot({ path: path.join(OUT, 'loadout-export.png') });
+    await page.evaluate(() => [...document.querySelectorAll('.modal__actions .btn')].find((b) => b.textContent.trim() === '关闭').click());
+    await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 3000 });
+
+    // wipe it, then 导入 the payload back
+    await page.evaluate(() => localStorage.setItem('sp.pref.loadout', JSON.stringify({ v: 1, entries: {} })));
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => globalThis.__SP__?.store.get().connection.status === 'online' && !!document.querySelector('.lobby-screen'), { timeout: 30000 });
+    await clickSel(page, '.lobby-screen [data-testid="loadout-open"]');
+    await page.waitForSelector('.lo .lo-card', { visible: true, timeout: 15000 });
+    await clickSel(page, '[data-testid="loadout-import"]');
+    await page.waitForSelector('.modal [data-testid="loadout-io-text"]', { visible: true, timeout: 5000 });
+    await page.$eval('[data-testid="loadout-io-text"]', (t, v) => { t.value = v; t.dispatchEvent(new Event('input', { bubbles: true })); }, JSON.stringify(payload));
+    await page.click('[data-testid="loadout-io-apply"]');
+    await page.waitForFunction(() => !document.querySelector('.modal'), { timeout: 5000 });
+    await sleep(300);
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')).entries), stored.entries, 'round trip');
+
+    // a payload of another tool is refused and leaves the loadout alone
+    await clickSel(page, '[data-testid="loadout-import"]');
+    await page.waitForSelector('.modal [data-testid="loadout-io-text"]', { visible: true, timeout: 5000 });
+    await page.$eval('[data-testid="loadout-io-text"]', (t) => { t.value = '{"kind":"other.tool","entries":{"a":{"skill":1}}}'; t.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.click('[data-testid="loadout-io-apply"]');
+    await page.waitForFunction(() => /导入失败/.test(document.body.textContent || ''), { timeout: 5000 });
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')).entries), stored.entries, 'a refused import changes nothing');
+    assert.deepEqual(problems, []);
+    await ctx.close();
+  });
+
   test('solo briefing: an edit made right before 准备就绪 still applies to this match (closing the overlay sends it)', async () => {
     const { ctx, page, problems } = await open();
     await page.evaluate(() => globalThis.__SP__.net.request('room.create', { mode: 'solo', difficulty: 'NORMAL' }));
