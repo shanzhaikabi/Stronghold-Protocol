@@ -55,7 +55,7 @@
 //     normal chess → moduleId null, elite → uniEquipId | 'none'); m.private exposes `loadout`.
 
 import { ERR, GEO, PHASE, layerGainRoom } from '../../shared/constants.js';
-import { checkLoadout, resolveLoadout } from '../../shared/protocol.js';
+import { checkLoadout, checkFreePicks, resolveLoadout } from '../../shared/protocol.js';
 import { FIELD, tileKey, parseKey, inField, canPlace, positionClass, boardOrder, freeSlot, pieceDir, parseDir, mergeTile } from './board.js';
 import { offsetTile } from '../sim/dir.js';
 import { absoluteRangeKeys } from '../sim/targeting.js';
@@ -69,6 +69,19 @@ const TEMP_SIZE = GEO.TEMP_SIZE;
 const MAX_OFFER_SLOTS = 6;
 const OK = Object.freeze({ ok: true });
 const fail = (error, detail) => (detail ? { error, detail } : { error });
+
+/**
+ * 所属势力 (data `nationId`) → the core bond it grants (DESIGN §21, user playtest): 阿戈尔 / 卡西米尔 / 拉特兰 /
+ * 萨尔贡 / 维多利亚 / 谢拉格 / 叙拉古 / 炎 — 龙门 and the other 炎 sub-factions count as 炎. A faction outside this
+ * list (罗德岛, 哥伦比亚, 东国, 伊比利亚, 莱塔尼亚, 玻利瓦尔, 萨米, 乌萨斯, 雷姆必拓 …) grants no core bond, so the
+ * operator's 主盟约 is 协防干员. Only ever used to break a TIE between several core bonds: a record's own `bonds`
+ * already merge 所属势力 with the 隐藏势力 (see freePickMainBond).
+ */
+const FACTION_BOND = Object.freeze({
+  egir: 'egirShip', kazimierz: 'kazimierzShip', kjerag: 'kjeragShip', laterano: 'lateranoShip',
+  sargon: 'sargonShip', siracusa: 'siracusaShip', victoria: 'victoriaShip',
+  yan: 'yanShip', lungmen: 'yanShip',
+});
 
 export class PlayerState {
   /**
@@ -96,6 +109,13 @@ export class PlayerState {
     /** operator loadout (DESIGN §16): frozen { [baseChessId]: { skill, module } }, {} = every chess on its defaults */
     this.loadout = Object.freeze({});
     if (!this.isBot && seat.loadout) this.setLoadout(seat.loadout);
+    /**
+     * 自选干员 (DESIGN §21): frozen `{ [调度中心 level]: chessId[] }` — the 自由位置 picks, which join THIS player's
+     * shop pool. Stored as picked; whether one actually enters the pool also depends on this match's drawn ban set,
+     * which is decided after the players are constructed — see freePickIds().
+     */
+    this.freePicks = Object.freeze({});
+    if (!this.isBot && seat.picks) this.setFreePicks(seat.picks);
     this.shop = { level: 1, upgradePrice: this.gd.upgradeBase(1) ?? 0, slots: [], frozen: false, freeRefreshes: 0 };
     /** reward offers queue (merge rewards, special refreshes): { tier, source, slots: [{ kind, id, price, sold }] } */
     this.offers = [];
@@ -218,6 +238,92 @@ export class PlayerState {
   /** The skill index / module a chess record fights with under this player's loadout (DESIGN §16). */
   loadoutFor(chessRecord) {
     return resolveLoadout(this.loadout, chessRecord, (id) => this.gd.chess(id));
+  }
+
+  /**
+   * Replace the 自由位置 picks (DESIGN §21) after re-checking them against this match's data. Returns false (picks
+   * unchanged) when they do not fit; bots never pick. Ban filtering is NOT done here — it is applied on demand by
+   * freePickIds(), because the match draws its disabled bonds after the players exist.
+   * @param {any} picks `{ [level]: chessId[] }`
+   * @returns {boolean}
+   */
+  setFreePicks(picks) {
+    if (this.isBot) return false;
+    const res = checkFreePicks(picks, (id) => this.gd.chess(id));
+    if (!res || !res.ok) {
+      this.m.log?.warn?.(`[match ${this.m.roomCode}] 自选干员 of ${this.playerId} ignored: ${res && res.detail}`);
+      return false;
+    }
+    const out = {};
+    for (const [level, list] of Object.entries(res.picks)) out[level] = Object.freeze([...list]);
+    this.freePicks = Object.freeze(out);
+    return true;
+  }
+
+  /**
+   * The 主盟约 of a 自选干员 (DESIGN §21): the core bond of its record, else 协防干员 (`emptyShip`).
+   *
+   * The record's `bonds` are authoritative, NOT `nationId`: the official autochess data already merges 所属势力 with
+   * the 隐藏势力 the PRTS tables record, and the two disagree for a third of the 6★ pool (能天使 is 龙门 but carries
+   * 拉特兰, 水月 is 东国 but carries 阿戈尔, …) — user playtest: "以实际盟约为准". Only when a record carries SEVERAL
+   * core bonds does the faction pick between them (烛煌 victoriaShip+yanShip on 罗德岛, 锏 kjeragShip+kazimierzShip on
+   * 谢拉格); with no faction match the first one the data lists wins.
+   * @param {any} rec a chess record (season or 自选候选)
+   * @returns {string} a bond id
+   */
+  freePickMainBond(rec) {
+    const core = ((rec && rec.bonds) || []).filter((b) => this.gd.bond(b)?.isCore);
+    if (!core.length) return 'emptyShip';
+    if (core.length === 1) return core[0];
+    const byFaction = FACTION_BOND[rec.nationId];
+    return byFaction && core.includes(byFaction) ? byFaction : core[0];
+  }
+
+  /**
+   * The 自选干员 that actually join this player's pool: a pick whose 主盟约 is in the match's drawn disabled set is
+   * dropped entirely (it never appears in this player's shop — "如果对应的主盟约被ban，该干员也不会出现在池子内"
+   * [user]). 协防干员 can never be banned (its bond has weight 0, so the ban draw cannot pick it).
+   * @returns {string[]} chess ids, in pick order
+   */
+  freePickIds() {
+    const banned = Array.isArray(this.m.disabledBonds) ? this.m.disabledBonds : [];
+    const out = [];
+    for (const list of Object.values(this.freePicks)) {
+      for (const id of list) {
+        const rec = this.gd.chess(id);
+        if (rec && !banned.includes(this.freePickMainBond(rec))) out.push(id);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * This player's 自选干员 as pool-roll entries (DESIGN §21, `SharedPool._eligible` `extra`): `{ id, tier, left }` per
+   * pick that joins the pool and can still yield copies.
+   *
+   * A 自选干员 is NOT part of the shared copy economy — its pieces hold `poolCopies: 0` like any effect-granted chess —
+   * so its budget is "how many more copies of this base the player may own": the base's ordinary pool cap minus what is
+   * already owned (an elite counts as `goldenCopies`). Buying, merging and selling therefore behave exactly as for any
+   * operator, a pick already owned in full simply stops appearing, and selling copies back frees the budget again.
+   * @returns {Array<{ id: string, tier: number, left: number }>}
+   */
+  freePickEntries() {
+    const out = [];
+    const seen = new Set();
+    for (const id of this.freePickIds()) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const cap = this.gd.poolCopies(id);
+      if (!(cap > 0)) continue;
+      let owned = 0;
+      for (const p of this.allChess()) {
+        if (!p || p.kind !== 'chess' || this.gd.baseIdOf(p.id) !== id) continue;
+        owned += this.gd.isGolden(p.id) ? this.gd.goldenCopies : 1;
+      }
+      const left = Math.max(0, cap - owned);
+      if (left > 0) out.push({ id, tier: this.gd.tierOf(id), left });
+    }
+    return out;
   }
 
   /**
@@ -603,7 +709,7 @@ export class PlayerState {
       const fresh = (id) => !list.includes(id);
       for (let i = 0; i < ro.count; i++) {
         let id = null;
-        for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh });
+        for (let tt = t; tt >= 1 && !id; tt--) id = this.m.pool.roll(this.m.rngShop, { tier: tt, filter: fresh, extra: this.freePickEntries() });
         if (id) list.push(id);
       }
     }
@@ -769,7 +875,7 @@ export class PlayerState {
   }
 
   _rollChessSlot() {
-    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level });
+    const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.freePickEntries() });
     return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
   }
 
@@ -1518,6 +1624,8 @@ export class PlayerState {
       nextEnemies: this.m.nextEnemiesFor(this),
       // DESIGN §16: the effective operator loadout ({ [baseChessId]: { skill, module } }; chess not listed use defaults)
       loadout: this.loadout,
+      // DESIGN §21: the 自由位置 picks that actually join this player's pool (a pick whose 主盟约 is banned is absent)
+      freePicks: this.freePickIds(),
       stats: {
         dmgDealt: Math.round(this.stats.dmgDealt), kills: this.stats.kills, leaks: this.stats.leaks, gold: this.stats.gold,
         refreshes: this.stats.refreshes, merges: this.stats.merges,

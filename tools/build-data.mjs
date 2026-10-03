@@ -947,6 +947,119 @@ function buildChess(ctx) {
   return { chess: out, tokenOwners };
 }
 
+// ===== 自选干员 (free picks, DESIGN §21) =========================================================
+
+/**
+ * charIds a 自由位置 (自选干员) may bring into the player's own shop pool. They get a record in data/freePicks.json
+ * that is NOT a season chess and never enters the season pool (visible:false, chessType 'PROTOTYPE').
+ *
+ * Seeded with the 原型干员 the season's `backupCharId` data points at (docs/research/03-operators.json `backup`):
+ * the 6★ 罗德岛特派高级干员 char_608..617 and the 4★ 预备干员 char_600..607. The official character_table carries
+ * no team/faction for them (nationId/groupId/teamId are all null), so their only bond is 协防
+ * (constData.fallbackBondId `emptyShip`) and they carry no 特质 [user playtest].
+ *
+ * Extensible by design: append charIds here to offer further Arknights operators. Each addition needs (a) assets —
+ * the pipeline and its per-class hit rates are in docs/research/07-assets.md §0 — and (b) a kit spec for every skill
+ * it exposes (enforced by the kit coverage test), so add them in small batches.
+ */
+const FREE_PICK_CHARS = Object.freeze([
+  'char_600_cpione', 'char_601_cguard', 'char_602_cdfend', 'char_603_csnipe',
+  'char_604_ccast', 'char_605_cmedic', 'char_606_csuppo', 'char_607_cspec',
+  'char_608_acpion', 'char_609_acguad', 'char_610_acfend', 'char_611_acnipe', 'char_612_accast',
+  'char_613_acmedc', 'char_614_acsupo', 'char_615_acspec', 'char_617_sharp2',
+]);
+
+/**
+ * 自由位置 levels a free pick is selectable at: every 6★ at 5 级 and 6 级, the 4★ 预备干员 at 5 级 only — and among
+ * those not the 先锋 / 特种 ones (6 remain: 近卫 / 重装 / 狙击 / 术师 / 医疗 / 辅助) [user].
+ */
+function freePickLevels(rarity, profession) {
+  if (rarity === 6) return [5, 6];
+  if (rarity === 4 && profession !== 'PIONEER' && profession !== 'SPECIAL') return [5];
+  return [];
+}
+
+/**
+ * Build data/freePicks.json: one record per FREE_PICK_CHARS charId, shaped like a chess record (the client, the sim
+ * and the pool logic can then treat it as one) but explicitly marked as a 自选候选 rather than a season chess.
+ *
+ * Status follows the season's NORMAL-chess convention (phase E2 / level 1 / skill level 4 — all 53 visible NORMAL
+ * chess use it). `tier` is provisional (= rarity): the 自由位置 shop-tier gate is settled with the pool work.
+ * `tokens` stays empty until the operators' skills get kits (their summons belong to that step).
+ */
+function buildFreePicks(ctx) {
+  const { charTable, uniequip } = ctx;
+  const out = {};
+  for (const charId of FREE_PICK_CHARS) {
+    const char = charTable[charId];
+    if (!char) { warn(`freePick ${charId}: missing from character_table`); continue; }
+    const rarity = Number(String(char.rarity).replace('TIER_', '')) || null;
+    const levels = freePickLevels(rarity, char.profession);
+    if (!levels.length) { warn(`freePick ${charId}: no 自由位置 level (rarity ${rarity}, ${char.profession})`); continue; }
+    const chessId = `chess_free_${charId}`;
+    const phase = 2;      // E2: every NORMAL chess of the season is fielded at phase 2
+    const level = 1;
+    const skillLevel = 4; // the season's normal-chess skill level
+    const attrs = interpolateAttrs(char, phase, level);
+    if (!attrs) warn(`freePick ${charId}: cannot interpolate attributes`);
+    const rangeId = char.phases?.[phase]?.rangeId || null;
+    const traitDefault = traitRecord(ctx, char, phase, level, [], chessId);
+    const skillRecs = [];
+    (char.skills || []).forEach((se, i) => {
+      if (!se?.skillId || !unlocked(se.unlockCond, phase, level)) return;
+      const s = buildSkill(ctx, se.skillId, skillLevel, null, `freePick ${charId}`);
+      if (!s) return;
+      s.trigger = resolveTrigger(ctx, char, charId, i, s, { operator: true });
+      s.index = i;
+      s.overrideTokenKey = se.overrideTokenKey || null;
+      skillRecs.push(s);
+    });
+    if (!skillRecs.length) warn(`freePick ${charId}: no buildable skill`);
+    // These operators have no charShopChessDatas row, so there is no official defaultSkillIndex: the highest unlocked
+    // index is the signature skill, the convention every 3-skill operator of the season follows.
+    const defaultIdx = skillRecs.length ? skillRecs[skillRecs.length - 1].index : null;
+    const rec = {
+      chessId, baseId: chessId, goldenId: null, isGolden: false,
+      tier: rarity, // provisional: see the 自由位置 shop-tier gate note above
+      identifier: null,
+      isHidden: true, isDiy: false, visible: false,
+      chessType: 'PROTOTYPE',
+      freePick: true,
+      freePickLevels: levels,
+      shopSortId: null,
+      charId,
+      name: char.name, appellation: char.appellation, rarity,
+      profession: char.profession,
+      subProfessionId: char.subProfessionId,
+      subProfessionName: uniequip.subProfDict?.[char.subProfessionId]?.subProfessionName || null,
+      position: char.position,
+      nationId: char.nationId || null,
+      bonds: ['emptyShip'], // 协防干员: the prototypes carry no faction [user]
+      garrisonIds: [],      // 不拥有特质 [user]
+      price: null, sellPrice: null,
+      upgradeNum: null, upgradeChessId: null,
+      status: { phase, level, skillLevel, equipLevel: 0 },
+      stats: statsFrom(attrs, {}),
+      immunities: attrs ? immunitiesOf(attrs) : null,
+      rangeId, rangeGrid: rangeGrid(ctx, rangeId),
+      dmgType: null, attackKind: null, projectile: null, canHitFly: false, targetPriority: null,
+      trait: traitDefault.trait,
+      skill: skillRecs.find((s) => s.index === defaultIdx) || null,
+      skills: skillRecs.map((s) => ({ ...s, isDefault: s.index === defaultIdx })),
+      talents: mergeTalentChanges(baseTalentList(ctx, char, phase, level, `freePick ${charId}`), []),
+      tokens: [], module: null,
+      assets: {
+        avatar: charId, portrait: `${charId}_1`, spine: charId,
+        skillIcon: (skillRecs.find((s) => s.index === defaultIdx) || {}).iconId || null,
+        subProfIcon: `sub_${char.subProfessionId}_icon`,
+      },
+    };
+    Object.assign(rec, traitDefault.classify);
+    if (!out[chessId]) out[chessId] = rec;
+  }
+  return out;
+}
+
 // ===== tokens ===================================================================================
 
 /** Classify a token / map character (heal tokens have no MEDIC profession). */
@@ -2718,7 +2831,7 @@ function findNonFinite(obj, path, out) {
 function validateAll(f) {
   const errors = [];
   const err = (m) => errors.push(m);
-  const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens } = f;
+  const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens, freePicks } = f;
   for (const [name, obj] of Object.entries(f)) {
     const bad = [];
     findNonFinite(obj, name, bad);
@@ -2791,6 +2904,19 @@ function validateAll(f) {
     for (const id of [...(p.items || []), ...(p.weighted || []).map((x) => x[0])]) if (!id || !(items[id] || chess[id])) err(`pool ${pid}: unresolved entry ${id}`);
   }
   for (const id of Object.keys(SHOP_EXCLUDED_ITEMS)) if (!items[id] || items[id].itemType !== 'EQUIP' || items[id].isGolden) err(`SHOP_EXCLUDED_ITEMS: ${id} is not a normal EQUIP item`);
+  // 自选干员 (DESIGN §21): every FREE_PICK_CHARS entry must build, stay out of the season pool and be 协防-only.
+  if (!Object.keys(freePicks).length) err('freePicks: FREE_PICK_CHARS produced no record');
+  for (const [id, r] of Object.entries(freePicks)) {
+    if (chess[id]) err(`freePicks ${id}: also a season chess (the shop pool would pick it up)`);
+    if (r.visible || r.chessType !== 'PROTOTYPE' || !r.freePick) err(`freePicks ${id}: bad pool flags (visible ${r.visible}, type ${r.chessType})`);
+    if (!r.stats || !(r.stats.maxHp > 0) || !(r.stats.atk > 0)) err(`freePicks ${id}: bad stats`);
+    if (!Array.isArray(r.skills) || !r.skills.length) err(`freePicks ${id}: no skill`);
+    if (r.skills?.filter((s) => s.isDefault).length !== 1) err(`freePicks ${id}: needs exactly one default skill`);
+    if (!Array.isArray(r.rangeGrid) || !r.rangeGrid.length) err(`freePicks ${id}: no attack range`);
+    if (r.garrisonIds.length) err(`freePicks ${id}: 自选干员 own no 特质`);
+    if (r.bonds.length !== 1 || r.bonds[0] !== 'emptyShip') err(`freePicks ${id}: must be 协防干员 only (${r.bonds.join(',')})`);
+    if (!r.freePickLevels.length) err(`freePicks ${id}: no 自由位置 level`);
+  }
   for (const [id, fl] of Object.entries(TOKEN_ABNORMAL)) {
     if (!tokens[id]) err(`TOKEN_ABNORMAL: ${id} is not a token`);
     for (const f of fl) if (f !== 'healFree' && f !== 'isolated') err(`TOKEN_ABNORMAL: ${id}: unknown effect ${f}`);
@@ -2816,6 +2942,7 @@ async function main() {
   const ctx = await loadContext();
   log('building…');
   const { chess, tokenOwners } = buildChess(ctx);
+  const freePicks = buildFreePicks(ctx);
   const effects = buildEffects(ctx);
   const bonds = buildBonds(ctx, chess, effects);
   const garrisons = buildGarrisons(ctx, chess);
@@ -2829,7 +2956,7 @@ async function main() {
   const bosses = buildBosses(ctx, enemies, waves);
   const choices = buildChoices(ctx, effects, items, chess);
   const config = buildConfig(ctx, waves, stages, bands);
-  const files = { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens };
+  const files = { config, chess, freePicks, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens };
 
   const errors = validateAll(files);
   let total = 0;

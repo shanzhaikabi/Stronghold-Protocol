@@ -105,6 +105,8 @@ export class Session {
     this.resyncAt = -Infinity;
     /** @type {Record<string, { skill: number, module: string|null }> | null} checked operator loadout (lobby-owned, DESIGN §16) */
     this.loadout = null;
+    /** @type {Record<string, string[]> | null} checked 自由位置 picks (lobby-owned, DESIGN §21) */
+    this.picks = null;
     /** @type {string} client address of the latest connection (logging) */
     this.addr = '?';
     /** @type {string | null} per-network limit key of the latest connection (null = not limited), see clientAddress */

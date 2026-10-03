@@ -122,7 +122,9 @@ export function loadoutOptions(base, golden = null) {
 /**
  * Semantic check + normalisation of a loadout against the game data (DESIGN §16). Strict: any unknown / hidden / elite
  * chess id, illegal skill index or module rejects the whole loadout. Entries equal to the defaults are dropped, the
- * rest are stored complete: `{ skill, module }` (module null for a chess without an elite record).
+ * rest are stored complete: `{ skill, module }` (module null for a chess without an elite record). A 自选候选 record
+ * (`freePick: true`, DESIGN §21) is accepted although it is invisible + hidden — its owner picked it, so it is theirs to
+ * configure; every other invisible / hidden chess stays rejected.
  * @param {any} entries `room.loadout.entries`
  * @param {(id: string) => any} getChess chess record lookup (normal and golden ids)
  * @returns {{ ok: true, loadout: Record<string, { skill: number, module: string|null }> } | { error: 'BAD_MSG'|'BAD_TARGET', detail: string }}
@@ -133,7 +135,11 @@ export function checkLoadout(entries, getChess) {
   for (const id of Object.keys(entries)) {
     const e = entries[id];
     const base = typeof getChess === 'function' ? getChess(id) : null;
-    if (!base || base.isGolden || base.visible === false || base.isHidden || base.isDiy || (base.baseId && base.baseId !== id)) {
+    // 自选干员 (DESIGN §21) are deliberately invisible + hidden (they must never join the season pool) yet ARE selectable
+    // by the player who picked them, so the visibility guard below must not reject them.
+    const freePick = !!base && base.freePick === true;
+    if (!base || base.isGolden || base.isDiy || (base.baseId && base.baseId !== id)
+      || (!freePick && (base.visible === false || base.isHidden))) {
       return { error: 'BAD_TARGET', detail: `unknown chess ${id}` };
     }
     const golden = base.goldenId ? getChess(base.goldenId) || null : null;
@@ -169,6 +175,68 @@ export function resolveLoadout(loadout, chess, getChess) {
   let moduleId = null;
   if (golden) moduleId = e && opt.modules.includes(e.module) ? e.module : opt.defaultModule;
   return { skillIndex, moduleId };
+}
+
+// ---- 自选干员 / 自由位置 (DESIGN §21): room.loadout { entries, picks } ---------------------------------------
+
+/**
+ * `room.loadout.picks`: `{ [调度中心 level]: chessId[] }` — the 自由位置 selection of the 干员调配 screen. 调度中心
+ * 5 级 and 6 级 each hold `perLevel` picks; the pool an id may come from is data/freePicks.json (records with
+ * `freePick: true` + their own `freePickLevels`). Structural limits here; the semantic check against the game data is
+ * `checkFreePicks`.
+ */
+export const FREE_PICK_LIMITS = Object.freeze({ perLevel: 2, levels: [5, 6] });
+
+/** Structural check of `room.loadout.picks` (level keys, ≤2 ids per level, id-shaped entries). */
+export const isFreePicks = (v) => isPlain(v)
+  && Object.keys(v).every((k) => FREE_PICK_LIMITS.levels.includes(Number(k)))
+  && Object.values(v).every((a) => Array.isArray(a) && a.length <= FREE_PICK_LIMITS.perLevel && a.every(isId));
+
+/**
+ * 调度中心 levels a chess record may be **picked** at for a 自由位置 (DESIGN §21), `[]` when it is not selectable:
+ *   - a 自选候选 record of data/freePicks.json (`freePick: true`): its own `freePickLevels`
+ *   - a season NORMAL 6★ chess — "除所有预设干员以外的玩家拥有的六星干员": 5 级 and 6 级
+ *   - every PRESET / DIY chess (预设干员) and every non-6★ season chess: never
+ * Shared by the server check (`checkFreePicks`) and the 干员调配 picker, so the two can never disagree.
+ * @param {any} rec a chess record (season or 自选候选)
+ * @returns {number[]}
+ */
+export function freePickLevelsOf(rec) {
+  if (!rec || typeof rec !== 'object') return [];
+  if (rec.freePick === true) return Array.isArray(rec.freePickLevels) ? rec.freePickLevels.filter((n) => FREE_PICK_LIMITS.levels.includes(n)) : [];
+  if (!rec.isGolden && rec.chessType === 'NORMAL' && rec.rarity === 6) return [...FREE_PICK_LIMITS.levels];
+  return [];
+}
+
+/**
+ * Semantic check + normalisation of `room.loadout.picks` (DESIGN §21). Strict: every id must be selectable
+ * (`freePickLevelsOf`), must be filed under one of ITS OWN levels, and the same operator may not be picked twice —
+ * the 自由位置 picker forbids duplicates across both levels [user]. Levels without picks are omitted.
+ * @param {any} picks `{ [level]: chessId[] }` (string or numeric level keys)
+ * @param {(id: string) => any} getChess
+ * @returns {{ ok: true, picks: Record<string, string[]> } | { error: 'BAD_MSG'|'BAD_TARGET', detail: string }}
+ */
+export function checkFreePicks(picks, getChess) {
+  if (!isFreePicks(picks)) return { error: 'BAD_MSG', detail: 'bad free picks' };
+  /** @type {Record<string, string[]>} */
+  const out = {};
+  const seen = new Set();
+  for (const level of FREE_PICK_LIMITS.levels) {
+    const list = picks[level] ?? picks[String(level)];
+    if (!Array.isArray(list) || !list.length) continue;
+    for (const id of list) {
+      const rec = typeof getChess === 'function' ? getChess(id) : null;
+      const levels = freePickLevelsOf(rec);
+      if (!levels.length) return { error: 'BAD_TARGET', detail: `${id} is not a 自选候选` };
+      if (!levels.includes(level)) {
+        return { error: 'BAD_TARGET', detail: `${id} is not selectable at 调度中心 ${level} 级` };
+      }
+      if (seen.has(id)) return { error: 'BAD_TARGET', detail: `${id} was picked twice` };
+      seen.add(id);
+      (out[String(level)] = out[String(level)] || []).push(id);
+    }
+  }
+  return { ok: true, picks: out };
 }
 
 // ---- unit stats (user playtest #4 item 7): m.unitStats units and the browser battle's live stats ---------------------
@@ -238,8 +306,9 @@ export const C2S = {
   'room.addBot': {},
   'room.removeBot': { seat: (v) => isInt(v, 0, MAX_SEATS - 1) },
   'room.start': {},
-  // operator loadout (DESIGN §16): stored per session/seat; accepted until the match leaves INFO_CHECK
-  'room.loadout': { entries: isLoadoutEntries },
+  // operator loadout (DESIGN §16) + 自选干员 picks (DESIGN §21): stored per session/seat; accepted until the match
+  // leaves INFO_CHECK
+  'room.loadout': { entries: isLoadoutEntries, picks: isFreePicks, $optional: ['picks'] },
 
   // match
   'g.infoReady': {},

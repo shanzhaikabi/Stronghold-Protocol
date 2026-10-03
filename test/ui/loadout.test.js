@@ -14,8 +14,10 @@ import {
   parseStored, toStored, chessOptions, effectiveChoice, setChoice, resetChoice, sanitizeEntries, rosterOf, filterRoster,
   changedCount, moduleBadge, attrRows, skillTags, skillLabel, selectedSkill, selectedModule, recordsOf,
   exportPayload, serializeExport, parseImport, LOADOUT_EXPORT_KIND, LOADOUT_VERSION,
+  parseStoredPicks, sanitizePicks, pickedIds, setPick, clearPick, freePickSlots, pickedCount,
+  FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../../public/js/ui/loadoutModel.js';
-import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS, applyLoadoutEntries, setEntries, loadoutStore } from '../../public/js/ui/loadoutSync.js';
+import { installLoadoutSync, SYNC_DEBOUNCE_MS, RETRY_MS, applyLoadoutEntries, setEntries, setPicks, loadoutStore } from '../../public/js/ui/loadoutSync.js';
 import { createStore } from '../../public/js/store.js';
 import { shouldAutoClose } from '../../public/js/screens/loadout.js';
 
@@ -232,7 +234,7 @@ function fakeTimers() {
     },
   };
 }
-const syncStore = (entries = {}) => createStore({ entries, open: false, from: null, sel: null, filters: {}, sync: 'idle' });
+const syncStore = (entries = {}, picks = {}) => createStore({ entries, picks, open: false, from: null, sel: null, filters: {}, sync: 'idle' });
 
 test('sync: welcome sends the sanitised loadout; edits are debounced; identical content is not resent', async () => {
   const net = fakeNet();
@@ -241,7 +243,7 @@ test('sync: welcome sends the sanitised loadout; edits are debounced; identical 
   const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => CHESS, lookupChess: get });
   net.emit('welcome', {});
   await T.advance(100);
-  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } } }], 'stale entry dropped');
+  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: {} }], 'stale entry dropped');
   assert.equal(target.get().sync, 'synced');
   target.set({ entries: { [INSIDE]: { skill: 0 }, [SWIRE]: { module: SWIRE_ALT } } });
   target.set({ entries: { [INSIDE]: { skill: 0 }, [SWIRE]: { module: MODULE_NONE } } });
@@ -446,7 +448,7 @@ test('sync: an empty loadout is sent without loading chess.json (no 1.6 MB downl
   const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => { loads++; return CHESS; }, lookupChess: get, notify: () => {} });
   net.emit('welcome', {});
   await T.advance(100);
-  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: {} }]);
+  assert.deepEqual(net.sent, [{ t: 'room.loadout', entries: {}, picks: {} }]);
   assert.equal(loads, 0);
   await net.reply();
   target.set({ entries: { [INSIDE]: { skill: 0 } } });
@@ -465,4 +467,91 @@ test('entry badge (review fix): counts like the screen once chess.json is loaded
   assert.equal(badgeCount(entries, get), 1, 'with the data: only chess the screen shows as 已调整');
   assert.equal(badgeCount(entries, get), changedCount(entries, get));
   assert.equal(badgeCount({}, get), 0);
+});
+
+// ---- 自由位置 picks (DESIGN §21) ------------------------------------------------------------------------------------
+
+const FREE = JSON.parse(readFileSync(path.join(ROOT, 'data/freePicks.json'), 'utf8'));
+/** Chess lookup that also resolves 自选候选 — what the app's `data.lookup('chess', …)` does (data.js fallback). */
+const getAny = (id) => (Object.hasOwn(CHESS, id) ? CHESS[id] : Object.hasOwn(FREE, id) ? FREE[id] : null);
+const FREE6 = Object.keys(FREE).filter((id) => FREE[id].rarity === 6).sort();
+const FREE4 = Object.keys(FREE).filter((id) => FREE[id].rarity === 4).sort();
+const NORMAL6 = 'chess_char_3_01_a'; // 能天使: a season 6★ NORMAL — "玩家拥有的六星干员"
+const PRESET6 = 'chess_char_3_19_a'; // 伺夜: a season 6★ PRESET — 预设干员, never selectable
+
+test('自选干员: parseStoredPicks 容错(等级键/每级上限/重复/id 形状);toStored 往返', () => {
+  assert.deepEqual(parseStoredPicks(null), {});
+  assert.deepEqual(parseStoredPicks('x'), {});
+  assert.deepEqual(parseStoredPicks({ 5: [FREE6[0], FREE6[1], FREE6[2]] }), { 5: [FREE6[0], FREE6[1]] }, 'at most 2 per level');
+  assert.deepEqual(parseStoredPicks({ 5: [FREE6[0], FREE6[0]] }), { 5: [FREE6[0]] }, 'no duplicate');
+  assert.deepEqual(parseStoredPicks({ 4: [FREE6[0]], 7: [FREE6[1]], 5: [FREE6[2]] }), { 5: [FREE6[2]] }, 'only 5 / 6');
+  assert.deepEqual(parseStoredPicks({ 6: [FREE6[0], 'bad id', 7] }), { 6: [FREE6[0]] }, 'id-shaped entries');
+  const picks = { 5: [FREE4[0]], 6: [FREE6[0]] };
+  assert.deepEqual(parseStoredPicks(JSON.parse(JSON.stringify(toStored({}, picks))).picks), picks, 'toStored round trip');
+});
+
+test('自选干员: setPick 校验可选身份 / 等级 / 重复 / 槽位上限;clearPick 移除', () => {
+  assert.equal(FREE_PICK_PER_LEVEL, 2);
+  assert.deepEqual([...FREE_PICK_LEVELS], [5, 6]);
+  assert.deepEqual(setPick({}, 5, NORMAL6, getAny), { 5: [NORMAL6] }, 'a season 六星 NORMAL is pickable');
+  assert.deepEqual(setPick({}, 6, FREE6[0], getAny), { 6: [FREE6[0]] }, 'a 六星 自选候选 at 6 级');
+  assert.deepEqual(setPick({}, 5, FREE4[0], getAny), { 5: [FREE4[0]] }, 'a 四星 自选候选 at 5 级');
+  assert.equal(setPick({}, 6, FREE4[0], getAny), null, 'the same 四星 is not selectable at 6 级');
+  assert.equal(setPick({}, 5, PRESET6, getAny), null, '预设干员 are not selectable');
+  assert.equal(setPick({}, 4, FREE6[0], getAny), null, 'unknown level');
+  assert.equal(setPick({ 5: [FREE6[0]] }, 6, FREE6[0], getAny), null, 'an operator may not be picked twice [user]');
+  assert.equal(setPick({ 5: [FREE6[0], FREE6[1]] }, 5, FREE6[2], getAny), null, 'the level slots are full');
+  assert.equal(setPick({}, 5, 'chess_nope_999', getAny), null, 'unknown id');
+
+  const picks = { 5: [FREE4[0]], 6: [FREE6[0]] };
+  assert.deepEqual(clearPick(picks, 5, FREE4[0]), { 6: [FREE6[0]] }, 'an emptied level disappears');
+  assert.deepEqual(clearPick(picks, 5, FREE6[0]), picks, 'an id from another level changes nothing');
+  assert.deepEqual([...pickedIds(picks)].sort(), [FREE4[0], FREE6[0]].sort());
+  assert.equal(pickedCount(picks), 2);
+});
+
+test('自选干员: freePickSlots 补空槽(界面直接渲染);sanitizePicks 丢掉已不可选的', () => {
+  assert.deepEqual(freePickSlots({}), { 5: [null, null], 6: [null, null] });
+  assert.deepEqual(freePickSlots({ 5: [FREE4[0]] }), { 5: [FREE4[0], null], 6: [null, null] });
+  const picks = { 5: [NORMAL6], 6: [FREE6[0]] };
+  assert.deepEqual(sanitizePicks(picks, getAny), picks, 'selectable picks survive');
+  assert.deepEqual(sanitizePicks({ 5: [PRESET6] }, getAny), {}, 'a PRESET pick is dropped');
+  assert.deepEqual(sanitizePicks({ 6: [FREE4[0]] }, getAny), {}, 'a 四星 filed at 6 级 is dropped');
+  assert.deepEqual(sanitizePicks({ 5: ['gone'] }, getAny), {}, 'an unknown id is dropped');
+  assert.deepEqual(sanitizePicks(picks, () => null), {}, 'without data nothing is kept (never send junk)');
+});
+
+test('自选干员: setPicks 进 store,setEntries 不会洗掉选取,反之亦然', () => {
+  const beforeE = loadoutStore.get().entries;
+  const beforeP = loadoutStore.get().picks;
+  try {
+    setPicks({ 5: [FREE4[0]] });
+    assert.deepEqual(loadoutStore.get().picks, { 5: [FREE4[0]] });
+    setEntries({ [INSIDE]: { skill: 0 } });
+    assert.deepEqual(loadoutStore.get().picks, { 5: [FREE4[0]] }, 'an entries edit keeps the picks');
+    setPicks({});
+    assert.deepEqual(loadoutStore.get().picks, {});
+    assert.deepEqual(loadoutStore.get().entries, { [INSIDE]: { skill: 0 } }, 'a picks edit keeps the entries');
+  } finally {
+    setEntries(beforeE);
+    setPicks(beforeP);
+  }
+});
+
+test('自选干员: 同步随 room.loadout 一起发送 picks;只改选取也会触发同步', async () => {
+  const net = deferredNet();
+  const T = fakeTimers();
+  const target = syncStore({ [INSIDE]: { skill: 0 } }, { 5: [FREE4[0]] });
+  const s = installLoadoutSync({ net, timers: T, target, getChessReady: async () => CHESS, lookupChess: getAny, notify: () => {} });
+  net.emit('welcome', {});
+  await T.advance(100);
+  assert.deepEqual(net.sent[0], { t: 'room.loadout', entries: { [INSIDE]: { skill: 0 } }, picks: { 5: [FREE4[0]] } }, 'both halves');
+  await net.reply();
+  // a picks-only edit must sync too (the player changing 自由位置 without touching any skill)
+  target.set({ picks: { 5: [FREE4[0]], 6: [FREE6[0]] } });
+  await T.advance(SYNC_DEBOUNCE_MS + 10);
+  assert.equal(net.sent.length, 2, 'a picks-only edit syncs');
+  assert.deepEqual(net.sent[1].picks, { 5: [FREE4[0]], 6: [FREE6[0]] });
+  assert.deepEqual(net.sent[1].entries, { [INSIDE]: { skill: 0 } }, 'and keeps the entries');
+  s.dispose();
 });

@@ -59,9 +59,9 @@
 
 import { randomBytes, randomInt } from 'node:crypto';
 import { ERR, MAX_SEATS, ROOM_CODE_LEN, modeIdFor } from '../shared/constants.js';
-import { checkLoadout } from '../shared/protocol.js';
+import { checkLoadout, checkFreePicks } from '../shared/protocol.js';
 import { encode, isDroppable, isErrCode, sendRaw, sendSession } from './net.js';
-import { getData as defaultGetData, lookup } from './data.js';
+import { getData as defaultGetData, getChess, lookup } from './data.js';
 import { Match as DefaultMatch } from './match/Match.js';
 
 /** Room code alphabet: uppercase letters without I and O (and no digits, so no 0/1). */
@@ -96,6 +96,13 @@ const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
 function freezeLoadout(loadout) {
   const out = {};
   for (const [id, e] of Object.entries(loadout || {})) out[id] = Object.freeze({ skill: e.skill, module: e.module ?? null });
+  return Object.freeze(out);
+}
+
+/** Deep-frozen copy of checked 自由位置 picks (DESIGN §21), shared by the session, the seat and the match. */
+function freezeFreePicks(picks) {
+  const out = {};
+  for (const [level, list] of Object.entries(picks || {})) out[level] = Object.freeze([...list]);
   return Object.freeze(out);
 }
 
@@ -443,19 +450,32 @@ export class Lobby {
   }
 
   /**
-   * room.loadout (DESIGN §16): check the operator loadout against the game data, store it on the session and the seat,
-   * and — while a match runs — hand it to the match (accepted only during INFO_CHECK, see the header).
+   * room.loadout (DESIGN §16) + the 自由位置 picks it carries (DESIGN §21): check both against the game data, store
+   * them on the session and the seat, and — while a match runs — hand them to the match (accepted only during
+   * INFO_CHECK, see the header). `picks` absent means "leave the stored picks alone" (older clients).
    */
-  loadout(session, { entries }) {
+  loadout(session, { entries, picks }) {
     const data = this.safeData();
-    const res = checkLoadout(entries, (id) => lookup('chess', id, data));
+    // getChess (not lookup('chess')): a 自选干员 lives in data/freePicks.json, and both halves of the message must be able
+    // to resolve one — otherwise a valid pick makes the whole room.loadout frame fail and the loadout silently reverts.
+    const res = checkLoadout(entries, (id) => getChess(id, data));
     if (!res || res.error) return fail(res && isErrCode(res.error) ? res.error : ERR.BAD_MSG, res && res.detail);
     const loadout = freezeLoadout(res.loadout);
+    let freePicks = null;
+    if (picks !== undefined) {
+      const fp = checkFreePicks(picks, (id) => getChess(id, data));
+      if (!fp || fp.error) return fail(fp && isErrCode(fp.error) ? fp.error : ERR.BAD_MSG, fp && fp.detail);
+      freePicks = freezeFreePicks(fp.picks);
+    }
     session.loadout = loadout;
+    if (freePicks) session.picks = freePicks;
     const room = this.roomOf(session);
     if (!room) return OK;
     const seat = room.seatOf(session.playerId);
-    if (seat) seat.loadout = loadout;
+    if (seat) {
+      seat.loadout = loadout;
+      if (freePicks) seat.picks = freePicks;
+    }
     if (!room.match) return OK;
     if (typeof room.match.setLoadout !== 'function') return fail(ERR.ROOM_STARTED, 'stored for the next match');
     let r;
@@ -467,6 +487,18 @@ export class Lobby {
     }
     if (r && typeof r === 'object' && r.error) {
       return fail(isErrCode(r.error) ? r.error : ERR.INTERNAL, typeof r.detail === 'string' ? r.detail : undefined);
+    }
+    if (freePicks && typeof room.match.setFreePicks === 'function') {
+      let fr;
+      try {
+        fr = room.match.setFreePicks(session.playerId, freePicks);
+      } catch (e) {
+        this.log.error(`[lobby] ${room.code} match.setFreePicks threw`, e);
+        return fail(ERR.INTERNAL);
+      }
+      if (fr && typeof fr === 'object' && fr.error) {
+        return fail(isErrCode(fr.error) ? fr.error : ERR.INTERNAL, typeof fr.detail === 'string' ? fr.detail : undefined);
+      }
     }
     return OK;
   }
@@ -483,6 +515,8 @@ export class Lobby {
       seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, connected: s.connected,
       // DESIGN §16: the human's checked operator loadout (bots fight with the defaults)
       loadout: s.isBot ? null : s.loadout || null,
+      // DESIGN §21: the human's checked 自由位置 picks (bots never pick either)
+      picks: s.isBot ? null : s.picks || null,
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
     const ctx = { live: true, ended: false, disposed: false, match: null, lastPublic: null, sharedResult: null, results: new Map() };
@@ -735,6 +769,8 @@ export class Lobby {
     return {
       seat: idx, playerId: session.playerId, name: session.name, isBot: false, ready: false, connected: session.connected, left: false,
       loadout: session.loadout || null,
+      // DESIGN §21: the 自由位置 picks already stored on the session follow the player into the room, like the loadout
+      picks: session.picks || null,
     };
   }
 

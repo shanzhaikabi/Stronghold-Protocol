@@ -9,7 +9,7 @@
 // them only the default skill / module is offered. The option rules are shared with the server
 // (shared/protocol.js loadoutOptions / checkLoadout), so a sanitised loadout is always accepted.
 
-import { loadoutOptions, checkLoadout, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS } from '../../../shared/protocol.js';
+import { loadoutOptions, checkLoadout, resolveLoadout, MODULE_NONE, LOADOUT_LIMITS, FREE_PICK_LIMITS, freePickLevelsOf } from '../../../shared/protocol.js';
 
 export { MODULE_NONE };
 
@@ -30,6 +30,8 @@ export const ATTR_LABEL = Object.freeze({
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isInteger(v);
+/** Shape of a chess / bond / item id, shared by the stored parsers (mirrors the server's `isId`). */
+const ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
 
 // ---- storage -----------------------------------------------------------------------------------------------------
 
@@ -53,8 +55,116 @@ export function parseStored(raw) {
   return out;
 }
 
-/** Serialised form for localStorage. */
-export const toStored = (entries) => ({ v: LOADOUT_VERSION, entries: entries || {} });
+/** Serialised form for localStorage (entries + 自由位置 picks, DESIGN §21). */
+export const toStored = (entries, picks = {}) => ({ v: LOADOUT_VERSION, entries: entries || {}, picks: picks || {} });
+
+// ---- 自由位置 picks (DESIGN §21) ------------------------------------------------------------------------------------
+
+/** The 调度中心 levels that hold 自由位置 slots (5 级 and 6 级), re-exported for the screen. */
+export const FREE_PICK_LEVELS = Object.freeze([...FREE_PICK_LIMITS.levels]);
+/** Slots per level (the screen renders this many card slots). */
+export const FREE_PICK_PER_LEVEL = FREE_PICK_LIMITS.perLevel;
+
+/**
+ * Parse stored 自由位置 picks (any junk → {}): structurally valid level keys, id-shaped entries, at most `perLevel` per
+ * level, and never the same operator twice — the picker forbids duplicates across both levels [user].
+ * @param {any} raw `{ [level]: chessId[] }`
+ * @returns {Record<string, string[]>}
+ */
+export function parseStoredPicks(raw) {
+  const src = isObj(raw) ? raw : {};
+  const out = {};
+  const seen = new Set();
+  for (const level of FREE_PICK_LEVELS) {
+    const list = src[level] ?? src[String(level)];
+    if (!Array.isArray(list)) continue;
+    const keep = [];
+    for (const id of list) {
+      if (keep.length >= FREE_PICK_LIMITS.perLevel) break;
+      if (typeof id !== 'string' || !ID_RE.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      keep.push(id);
+    }
+    if (keep.length) out[String(level)] = keep;
+  }
+  return out;
+}
+
+/** The ids picked at any level (the picker marks them as taken — an operator may not be picked twice [user]). */
+export function pickedIds(picks) {
+  const s = new Set();
+  for (const list of Object.values(parseStoredPicks(picks))) for (const id of list) s.add(id);
+  return s;
+}
+
+/**
+ * Drop picks that are not selectable any more (a retired operator, a level that no longer fits) — the spirit of
+ * `sanitizeEntries`, so one stale id never makes the server refuse the whole `room.loadout` frame.
+ * @param {any} picks @param {(id: string) => any} getChess
+ */
+export function sanitizePicks(picks, getChess) {
+  const out = {};
+  const seen = new Set();
+  for (const [level, list] of Object.entries(parseStoredPicks(picks))) {
+    const lv = Number(level);
+    const keep = [];
+    for (const id of list) {
+      if (seen.has(id)) continue;
+      if (!freePickLevelsOf(getChess ? getChess(id) : null).includes(lv)) continue;
+      seen.add(id);
+      keep.push(id);
+    }
+    if (keep.length) out[level] = keep;
+  }
+  return out;
+}
+
+/**
+ * Put `id` into the 自由位置 slot list of `level` (DESIGN §21). Returns the NEW picks, or null when the operator is
+ * not selectable at that level, is already picked at another level, or the level's slots are full.
+ * @param {any} picks @param {number|string} level @param {string} id @param {(id: string) => any} getChess
+ * @returns {Record<string, string[]> | null}
+ */
+export function setPick(picks, level, id, getChess) {
+  const lv = Number(level);
+  if (!FREE_PICK_LEVELS.includes(lv)) return null;
+  if (!freePickLevelsOf(getChess ? getChess(id) : null).includes(lv)) return null;
+  const current = parseStoredPicks(picks);
+  if (pickedIds(current).has(id)) return null;
+  const list = current[String(lv)] || [];
+  if (list.length >= FREE_PICK_LIMITS.perLevel) return null;
+  return { ...current, [String(lv)]: [...list, id] };
+}
+
+/** Remove `id` from the slots of `level` (an emptied level disappears). */
+export function clearPick(picks, level, id) {
+  const current = parseStoredPicks(picks);
+  const key = String(level);
+  const list = (current[key] || []).filter((x) => x !== id);
+  const out = { ...current };
+  if (list.length) out[key] = list;
+  else delete out[key];
+  return out;
+}
+
+/**
+ * The 自由位置 slots for rendering: `{ 5: [id|null, id|null], 6: […] }` — always `perLevel` entries per level, so the
+ * screen does not have to pad them itself.
+ * @param {any} picks
+ * @returns {Record<string, Array<string|null>>}
+ */
+export function freePickSlots(picks) {
+  const current = parseStoredPicks(picks);
+  const out = {};
+  for (const level of FREE_PICK_LEVELS) {
+    const list = current[String(level)] || [];
+    out[String(level)] = Array.from({ length: FREE_PICK_LIMITS.perLevel }, (_, i) => list[i] ?? null);
+  }
+  return out;
+}
+
+/** Total picks in use (a badge on the 自由位置 row: "2/4"). */
+export const pickedCount = (picks) => pickedIds(picks).size;
 
 // ---- export / import ----------------------------------------------------------------------------------------------
 
