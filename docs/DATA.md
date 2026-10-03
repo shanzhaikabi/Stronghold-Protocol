@@ -167,10 +167,10 @@ Top level: `{ season, seasonName, modes, economy, lpCapPerRound, bossOvertimeAft
 | `trait` | `{"desc":"优先攻击空中单位","descRaw":"…","bb":{"atk_scale":1.1},"bbStr":{},"rangeGrid":null,"moduleDesc":"攻击空中单位时攻击力提升至110%","moduleDescRaw":"…"}` | profession trait (+ golden module trait upgrade merged into `bb`; `rangeGrid` = trait-effect area, e.g. 散射手 front row — **not** the attack range) |
 | `skill` | see below | default skill at `status.skillLevel` (normal 4, golden 7) |
 | `skills[]` | `[{…skill record…, "index":0, "isDefault":false}, {…, "index":1, "isDefault":true}]` | **loadout choices** (DESIGN §16): every skill unlocked at `status` (E1 ⇒ S1–S2, E2 ⇒ S1–S3; the default is always listed), same shape as `skill` + `isDefault`, at the chess skill level, `trigger` resolved **for that skill index** (§2.2). The `isDefault` entry equals `skill` |
-| `modules[]`, `statsBase`, `traitBase`, `talentsBase` | see §2.2 | golden chess with `equipLevel > 0` only: selectable modules + the no-module base they apply to |
+| `modules[]`, `statsBase`, `traitBase`, `talentsBase` | see §2.2 | golden chess with `equipLevel > 0`, and a 自选候选 whose operator has ADVANCED 模组 (§2.3): selectable modules + the no-module base they apply to |
 | `talents[]` | `{"index":0,"name":"火力支援","desc":"…","descRaw":"…","bb":{"self_ammo":3,"duration":20,"ally_ammo":1},"bbStr":{},"rangeGrid":null,"tokenKey":null,"hidden":false,"fromModule":false}` | best unlocked candidate at `status` (potential 0); golden: module talent upgrades applied (`fromModule`); module data-only talents have `name:null, hidden:true`. A module upgrade of an existing talent **merges** blackboards (module keys win, base keys it does not restate are kept — e.g. 宴 keeps `min_attack_speed`; 仇白's upgrade adds `atk_scale_t` next to the old `atk_scale`: prefer the key the text uses). Module parts flagged `isToken` are **not** applied to the operator; they upgrade its summons (tokens.json variants). `containerTokenKey`: the official talent token id when it is a container missing from character_table (凛御银灰), `tokenKey` then holds the default skill's token |
 | `tokens[]` | `["token_10028_vigil_wolf"]` | summons (→ `tokens.json`): displayTokenDict + default-skill `overrideTokenKey` + talent `tokenKey`; `tokens.json → variants[chessId].sources` tells which (a `display`-only token is not produced by this chess's default skill or talents) |
-| `module` | `{"id":"uniequip_002_inside","name":"“最初的惊喜”","type":"MAR-X","level":1,"active":true}` | active only on golden chess |
+| `module` | `{"id":"uniequip_002_inside","name":"“最初的惊喜”","type":"MAR-X","level":1,"active":true}` | active only on golden chess, and on a 自选候选 with 模组 (§2.3 — such a record is its own elite: `goldenId: null`, no `_b` sibling) |
 | `assets` | `{"avatar":"char_498_inside_2","portrait":"char_498_inside_2","spine":"char_498_inside","skillIcon":"skchr_inside_2","subProfIcon":"sub_fastshot_icon"}` | asset **ids** (URLs in `data/assets.json`); golden uses the E2 art when it exists |
 | `diyRequirement` | `"TIER_6"` | DIY only |
 
@@ -226,10 +226,52 @@ everything needed to resolve a unit for `(chessId, skillIndex, moduleId)` (`simd
 - `statsBase` / `traitBase` / `talentsBase` — the golden record **without** any module (`stats` / `trait` / `talents`
   keep the default module, unchanged). `test/data.test.js` proves that composing the default module onto the base
   reproduces `stats`, `trait` and `talents` exactly for every golden chess.
-- Module-less goldens (蒂比, 凛御银灰): `modules: []`, base = own values. Normal chess have none of these fields.
+- Module-less goldens (蒂比, 凛御银灰): `modules: []`, base = own values. Normal chess have none of these fields. A
+  自选候选 (§2.3) whose operator has ADVANCED 模组 carries the whole block too (its record is its own elite); the build
+  reads the module's trait / talent candidates at the level the season fields a golden chess of that tier at
+  (T1 50, T2 55, T3+ 60 — the 模组's own unlock level), so the module's trait / talent upgrade applies like a normal
+  operator's, while the record's own stats keep the 自选候选 baseline.
 - Module parts flagged `isToken` and the per-token attribute blackboards go to the summons: `tokens.json →
   variants[owner].byModule` (§14). Module choices never change the combat classification (`dmgType`…; the build warns
   if one ever would).
+
+---
+
+### 2.3 自选干员 (DESIGN §22) — `data/freePicks.json`
+
+The operators a 自由位置 may bring into a player's **own** shop pool. A separate file on purpose: they are NOT season
+chess, so nothing that reads `chess.json` — the shared pool, the loadout slots, the season's counts and docs — can pick
+them up by accident. Records carry the same shape as §2 plus:
+
+| Field | Example | Meaning |
+|---|---|---|
+| `chessId` | `chess_free_char_608_acpion` | synthetic id (`chess_free_<charId>`) |
+| `freePick` | `true` | the 自由位置 flag (the picker filters on it) |
+| `freePickLevels` | `[5,6]` / `[5]` | 调度中心 levels it may be selected at: every 6★ at 5 **and** 6, the 4★ 预备干员 at 5 only (and never 先锋 / 特种) |
+| `chessType` | `PROTOTYPE` | never `PRESET` / `NORMAL` / `DIY` |
+| `visible` / `isHidden` | `false` / `true` | the shop never offers them on its own |
+| `bonds` | `["yanShip"]` / `["emptyShip"]` | the **single 主盟约** — the core faction bond PRTS gives the operator, else 协防干员. One entry only: the ban filter drops a pick by its 主盟约 alone |
+| `bondSource` | `prts` / `hint:lungmen` / `none` | where that bond came from (build diagnostics) |
+| `garrisonIds` | `[]` | 自选干员 不拥有特质 |
+| `charId`, `assets` | `char_608_acpion`, … | the operator's own art (avatar / portrait / spine / skill icon) |
+| `tier` | `6` / `4` | the operator's own shop tier (= its rarity): it sets the price row (tier 5 and 6 both cost 4 资金) and the copy budget `poolCopies`. The **gate** a pick obeys is not this but its 自由位置 slot 等阶 (5 / 6, the level it is filed at): a 6★ filed at the 5 阶 slot appears from 调度中心 5 级 (DESIGN §21.6) |
+| `module`, `modules[]`, `status.equipLevel`, `statsBase` / `traitBase` / `talentsBase` | see §2.2 | 模组 of the operator (user rule 模组相关规则和普通干员一致): the record is **its own elite** (no `_b` sibling), so it carries the same block a golden chess does — default = the season's `backupCharUniEquipId` for that character, else the first ADVANCED 模组, else 不装备; level = the season's tier rule (6★ ⇒ 3). A character with no ADVANCED 模组 (all six 4★ 预备干员) keeps `module: null`, `equipLevel: 0` and no `modules[]` — `checkLoadout` then refuses a module for it |
+| `tokens` | `["token_10064_wang_stone1"]` | the operator's summons, resolved like a season chess's (26 of the 93 picks grant summons = 37 token records, `tokens.json` 22 → 59 keys). Its battle behaviour is whatever `content/tokens.js` authors for that token id — 望's **棋子** is the first (and so far only) hand-authored free-pick summon (`wangStone`, a hand piece that fires when an enemy enters its trigger tile), the other 36 use the generic token kit (DESIGN §22.11). A pick with **no** token is not a gap: 赤刃明霄陈 火陈 (the user's "火龙") carries `tokens: []` and no `tokenKey` anywhere — her dragon is the S3 剑气长龙, a skill mechanic authored in `kits/freePicks.js swordQi` |
+
+**The roster is derived, not listed** (`freePickCharIds` in `tools/build-data.mjs`): every 6★ operator of
+`character_table` that **no season chess record uses** — so a candidate can never duplicate one the shop already offers
+("已经在干员池内的干员不应该进入自选池" [user]), and the roster follows the game data by itself — plus the 4★ 预备干员 of
+the season's own `backup` data (`docs/research/03-operators.json`).
+
+**主盟约** (`freePickMainBond`): `docs/research/12-free-pick-factions.json` (checked against PRTS) wins where it has an
+entry — including a `null` entry, meaning "checked, none of the 8" — then the client-data hints `nationId` / `groupId` /
+`teamId` (`FACTION_BOND`: 阿戈尔 / 卡西米尔 / 拉特兰 / 萨尔贡 / 维多利亚 / 谢拉格 / 叙拉古 / 炎, where 龙门 and every 炎
+sub-faction count as 炎), else 协防干员. Hints alone are not enough: the client data carries no 隐藏势力 and disagrees with
+PRTS for many operators. The art of the 78 candidates outside research 07 comes from a locally installed PC client
+(`tools/local-extract/extract.py` → `tools/assets/plan.mjs syntheticOperator` → `node tools/fetch-assets.mjs --offline`);
+art stays optional at runtime, so an operator without it renders as its first character rather than breaking (DESIGN
+§22.10). A hand-authored kit per summon is still the follow-up work (DESIGN §22.11).
+`test/freePicks.test.js` locks the invariants (roster derived + no pool duplicate, one 主盟约, no 特质, prototype art).
 
 ---
 
@@ -244,7 +286,7 @@ everything needed to resolve a unit for `(chessId, skillIndex, moduleId)` (`simd
 | `thresholds` | `[2,3]` | ascending member counts that raise the tier (tier = number of thresholds reached). yan `[3,6,9]`, egir `[3,5]`, sunt `[2,5]`, solo `[1]` |
 | `maxCount` | `null` (solo `1`) | `count_threshold_downward`: active only while `count ≤ maxCount` |
 | `thresholdTemplate` | `"count_threshold_upward"` | also `_downward` (独行), `_upward_golden` (绝技) |
-| `countMode` | `"BOARD"` | `BOARD` (distinct base chess on board), `BOARD_AND_DECK` (+hand: 远见/奇迹/投资人), `BOARD_ALL_CHESS` (绝技: every golden chess on board, duplicates count) |
+| `countMode` | `"BOARD"` | `BOARD` (distinct base chess on board), `BOARD_AND_DECK` (+整备区: hand **and the 临时整备区 overflow**: 远见/奇迹/投资人), `BOARD_ALL_CHESS` (绝技: every golden chess on board, duplicates count) |
 | `countsHand`, `countsGoldenOnly` | `false`, `false` | convenience flags |
 | `activeType`, `isActiveInDeck`, `noStack`, `weight`, `maxInactiveBondCount` | `"BATTLE"`, `false`, `false`, `10`, `-1` | `weight` 0 ⇒ never drawn for per-match bans |
 | `layerMilestones[]` | `[{"layer":25,"mode":"every","effect":"bond_layer_added_reward_equip"}]` | layer-based powers: `reach` (while L ≥ layer), `every` (each multiple), `first` (latched once) |
@@ -467,7 +509,7 @@ Glyph legend (`rows`):
 | `stats`, `rangeGrid`, `dmgType`, `attackKind`, `projectile`, `canHitFly` | first owner's values | defaults |
 | `skill` | `{"skillId":"sktok_vigil_wolf_3","bb":{…}}` | default token skill (same slot as the owner's skill) |
 | `deployLimit`, `count` | `1`, `1` | `count` = copies sent to the hand / spawned (talent/skill `cnt`); `null` ⇒ use `deployLimit` |
-| `abnormal[]` | `["healFree"]` | abnormal effects the summon holds from the start, no official table carries them — `tools/build-data.mjs TOKEN_ABNORMAL` from the PRTS summon pages (user playtest #6 item 18): `healFree` = 禁疗 (“小自在”, “耀阳”, 斯卡蒂的海嗣, 沙之碑, 流形, 狼群, 迷迭香的战术装备, 黄金盟誓, 保护目标（冻结状态）), `isolated` = 孤立 "无法被同阵营选中" (“炎佑”, 从不混淆的方向); `[]` otherwise. The sim sets `noHeal` / `isolated` (docs/SIM.md §3) |
+| `abnormal[]` | `["healFree"]` | abnormal effects the summon holds from the start; no official table carries them — the PRTS 召唤物 pages' 备注 do (user playtest #6 item 18), harvested into `docs/research/13-token-abnormal.json` (`source` + `checkedAt`; per token the quoted 持有 segment, `holds` → `effects` → these flags, plus `unexpressed` / `mentions` with a reason in `unexpressible`) and read by `tools/build-data.mjs` (`TOKEN_ABNORMAL_FALLBACK` is the old hand table — the season's 10 + 炎佑 — used when the research file is absent or `--no-research` is given, and asserted equal to it). The vocabulary is exactly what `Battle._setupUnit` reads: `healFree` = 禁疗 (37 of the 59 token records), `isolated` = 孤立 "无法被同阵营选中" (7: “炎佑”, 从不混淆的方向, 铁钳号·原型机, 迷狂牢笼, 牵绊, 中继器, “一会儿见！”); `[]` otherwise — the effects PRTS names but this channel cannot express (无敌, 阻回, 静默, 不可阻挡, 状态免疫…) are recorded, never written as dead keys. The sim sets `noHeal` / `isolated` (docs/SIM.md §3) |
 | `variants[ownerChessId]` | `{"phase":2,"level":1,"stats":{…},"immunities":{…},"rangeGrid":…,"trait":{…},"dmgType":…,"skill":{full skill record},"talents":[…],"count":1,"sources":["talent","display"]}` | stats at the owner's phase/level (clamped to the token's max level) + golden module `tokenAttributeBlackboard`; the owner's module parts flagged `isToken` upgrade the variant's `trait` (+`moduleDesc`) and `talents` (伺夜's wolves, 缪尔赛思's 流形 `scale` 1, 浊心斯卡蒂's 海嗣 30 s, “耀阳” `atk_scale` 1.15). `sources` ⊆ `talent`/`skill`/`display`: how the owner produces it (`display` only = listed on the character but unused by its default skill/talents, e.g. 迷迭香 S2, 凛御银灰 eagle1/3). `count` = copies from a talent `cnt` or the default skill's `cnt` when that skill overrides this token; `null` ⇒ use `deployLimit` |
 | `variants[o].bySkill[i]` | `{"skill":{…},"count":1,"sources":["talent","display"]}` | owner loadout with the non-default skill index `i` (one entry per other selectable owner skill): the token skill of that slot (伺夜's wolves, 缪尔赛思's 流形, 凛御银灰's eagles…), the count and how the chess then produces it (`sources` may be `[]`: 风丸 S1 makes no 纸偶; 赫默 / 巫恋 S1 only `display` ⇒ no hand piece). The sim resolves them for an owner loadout: `simdata getToken(id, ownerChessId, loadout)` → `def.sources` / `def.count` |
 | `variants[o].byModule[m]` | `{"stats":{…},"immunities":{…},"trait":{…},"talents":[…]}` | golden owner with another module `m` or `'none'`: the token as that module makes it (module `tokenAttributeBlackboard`, `isToken` trait/talent parts) |
@@ -541,7 +583,7 @@ Glyph legend (`rows`):
 
 `chess 266 (112 visible; 283 selectable skills over the visible chess, 184 module choices over 129 goldens)`, `bonds 23`, `garrisons 249 (43 effect keys)`, `items 115`, `bands 40`, `effects 361`,
 `enemies 249`, `factions 67 entries`, `waves 38`, `stages 11 (8 active)`, `bosses 10`, `tokens 22`, `choice events 109`,
-`bounty cards 129`, `tactic cards 43`.
+`bounty cards 129`, `tactic cards 43`, `自选干员 93` (§2.3 — outside `chess.json` on purpose).
 
 ## 17. Integrity guarantees (checked by the builder and `test/data.test.js`)
 
@@ -553,7 +595,11 @@ carry the bond; items/bands/bonds reference existing effects; wave spawn keys an
 `enemies.json`, route indices exist; every mode round has a template (or boss templates) present in `waves.json`;
 stages are 19 × 21 with known glyphs and contiguous helper paths; bosses/factions/tokens/choice pools resolve; token
 variants carry `sources`; enemies have `maxHp`/`bat` > 0, `aspd`/`moveSpeed`/`lpr` ≥ 0 and `rangeRadius` ≥ 0 (0 for
-MELEE); no non-finite numbers; total size < 6 MB. `test/data.test.js` additionally re-derives every chess/enemy stat
+MELEE); no non-finite numbers; total size < 6 MB. 自选干员 (§2.3) are checked too: every `FREE_PICK_CHARS` entry builds
+a record that is **not** a season chess, stays `visible:false` / `chessType 'PROTOTYPE'` / `freePick:true`, carries stats,
+exactly one default skill, an attack range and a 自由位置 level, carries exactly ONE 主盟约 (a core faction bond or
+协防干员 `emptyShip`, never a bond that is not in `bonds.json`) and owns no 特质
+(`garrisonIds:[]`). `test/data.test.js` additionally re-derives every chess/enemy stat
 from the raw official tables (incl. the float32 `attrPower`) and rebuilds offline to prove `data/` is not stale (both
 skipped without the cache); faction entries carry no `k` copies and share one movement class; every device's
 `active` = `!hidden`; the helper lanes of act1 m02 / m04 / act2 m02 are the official ones (research 08 §3.2).

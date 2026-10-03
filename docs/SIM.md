@@ -484,7 +484,8 @@ still does (`ignoreSelect` / 无来源: 无视无法选择 abilities, direct pic
 with no 对空 check, since it stays a ground unit on its tile (`unit.ground` unchanged; PRTS 行动方式 "起飞的干员仍然是地面单位"),
 `noDisplace` = 失衡免疫 (`displace()` moves nothing), `isolated` = 孤立 ("无法被同阵营选中": no ally
 ability selects it — no heal, buff, aura or talent pick from another ally (`battle.allySelectable` / `alliesFor`,
-`alliesInGrid`; PRTS 选择器 可选判定), enemies still target it; a summon's tokens.json `abnormal` 'isolated' also sets
+`alliesInGrid`; PRTS 选择器 可选判定), enemies still target it; a summon's tokens.json `abnormal` (docs/research/13-token-abnormal.json,
+the only two effects this field carries) 'isolated' also sets
 `noHeal`, 'healFree' (禁疗) sets `noHeal` — Battle._setupUnit, DATA.md tokens.json; 禁疗 keeps heals off only — an HP-regen
 attribute such as 安洁莉娜's 兼职工作 still applies, PRTS 异常效果), `camou` = 迷彩 (below)). `taunt: true` as a flag counts
 as +1 taunt level (DESIGN §5.3).
@@ -888,6 +889,16 @@ displacement by the official 力度 − 重量 rules (拖拽/hookmaster: `pullTo
 宴 +65 % ATK for 14 s) and the self/counter effects — their scales describe procs that need a kit. Instant skills with
 mods/targeting but no attack override apply them to the next attack (the skill range is switched in for that attack).
 
+**Talents (`content/genericTalents.js`, §7.4 continued).** The generic kit's `talents` are translated from the DECLARED
+talents of the record (`def.talents`, the loadout-resolved composer output — a module's `talentChanges` are already
+merged into the blackboards by `shared/loadoutRecord.js composeTalents`, so a module on a kit-less record becomes live
+with the same fix), not left empty: plain/conditional self stat buffs, profession & range auras, `atk_scale`/`prob`
+attack riders, deployment stun / SP / cost, interval & on-hurt & nearby-kill SP, blocked-enemy debuffs, on-field timers.
+Every talent (and every half of a talent) the translator cannot express faithfully is REPORTED, never silently dropped:
+`kit.talentPlan` carries one row per declared talent (`installed` | `partial` + `drops` | `unexpressed` + `reason` |
+`installed-by-kit` for the wrapper kits of `WRAPPER_KITS`), `test/content/generic_talents.test.js` pins it and
+`docs/research/15-generic-talents.json` is the generated research note (`node tools/talent-plan.mjs [--check]`).
+
 ### 7.5 Worked examples (real operators, numbers from blackboards)
 
 **1. Ammo sniper — 隐现 `chess_char_1_01_a` “解决麻烦”** (bb `atk 0.8, base_attack_time −0.3, attack@trigger_time 14`;
@@ -1088,7 +1099,7 @@ table: `hitSleep` (targets and damages sleeping enemies — "可以攻击沉睡�
 | agent / hookmaster | can hit FLY (ranged reach); hook displacement comes from skills (generic: `force`) |
 | bearer | block 0 while the skill is active |
 | alchemist | ranged lob, can hit FLY |
-| dollkeeper | fatal damage ⇒ substitute for 20 s (bb duration): block 0, doll HP (its own substitute token's stats, else 50 % max HP: 归溟幽灵鲨); swaps back at full HP; dies if the doll dies |
+| dollkeeper | fatal damage ⇒ substitute for 20 s (bb duration): block 0, doll max HP = the operator's own × (1 + bb `max_hp`, the module bonus: PUM-Y / 结城理 +20 %) — a substitute token of its own loadout (风丸 纸偶) carries the same max HP; swaps back at full HP; dies if the doll dies |
 | geek | loses 1–3 % max HP per second (bb hp_ratio), never lethal on its own |
 | merchant | −3 DP every 3 s (bb cost/interval); retreats when DP runs out |
 | skywalker | can block FLY enemies (蒂比's kit: only while airborne — 起飞, flag `liftoff`, which also releases the ground enemies she blocked) |
