@@ -114,6 +114,17 @@ const BOMBARD_SHELL = Object.freeze({ look: 'mortar', tint: 0xfff2d8, glow: 0xff
 /** Sub-professions whose shells are arts (purple blast) — the rest explode orange. */
 const ARTS_SHELLS = new Set(['blastcaster']);
 /**
+ * 火陈 S3 赤霄·天喟's 剑气长龙 (server/sim/content/kits/freePicks.js `swordQi`): the sim re-emits ONE 1-tile segment per
+ * tile of flight (1 / 1.5 tiles/s = every 0.667 s) — from the tile the qi left to the tile it reached. Ever since the
+ * tile-grid state machine landed, those segments are all the client gets, so the renderer has to make a travelling
+ * projectile out of them: a bright head on the arrived tile plus a two-layer ribbon over the segment whose life is
+ * LONGER than the sim's step (QI_TAIL > 0.667), so consecutive segments join into one continuous 剑气长龙 instead of a
+ * 0.35 s thin flicker (user report 2026-10-03 "火陈的剑气还是看不到" — the archetype was 'move', a one-off displacement
+ * trail with no head and a 53 % duty cycle, and the pale ADD colour washes out on the board's edge art the qi hugs).
+ * `QI_BODY` / `QI_CORE` are the thickness multipliers of the outer / inner ribbon, `QI_ARC` the head ring.
+ */
+const QI_TAIL = 1.05, QI_BODY = 2.1, QI_CORE = 0.75, QI_ARC = 0.62;
+/**
  * An fx anchored on a unit (extra.id) is drawn at that unit's rendered position while the event's own (x, y) is within
  * this many tiles of it (it happens on the unit); farther away the fx happens at (x, y) — the sim puts the caster in
  * `id` of many area / target effects (an 'aoe' ahead of the caster, a 'crit' on the victim, 蕾缪安's 'bombard').
@@ -189,9 +200,9 @@ export const FX_KINDS = Object.freeze({
   // displacement
   pull: { a: 'move', c: 0x9fd4ff }, push: { a: 'move', c: 0xffd9a0 }, displace: { a: 'move', c: 0xd0c0a0 }, lure: { a: 'move', c: 0xffb3ec },
   charge: { a: 'move', c: 0xff9c33 }, dash: { a: 'move', c: 0xffd9a0 }, slippery: { a: 'move', c: 0x9fe6ff },
-  // 火陈 S3 赤霄·天喟's 剑气长龙 (server/sim/content/kits/freePicks.js `swordQi`): 'move' draws the 1-tile streak from the
-  // event's (x, y) to its tx / ty, which is why the sim re-emits it once per tile of flight
-  swordQi: { a: 'move', c: 0xdfe8ff },
+  // 火陈 S3 赤霄·天喟's 剑气长龙 (server/sim/content/kits/freePicks.js `swordQi`): its own archetype — each sim event is
+  // ONE 1-tile segment, and the case below draws the head + a ribbon that outlives the next step (see QI_TAIL)
+  swordQi: { a: 'swordQi', c: 0xdfe8ff },
   // pulses
   sonic: { a: 'wave', c: 0xc9a2ff, r: 1.5 }, pulse: { a: 'wave', c: 0x9ff0dc }, sermon: { a: 'wave', c: 0xffe28a, r: 1.5 }, ripple: { a: 'wave', c: 0x5fe0ff },
   tornadoPulse: { a: 'wave', c: 0xd8e8ff }, wake: { a: 'wave', c: 0x5fe0ff }, wolfShadow: { a: 'wave', c: 0x8fa0b0 }, wolfShadowLost: { a: 'vanish', c: 0x8fa0b0 },
@@ -1775,6 +1786,32 @@ export class FxSystem {
         this.burst(p.x, p.y, s, 6, col, { speed: 1.4, tex: 'dot', life: 0.4 });
         break;
       }
+      case 'swordQi': {
+        // one segment of 火陈's 剑气长龙 (see QI_TAIL): a two-layer ribbon from the tile the qi left (`at`, the anchor
+        // unit is the caster, so this is the segment's start unless the qi is still on her tile) to the tile it reached
+        // (tx / ty), plus a bright head — a glow at the head and a small ring on the ground — so the flight reads as a
+        // travelling projectile even though the sim only ever names 1-tile steps. Sparks trail the head when rich.
+        const tx = num(ex.tx, NaN), ty = num(ex.ty, NaN);
+        const hx = Number.isFinite(tx) ? tx : at.x, hy = Number.isFinite(ty) ? ty : at.y;
+        if (!Number.isFinite(hx) || !Number.isFinite(hy)) break;
+        const hz = this._groundZ(hx, hy);
+        this.streak(at.x, at.y, hx, hy, hz + 0.4, col, QI_TAIL, QI_BODY, 0.5);
+        this.streak(at.x, at.y, hx, hy, hz + 0.4, 0xffffff, QI_TAIL * 0.55, QI_CORE, 0.95);
+        const q = cam.project(hx, hy, hz + 0.45, this._q);
+        this.particle('glow', q.x, q.y, { tint: col, life: QI_TAIL * 0.7, s0: q.s / 128 * 0.85, s1: q.s / 128 * 0.3, a0: 0.95, a1: 0 });
+        this.particle('dot', q.x, q.y, { tint: 0xffffff, life: QI_TAIL * 0.45, s0: q.s / 128 * 0.3, s1: q.s / 128 * 0.1, a0: 1, a1: 0 });
+        this.ring(hx, hy, hz, 0.1, QI_ARC, col, 0.3);
+        if (this.rich) {
+          for (let i = 0; i < 4; i++) {
+            const po = this._o();
+            po.tint = i % 2 ? 0xffffff : col;
+            po.vx = (Math.random() - 0.5) * q.s * 1.1; po.vy = -q.s * (0.3 + Math.random() * 0.8); po.drag = 1.6;
+            po.life = 0.28 + Math.random() * 0.28; po.s0 = q.s / 128 * 0.16; po.s1 = 0; po.a0 = 0.9; po.a1 = 0;
+            this.particle('dot', q.x, q.y, po);
+          }
+        }
+        break;
+      }
       case 'move': {
         const fx0 = num(ex.fromX ?? ex.fx ?? ex.x0, NaN), fy0 = num(ex.fromY ?? ex.fy ?? ex.y0, NaN);
         const tx = num(ex.tx, NaN), ty = num(ex.ty, NaN);
@@ -1955,15 +1992,16 @@ export class FxSystem {
     this.particle('smoke', x, y, { add: false, tint, life: 0.8, s0: size / 128 * 0.9, s1: size / 128 * 2, a0: alpha, a1: 0 });
   }
 
-  /** Motion streak between two world points at height z (dash / pull / blink trails). */
-  streak(x0, y0, x1, y1, z, tint, life = 0.3) {
+  /** Motion streak between two world points at height z (dash / pull / blink trails). `w` scales its thickness. */
+  streak(x0, y0, x1, y1, z, tint, life = 0.3, w = 1, a0 = 0.8) {
     const cam = this.ctx.cam();
     const a = cam.project(x0, y0, z, this._p), ax = a.x, ay = a.y;
     const b = cam.project(x1, y1, z, this._q);
     const len = Math.hypot(b.x - ax, b.y - ay);
-    if (len < 2) return;
-    const th = Math.max(0.05, (b.s * 0.3) / 32);
-    this.particle('streak', b.x, b.y, { tint, life, s0: th, s1: th * 0.5, sx: len / 128 / th, a0: 0.8, a1: 0, rot: Math.atan2(b.y - ay, b.x - ax), anchorX: 1 });
+    if (len < 2) return false;
+    const th = Math.max(0.05, (b.s * 0.3) / 32) * w;
+    this.particle('streak', b.x, b.y, { tint, life, s0: th, s1: th * 0.5, sx: len / 128 / th, a0, a1: 0, rot: Math.atan2(b.y - ay, b.x - ax), anchorX: 1 });
+    return true;
   }
 
   /** Light strike from the sky onto a point (lightning / skill strikes / columns). */
