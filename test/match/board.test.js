@@ -192,6 +192,34 @@ test('the 战术点 rule is scoped to tacticians: 赫默\'s 医疗探机 still p
   m.dispose();
 });
 
+test('a re-orientation in place is never blocked by the 战术点 rule: a 援军 whose owner turned away still turns', () => {
+  const { m, ps } = prepMatch('act2autochess_m04');
+  const owner = give(m, ps, 'chess_char_3_19_a'); // 伺夜, tactician → 狼群
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: owner.uid, to: { area: 'board', row: 10, col: 5 }, dir: 'RIGHT' }), { ok: true });
+  const wolf = ps.hand.find((p) => p && p.kind === 'token');
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: wolf.uid, to: { area: 'board', row: 9, col: 5 } }), { ok: true }, '(9,5) is a 战术点 facing RIGHT');
+  const token = ps.board.get('9,5');
+  // the owner turns UP: (9,5) leaves its attack range (facing UP 伺夜 covers rows 10-13 × cols 4-6)
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: owner.uid, to: { area: 'board', row: 10, col: 5 }, dir: 'UP' }), { ok: true });
+  assert.equal(ps._tokenOnTacticalPoint(token, 9, 5), false);
+  // turning the summon in place re-orients it — the placement rule must not apply (it used to answer BAD_TILE)
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: token.uid, to: { area: 'board', row: 9, col: 5 }, dir: 'LEFT' }), { ok: true });
+  assert.equal(ps.board.get('9,5').dir, 'LEFT');
+  // …and the placement path is not weakened: a real move off the 战术点 is still refused, leaving the board untouched
+  assert.equal(m.handle('p_0', { t: 'g.move', uid: token.uid, to: { area: 'board', row: 9, col: 4 }, dir: 'LEFT' }).error, ERR.BAD_TILE);
+  assert.equal(ps.board.get('9,5').uid, token.uid);
+  assert.equal(ps.board.get('9,4'), undefined);
+  // the placement path is not weakened in the other direction either: an operator cannot be swapped onto the 战术点
+  const mate = give(m, ps, chessOfTier(1, MELEE).find((x) => m.pool.has(x)), 'board', [9, 4]);
+  assert.equal(m.handle('p_0', { t: 'g.move', uid: mate.uid, to: { area: 'board', row: 9, col: 5 } }).error, ERR.BAD_TILE, 'the summon would land off its 战术点');
+  assert.equal(ps.board.get('9,5').uid, token.uid);
+  assert.equal(ps.board.get('9,4').uid, mate.uid);
+  // the tactician's own in-place re-orientation keeps working too
+  assert.deepEqual(m.handle('p_0', { t: 'g.move', uid: owner.uid, to: { area: 'board', row: 10, col: 5 }, dir: 'DOWN' }), { ok: true });
+  checkInvariants(m);
+  m.dispose();
+});
+
 test('battle input: board units in deploy order with items; tokens carry ownerUid', () => {
   const { m, ps } = prepMatch('act2autochess_m04');
   const a = give(m, ps, 'chess_char_3_19_a');

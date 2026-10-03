@@ -852,6 +852,19 @@ export function tokenOnTacticalPoint(ctx, piece, owner, row, col) {
 }
 
 /**
+ * The same rule for a piece that already stands on the board: its summoner is looked up there (mirrors the server's
+ * PlayerState._placeable / _tokenOnTacticalPoint). Needed by the board → board swap, where the occupant may have left
+ * its owner's attack range after it was placed — the owner simply turned away. Chess pieces are never constrained.
+ * @param {{ boardAt: Map<string, {piece:any, row:number, col:number}> }} ctx placementContext
+ * @param {{ kind?: string, ownerUid?: number }} piece
+ */
+export function pieceOnTacticalPoint(ctx, piece, row, col) {
+  if (piece?.kind !== 'token') return true;
+  const owner = [...ctx.boardAt.values()].find((e) => e.piece.uid === piece.ownerUid);
+  return tokenOnTacticalPoint(ctx, piece, owner, row, col);
+}
+
+/**
  * Placement legality of dropping piece `uid` on `target` (mirror of server/match/PlayerState.js move / equip /
  * useArt and server/match/board.js canPlace):
  *   board ← chess: legal tile for its position; empty tile or a chess occupant (swap; from the board the occupant
@@ -916,8 +929,12 @@ export function canPlace(ctx, uid, target) {
       return no('BAD_TILE', deployable && piecePosition(ctx, piece) === 'MELEE' ? '近战单位只能部署在地面' : '无法部署在该位置');
     }
     if (src.area === 'board') {
-      // board → board: move or swap (the occupant must be legal on the source tile)
+      // board → board: move or swap (the occupant must be legal on the source tile). Both sides must also satisfy the
+      // server's `_placeable`: a summon dragged off its 战术点, or a summon swapped onto a tile that is no longer in
+      // its owner's attack range (the owner turned away), is refused there with BAD_TILE (issue #9).
+      if (!pieceOnTacticalPoint(ctx, piece, row, col)) return no('BAD_TILE', '超出召唤者的攻击范围');
       if (occ && !tileAllows(ctx, occ.piece, src.row, src.col)) return no('BAD_TILE', '交换后的单位无法部署在原位置');
+      if (occ && !pieceOnTacticalPoint(ctx, occ.piece, src.row, src.col)) return no('BAD_TILE', '超出召唤者的攻击范围');
       return { ok: true, action: occ ? 'swap' : 'move' };
     }
     if (piece.kind === 'token') {
