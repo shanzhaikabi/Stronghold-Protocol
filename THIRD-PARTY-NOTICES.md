@@ -21,6 +21,7 @@ them (with `node_modules/`, which keeps each package's own licence file).
 | [puppeteer-core](https://github.com/puppeteer/puppeteer) | 25.12.0 | Apache-2.0 | optional browser tests (dev dependency) | no (npm) | no |
 | [Ark-Unpacker](https://github.com/isHarryh/Ark-Unpacker) LZ4AK decoder | — | BSD-3-Clause | `tools/local-extract/aklz4.py` (optional local extraction) | **yes** — keeps its notice; full text also in `tools/local-extract/LICENSE-Ark-Unpacker.txt` | yes |
 | [UnityPy](https://github.com/K0lb3/UnityPy) (via MooncellWiki/UnityPy), [lz4](https://github.com/python-lz4/python-lz4), [Pillow](https://github.com/python-pillow/Pillow) | see `tools/local-extract/requirements.txt` | MIT / BSD-3-Clause / MIT-CMU | optional local extraction; installed by pip into `.venv-extract` only when the host opts in | no | no |
+| [Il2CppDumper](https://github.com/Perfare/Il2CppDumper) | 6.7.46 | MIT | optional: reads the local client's IL2CPP metadata (`global-metadata.dat` + `GameAssembly.dll`, both opened read-only) so enum literals and type/field names can be looked up — `tools/il2cpp-dump.mjs` / `tools/il2cpp-enum.mjs`; the binary and its 524 MB output live only under the git-ignored `.cache/il2cpp/`; see `docs/research/14-il2cpp-metadata.md` | no | no |
 
 The Spine Runtimes License requires, among other things, that redistributions include its licence and copyright notice
 (reproduced below) and that "each user of the Products must obtain their own Spine Editor license" unless the
