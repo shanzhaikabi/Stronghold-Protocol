@@ -63,7 +63,9 @@ const PREPARE_SLICE = 600;
 const MAX_ENTRIES = 4;
 const STATE_EV = new Set(['spawn', 'die', 'deploy', 'status', 'skill', 'leak']);
 /** Data files the simulation reads (DataSource + content/support gameData()). */
-export const SIM_DATA_FILES = Object.freeze(['chess', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects']);
+// `freePicks` (data/freePicks.json, DESIGN §21): the 自选干员 records are chess-shaped but live in their own file, so the
+// browser sim must fetch them too — a missing one would make every deployed 自选干员 resolve to no def and be dropped.
+export const SIM_DATA_FILES = Object.freeze(['chess', 'freePicks', 'enemies', 'tokens', 'stages', 'waves', 'bonds', 'items', 'garrisons', 'bands', 'effects']);
 
 /** Request failures after which a b.result counts as never delivered (re-sent on resume / b.start). */
 export const LOST_RESULT_CODES = Object.freeze(['DISCONNECTED', 'OFFLINE', 'TIMEOUT']);

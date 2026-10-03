@@ -24,7 +24,7 @@ const CACHE = join(ROOT, '.cache', 'gamedata');
 const HAS_CACHE = ['excel/activity_table.json', 'excel/character_table.json', 'excel/skill_table.json', 'excel/battle_equip_table.json',
   'levels/enemydata/enemy_database.json', 'levels/activities/act1autochess/level_autochess_enemy_data.json']
   .every((rel) => existsSync(join(CACHE, rel)));
-const FILES = ['config', 'chess', 'bonds', 'garrisons', 'items', 'bands', 'effects', 'choices', 'enemies', 'factions', 'waves', 'stages', 'bosses', 'tokens'];
+const FILES = ['config', 'chess', 'freePicks', 'bonds', 'garrisons', 'items', 'bands', 'effects', 'choices', 'enemies', 'factions', 'waves', 'stages', 'bosses', 'tokens'];
 
 /** Load one data file (fails with a helpful message when the build has not run). */
 function load(name) {
@@ -33,7 +33,11 @@ function load(name) {
   return JSON.parse(readFileSync(p, 'utf8'));
 }
 const D = Object.fromEntries(FILES.map((f) => [f, load(f)]));
-const { config, chess, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens } = D;
+const { config, chess, freePicks, bonds, garrisons, items, bands, effects, choices, enemies, factions, waves, stages, bosses, tokens } = D;
+/** A chess-shaped record by id: a season chess or a 自选候选 (DESIGN §21 — `data/freePicks.json`, its own file). */
+const chessOf = (id) => chess[id] ?? freePicks[id] ?? null;
+/** Whether a token is one the free-pick roster owns (the season's own records are the other half). */
+const freePickOwned = (t) => (t.owners || []).some((o) => String(o).startsWith('chess_free_'));
 
 const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const isInt = (v) => Number.isInteger(v);
@@ -333,7 +337,7 @@ test('bosses, factions, tokens and choices resolve', () => {
 
   for (const t of Object.values(tokens)) {
     assertStatsFinite(t.stats, t.tokenId, ['maxHp', 'atk', 'def', 'res', 'bat', 'aspd']);
-    for (const o of t.owners) assert.ok(chess[o]?.tokens.includes(t.tokenId), `${t.tokenId}: owner ${o}`);
+    for (const o of t.owners) assert.ok(chessOf(o)?.tokens.includes(t.tokenId), `${t.tokenId}: owner ${o}`);
   }
   assert.ok(tokens.enemy_9012_acloon, '炎佑 present');
 
@@ -410,7 +414,7 @@ test('chess/tokens: talent tokens resolve and every token variant says where it 
   for (const t of Object.values(tokens)) {
     for (const [owner, v] of Object.entries(t.variants)) {
       assert.ok(Array.isArray(v.sources) && v.sources.length && v.sources.every((s) => allowed.has(s)), `${t.tokenId}@${owner}: sources`);
-      assert.ok(chess[owner]?.tokens.includes(t.tokenId), `${t.tokenId}: owner ${owner}`);
+      assert.ok(chessOf(owner)?.tokens.includes(t.tokenId), `${t.tokenId}: owner ${owner}`);
     }
   }
   assert.deepEqual(tokens.token_10057_svash2_eagle1.variants.chess_char_5_14_a.sources, ['display']);
@@ -425,8 +429,14 @@ test('chess/tokens: talent tokens resolve and every token variant says where it 
     const made = Object.values(t.variants).some((v) => makes(v.sources) || Object.values(v.bySkill || {}).some((b) => makes(b.sources)));
     assert.equal(t.placeable, t.displayType !== 'HIDDEN' && made, `${t.tokenId} (${t.name}): placeable`);
   }
-  assert.deepEqual(Object.values(tokens).filter((t) => t.placeable).map((t) => t.name).sort(),
+  // the season's own hand-card summons (the free-pick roster brings its own, counted below)
+  const seasonPlaceable = Object.values(tokens).filter((t) => t.placeable && !freePickOwned(t));
+  assert.deepEqual(seasonPlaceable.map((t) => t.name).sort(),
     ['医疗探机', '诅咒娃娃', '斯卡蒂的海嗣', '流形', '狼群', '爬行号·防护单元'].sort());
+  // …and the 自选干员 summons (user report 2026-10-03): built from the same sources, placeable when some loadout makes them
+  const freePlaceable = Object.values(tokens).filter((t) => t.placeable && freePickOwned(t));
+  assert.ok(freePlaceable.length >= 20, `${freePlaceable.length} placeable 自选干员 summons`);
+  assert.ok(freePlaceable.every((t) => t.owners.every((o) => String(o).startsWith('chess_free_'))), 'owned by free picks only');
   assert.equal(tokens.enemy_9012_acloon.stats.deployLimit, tokens.enemy_9012_acloon.deployLimit);
 });
 
@@ -529,7 +539,7 @@ test('tokens: owner loadout variants (bySkill per non-default owner skill, byMod
   const allowed = new Set(['talent', 'skill', 'display']);
   for (const t of Object.values(tokens)) {
     for (const [owner, v] of Object.entries(t.variants || {})) {
-      const o = chess[owner];
+      const o = chessOf(owner);
       const alt = o.skills.filter((s) => !s.isDefault).map((s) => String(s.index));
       assert.deepEqual(Object.keys(v.bySkill || {}), alt, `${t.tokenId}@${owner}: bySkill keys`);
       for (const b of Object.values(v.bySkill || {})) {

@@ -94,11 +94,13 @@ export class SharedPool {
    * Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`), PLUS the caller's `extra` entries — the
    * player's 自选干员 (DESIGN §21, PlayerState.freePickEntries).
    *
-   * `extra` ids are eligible REGARDLESS of the `maxTier` gate: they were explicitly brought into this player's pool,
-   * so a 6★ picked at 调度中心 5 级 is drawable at 5 级 too (a 自由位置 is "编入作战", not a shop-tier purchase). An
-   * exact-`tier` request (the reward / effect rolls) and the caller's `filter` still apply to them, and they never
-   * appear in `this.entries` — they are outside the shared copy economy, so a weight here is "copies this pick may
-   * still yield", not a shared pool count.
+   * `extra` ids obey the **same tier gate as a shared chess**: shop level L offers operators of tier ≤ L (research 01
+   * §6; user report 2026-10-03 "自选干员会忽略他的等级出现 … 5 级干员需要到 5 级以后才进入池子"), so a 6★ pick is not
+   * drawable at 调度中心 5 级 and a 5★ one not at 4 级 — exactly like a season operator of that tier. An exact-`tier`
+   * request is how a lower level legitimately reaches one tier above: the merge promotion reward rolls
+   * `tier = min(shopLevel + 1, 6)` (research 01 §7, PlayerState.pushRewardOffer). The caller's `filter` applies to them
+   * too, and they never appear in `this.entries` — they are outside the shared copy economy, so a weight here is
+   * "copies this pick may still yield", not a shared pool count.
    * @param {{ maxTier?: number, tier?: number|null, filter?: (id: string, e: object) => boolean,
    *   extra?: Array<{ id: string, tier: number, left: number }>|null }} [opts]
    */
@@ -112,7 +114,7 @@ export class SharedPool {
     }
     for (const x of extra || []) {
       if (!x || !(x.left > 0)) continue;
-      if (tier != null && x.tier !== tier) continue;
+      if (tier != null ? x.tier !== tier : x.tier > maxTier) continue;   // the shared chess gate above, verbatim
       if (filter && !filter(x.id, x)) continue;
       out.push([x.id, x.left]);
     }

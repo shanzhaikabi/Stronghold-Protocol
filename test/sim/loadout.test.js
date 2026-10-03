@@ -21,6 +21,7 @@ const freshDs = () => new DataSource(ds.raw, null);
 const INSIDE = 'chess_char_1_01_a';     // 隐现 (T1, E1: S1–S2, default S2)
 const MLYSS = 'chess_char_6_11_b';      // 缪尔赛思 精锐 (S1–S3, default S3; modules 002 default / 003)
 const WTRMAN = 'token_10030_mlyss_wtrman';
+const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (data/freePicks.json, DESIGN §21) — never in data/chess.json
 
 test('resolveLoadout: legal choices resolve, anything else falls back to the default', { skip }, () => {
   const n = C[INSIDE];
@@ -216,6 +217,46 @@ test('BattleSpec: units carry skillIndex / moduleId (sanitised); a battle uses t
   // the Battle still runs to the end
   b.runToEnd(4000);
   assert.ok(b.finished);
+});
+
+test('自选干员 resolve in the sim: the free-pick file is part of the sim data (server source and the browser shape)', { skip }, () => {
+  // user report 2026-10-03: a deployed 自选干员 vanished when the battle started. data/freePicks.json is a separate file
+  // (DESIGN §21), and the sim's own DataSource read `raw.chess` only — so every free-pick unit resolved to null and
+  // Battle._addAllyFromInput dropped it ("unknown chess"). The server source loads data/*.json wholesale; the browser
+  // runner fetches SIM_DATA_FILES.
+  for (const src of [ds, freshDs()]) {
+    for (const loadout of [null, { skillIndex: 0, moduleId: null }, { skillIndex: 0, moduleId: 'none' }]) {
+      const def = src.getChess(WANG, loadout);
+      assert.ok(def, `a 自选候选 must resolve (loadout ${JSON.stringify(loadout)})`);
+      assert.equal(def.id, WANG);
+      assert.ok(def.stats.maxHp > 0 && def.stats.atk > 0, 'with its own stats');
+      assert.ok(def.skill && def.skill.id, 'and its selected skill');
+      assert.ok(def.talents.length >= 1, 'and its talents');
+    }
+    // …without disturbing a season chess, a golden one or a token
+    assert.equal(src.getChess(INSIDE).id, INSIDE);
+    assert.equal(src.getChess(MLYSS, { moduleId: 'uniequip_003_mlyss' }).id, MLYSS);
+    assert.ok(src.getToken(WTRMAN, MLYSS), '流形 still resolves');
+    assert.equal(src.getChess('chess_free_nope'), null, 'an unknown id is still null');
+    // a 自选候选's own summon resolves too (tokens.json carries it since the free-pick summon fix)
+    assert.ok(src.getToken('token_10064_wang_stone1', WANG), '棋子 (望\'s summon) resolves in the sim');
+  }
+});
+
+test('a deployed 自选干员 actually fights: the battle keeps the unit instead of dropping it as unknown', { skip }, () => {
+  const spec = normalSpec([
+    { uid: 1, chessId: WANG, row: 10, col: 5, dir: 'RIGHT', skillIndex: 0 },
+    { uid: 2, chessId: INSIDE, row: 10, col: 7, dir: 'RIGHT', skillIndex: 0, moduleId: 'none' },
+  ]);
+  const b = createBattleFromSpec(spec, freshDs(), { recordEvents: false, quiet: true });
+  const wang = b.allyUnits.find((x) => x.uid === 1);
+  assert.ok(wang, 'the 自选干员 is on the field when the battle starts (it used to be dropped)');
+  assert.ok(b.allyUnits.some((x) => x.uid === 2), 'and so is the season operator beside it');
+  assert.ok(wang.base.maxHp > 0 && wang.base.atk > 0, 'with its stats');
+  assert.ok(wang.def.skill, 'and its selected skill');
+  assert.ok(b.errors.length === 0, `no sim errors (${JSON.stringify(b.errors.slice(0, 2))})`);
+  b.runToEnd(4000);
+  assert.ok(b.finished, 'and the battle runs to the end');
 });
 
 test('determinism: a spec with loadouts gives identical results on independent sources; the loadout matters', { skip }, () => {

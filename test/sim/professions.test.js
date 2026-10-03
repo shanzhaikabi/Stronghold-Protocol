@@ -18,6 +18,9 @@ test('every subProfessionId in the visible pool has a dedicated profile entry', 
   for (const id of ds.chessIds()) {
     const raw = ds.rawChess(id);
     if (!raw || raw.isDiy || raw.chessType === 'DIY') continue;
+    // the free-pick roster (DESIGN §21) resolves in the sim too (it is its own data file) but it is not the visible
+    // pool: its own coverage is the next test
+    if (raw.freePick === true) continue;
     const c = ds.getChess(id);
     if (!c.subProf) continue;
     seen.add(c.subProf);
@@ -25,6 +28,25 @@ test('every subProfessionId in the visible pool has a dedicated profile entry', 
   }
   assert.deepEqual([...missing], []);
   assert.ok(seen.size >= 50, `${seen.size} subprofessions`);
+});
+
+test('自选干员 (DESIGN §21) fight with their profession profile; the subprofessions that still lack one are listed', () => {
+  // A 自选候选 resolves through the sim's DataSource like any chess. The 73 authored SUB entries cover all 112 visible
+  // chess and 86 of the 93 free picks; the 5 subprofessions below have no dedicated entry yet, so those operators fall
+  // back to their profession's default profile (a fidelity gap, not a crash — stated here so it cannot grow silently).
+  const ds = getDefaultSource();
+  const freeIds = ds.chessIds().filter((id) => ds.rawChess(id)?.freePick === true);
+  assert.ok(freeIds.length >= 90, `${freeIds.length} 自选候选 in the sim data`);
+  const missing = new Set();
+  const withoutProfile = [];
+  for (const id of freeIds) {
+    const c = ds.getChess(id);
+    assert.ok(c && c.stats.maxHp > 0, `${id} resolves`);
+    if (!c.subProf) continue;
+    if (!SUB[c.subProf]) { missing.add(c.subProf); withoutProfile.push(id); }
+  }
+  assert.deepEqual([...missing].sort(), ['artsprotector', 'blessing', 'siegesniper', 'soulcaster', 'watchman']);
+  assert.ok(withoutProfile.length <= 8, `${withoutProfile.length} picks on the generic profession profile`);
 });
 
 test('every visible chess (normal & elite) fights in a real battle without errors', () => {
