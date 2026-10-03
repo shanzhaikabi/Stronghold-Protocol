@@ -6,12 +6,14 @@
 // falls back to the id itself for such a record (there is no `_b` sibling), so one key covers the normal and the 精锐
 // piece alike.
 //
-// This batch = the nine 6★ 原型干员 of the season, plus a small wrapper for the six 4★ 预备干员 (their shared generic
+// This batch = the nine 6★ 原型干员 of the season, 赤刃明霄陈 火陈 (the "火龙" / 剑气长龙 report, S3 only), plus a small
+// wrapper for the six 4★ 预备干员 (their shared generic
 // skills `skcom_atk_up[…]` / … are reproduced exactly by the generic kit, which however installs no talent — theirs is
 // a plain stat talent that the wrapper below adds):
 //   608_acpion 郁金香 (PIONEER 尖兵)        609_acguad Sharp (WARRIOR 无畏者)   610_acfend Mechanist (TANK 铁卫)
 //   611_acnipe Stormeye (SNIPER 速射手)     612_accast Pith (CASTER 扩散术师)  613_acmedc Touch (MEDIC 医师)
 //   614_acsupo Raidian (SUPPORT 凝滞师)     615_acspec Misery (SPECIAL 处决者) 617_sharp2 领主·Sharp (WARRIOR 领主)
+//   1050_chen3 赤刃明霄陈 (WARRIOR 术战者, S3 剑气长龙)
 //   601_cguard / 602_cdfend / 603_csnipe / 604_ccast / 605_cmedic / 606_csuppo (4★ 预备干员, `reserveKit`)
 // Every number comes from the record's own blackboards (`bb` = the SELECTED skill's one, `def.talents[i].bb`,
 // `def.traitBb`); the few constants are documented where they are used. The official wording (description + 备注) was
@@ -24,7 +26,7 @@
 // on `isSel(def, id)` or `skillOn(unit, id)`.
 // Tests: test/content/kits_freePicks.test.js.
 
-import { COLS } from '../../constants.js';
+import { COLS, ROWS } from '../../constants.js';
 import { absoluteRangeKeys, canTargetEnemy, sortEnemyTargets } from '../../targeting.js';
 import { bodyInKeys } from '../../body.js';
 import { genericKit } from '../generic.js';
@@ -120,6 +122,70 @@ function doubleHit(battle, unit, targets) {
 
 const AURA = 0.2;       // aura refresh period (s)
 const AURA_DUR = 0.25;  // aura buff lifetime (s)
+
+// ---------------------------------------------------------------------------------------------------------------
+// 剑气长龙 ("火龙") of 赤刃明霄陈 S3 赤霄·天喟 — user report 2026-10-03: "火陈的火龙现在也没有实现"
+
+/** PRTS 备注 of 赤霄·天喟: 剑气 "移动速度1.5" (tiles/s) — the data has no key for it. */
+const SWORD_QI_SPEED = 1.5;
+/** PRTS 备注 of 赤霄·天喟: 剑气 "碰撞半径1.3" (tiles) — the data has no key for it either. */
+const SWORD_QI_RADIUS = 1.3;
+
+/**
+ * The sword-qi of S3 赤霄·天喟 (`skchr_chen3_3`): on activation she releases a qi straight ahead that damages **once**
+ * every enemy its path passes through, for `max(hp_ratio × the victim's CURRENT HP, projectile_min_atk_scale × ATK)`
+ * arts damage — both numbers are the skill's own blackboard keys (`hp_ratio` 0.06, `projectile_min_atk_scale` 5.3 at the
+ * record's skill level). PRTS 备注 (the authority for what the data does not carry): "剑气可对空，碰撞半径1.3，移动速度
+ * 1.5，每次转向前对每个敌人仅判定一次伤害；…"; "『至少造成』指的是『如果目标当前生命值的6%低于自己的攻击力*相应攻击力
+ * 倍率』，则改为造成一次相应攻击力倍率的法术伤害（非伤害保底或无视法术抗性）"; "剑气的伤害为预计算的无途径法术普通伤害".
+ * The qi therefore hits FLYING enemies too (`canHitFly: true`, unlike her own attacks — 地面敌人), flies to the field
+ * edge at `SWORD_QI_SPEED` tiles/s (each step damages from where it has arrived, so a distant enemy is hit later),
+ * and its ATK is the one cached at cast time (预计算 — a later ATK buff does not grow it).
+ *
+ * The 剑气 is a travelling projectile, not a tile sweep: its position is sampled once per tile of flight (0.667 s at
+ * `SWORD_QI_SPEED`) and damages `battle.enemiesInRadius(x = its column, y = its row, SWORD_QI_RADIUS)` — the 1.3
+ * 碰撞半径 of 备注, a body only has to touch that disc. `hit` keeps "每个敌人仅判定一次" per segment: a 巨型 enemy
+ * (body.js `hitArea`) whose rectangle covers several samples, or one walking into the corridor between two steps, takes
+ * ONE instance. The flight stops at the field edge (`battle.rect`), which for a normal battle is much narrower than the
+ * 19×21 stage grid behind it.
+ *
+ * Not modelled: the official 可转向 (the qi turns clockwise 90° when the way ahead is blocked — 侵入点 / 保护目标 / 高地
+ * within 0.25; it never turns here, so the whole flight is one segment) and obstacles / 高地 do not stop it either. Its
+ * damage cannot be dodged by enemies: the official damage is a projectile hit, not one of the caster's attacks.
+ */
+function swordQi(battle, unit, bb) {
+  const [dr, dc] = Array.isArray(unit.fwd) ? unit.fwd : [0, 1];
+  if (!dr && !dc) return;
+  const ratio = num(bb.hp_ratio, 0.06);
+  const scale = num(bb.projectile_min_atk_scale, 5.3);
+  const atk = unit.s.atk;                       // 预计算: the ATK at cast time
+  const R = battle.rect;                        // the qi flies over the FIELD, not the 19×21 grid behind it
+  const path = [];
+  for (let i = 1; i <= Math.max(ROWS, COLS); i++) {
+    const r = unit.tileR + dr * i, c = unit.tileC + dc * i;
+    if (r < R.r0 || r > R.r1 || c < R.c0 || c > R.c1) break;
+    path.push([r, c]);
+  }
+  if (!path.length) return;
+  const hit = new Set();                        // 每个敌人仅判定一次 (per segment)
+  let px = unit.x, py = unit.y;                 // the qi's continuous position: her spot at cast time
+  for (let i = 0; i < path.length; i++) {
+    const [r, c] = path[i];
+    const fx0 = px, fy0 = py;                   // the spot the qi comes from (fixed at cast: it does not follow her)
+    battle.after((i + 1) / SWORD_QI_SPEED, () => {
+      // one streak per step (`move` archetype: the client walks the event's tx / ty, see render/fx.js) — the old single
+      // 'beam' for the whole flight resolved unit views only and drew a sparkle on the caster instead of a line
+      battle.fx('swordQi', { x: fx0, y: fy0, id: unit.id, tx: c, ty: r });
+      for (const e of battle.enemiesInRadius(c, r, SWORD_QI_RADIUS)) {
+        if (hit.has(e) || !canTargetEnemy(unit, e, { canHitFly: true })) continue;
+        hit.add(e);
+        const amount = Math.max(e.hp * ratio, atk * scale);
+        battle.dealDamage(unit, e, { amount, type: 'arts', isSkill: true, canDodge: false, tags: ['skill', 'swordQi'] });
+      }
+    }, { owner: unit });
+    px = c; py = r;
+  }
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // 模组 helpers (a 自选候选 is its own elite: its record carries `modules[]` + the module-applied trait / talents, so the
@@ -868,6 +934,43 @@ export default {
           battle.dealDamage(unit, c.target, { amount: unit.s.atk * m, type: 'arts', tags: ['module'] });
         }, { owner: unit });
       },
+    };
+  },
+
+  // ===============================================================================================================
+  // 1050_chen3 赤刃明霄陈 (WARRIOR 术战者, char_1050_chen3; 攻击造成法术伤害) — 火陈 [user], the reported "火龙"
+  //   形意洞照: 攻击力+13%，攻击速度+13，攻击变为弱点伤害
+  //   寒暑觉知: 未受到伤害时，每6秒随机治疗自身一定（攻击力的50%~200%）生命值，并闪避下次物理与法术攻击
+  //   S1 赤霄·奔夜: 攻击力+65%，攻击变为二连击，攻击使目标敌人特殊能力失效至技能结束
+  //   S2 赤霄·绝影-驰: 对周围最近的1名敌人发动10次斩击 ×390% 法术，击倒则转移（剩余次数+1），结束时移动到其位置；
+  //                    之后攻击力+230%、40%双闪避
+  //   S3 赤霄·天喟 (default, 20 s): 开启时向前释放一道剑气长龙（`swordQi`），并且每次攻击对最多 3 名地面敌人造成
+  //                    3 次攻击力 165% 的法术伤害
+  //
+  // Only S3 is authored here: it is the skill the user reported ("火陈的火龙现在也没有实现") and the default one, so the
+  // 剑气长龙 is what a player sees. S1 / S2 have no special mechanic the generic kit cannot express, so they keep falling
+  // back to it (`selectSkillSpec`: no `skills[skchr_chen3_1|2]` entry ⇒ the generic spec of the selected skill), and the
+  // two TALENTS stay unauthored like those of every other pick the generic kit serves — 78 of the 93 have none (only the
+  // nine 原型干员 and the six 预备干员's `reserveKit` install one; DESIGN §21.11). Both gaps are recorded there rather than
+  // half-modelled here: 形意洞照's 弱点伤害 (the attack deals whichever of physical / arts is higher for the target) has
+  // no engine support anywhere, and modelling it for one operator alone would silently make 火陈 the only pick whose
+  // talent exists.
+  chess_free_char_1050_chen3: (bb, chess, def) => {
+    const S3 = 'skchr_chen3_3';
+    const g = gridOf(def);
+    return {
+      skills: alt(def, {
+        [S3]: () => ({
+          kind: 'duration',
+          // "攻击范围扩大": the data's own S3 grid (what the generic spec's `targeting.rangeGrid` line does), and
+          // "最多3名地面敌人": `attack@max_target` 3 (地面 ⇒ `attack.groundOnly`, the 蕾缪安 S3 reading)
+          targeting: { maxTargets: Math.max(1, Math.floor(num(bb['attack@max_target'], 3))), ...(g ? { rangeGrid: g } : {}) },
+          // "3 次攻击力165%": the count is in the text, not in a `times` key — the generic kit reads `attack@atk_scale`
+          // (1.65 ✓) but can only produce ONE instance per target, so the skill's real damage needs this line
+          attack: { atkScale: num(bb['attack@atk_scale'], 1.65), hits: 3, dmgType: 'arts', groundOnly: true },
+          onStart({ battle, unit }) { swordQi(battle, unit, bb); },
+        }),
+      }),
     };
   },
 

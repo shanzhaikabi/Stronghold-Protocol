@@ -373,7 +373,7 @@ function FreePickPage({ m, level, picks, entries, locked, sel, onBack, onSelect,
               onClick=${() => onAdd(level, selId)}>${full ? `本级已满（${FREE_PICK_PER_LEVEL}）` : '选入本级'}<//>`}
       </div>
     </header>
-    <p class="lo-note"><${Icon} name="info" />选中的干员只进入<b>你自己</b>的干员池，仍需像普通干员一样随机抽出，且不能被信标送走。在右侧给他配好携带的技能，本局生效。</p>
+    <p class="lo-note"><${Icon} name="info" />选中的干员只进入<b>你自己</b>的干员池，仍需像普通干员一样随机抽出，且不能被信标送走。<b>本槽位就是他的等阶</b>：调度中心 ${ROMAN[level]} 级起才可能出现。在右侧给他配好携带的技能，本局生效。</p>
     <main class=${cx('lo-body', narrowDetail && 'is-detail')}>
       <section class="lo-roster">
         <${Filters} m=${m} filters=${filters} bonds=${bonds} onFilters=${setFilters} />
@@ -419,7 +419,7 @@ function FreePicks({ m, picks, locked, bannedIds, onOpen, onClear }) {
   return html`<section class="lo-free" data-testid="loadout-free">
     <div class="lo-free__head">
       <span class="lo-free__title"><${MicroLabel} tone="mint">FREE PICK<//>自由位置</span>
-      <span class="lo-free__hint t-dim">调度中心 5 / 6 级各 2 名，从六星干员与原型干员中自选；他们只进入<b>你自己</b>的干员池，仍需随机抽取</span>
+      <span class="lo-free__hint t-dim">调度中心 5 / 6 级各 2 名，从六星干员与原型干员中自选；<b>填在 Ⅴ 级槽的从调度中心 5 级起</b>、Ⅵ 级槽的从 6 级起才可能被抽到（等阶即槽位）。他们只进入<b>你自己</b>的干员池，仍需随机抽取</span>
       <span class="lo-free__count">已选 <b class="num">${total}</b><span class="num t-dim">/${FREE_PICK_LEVELS.length * FREE_PICK_PER_LEVEL}</span></span>
     </div>
     ${FREE_PICK_LEVELS.map((level) => html`<div class="lo-free__row" key=${level} data-testid=${`free-row-${level}`}>

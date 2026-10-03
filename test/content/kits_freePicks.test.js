@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { makeBattle, chessRec, enemyRec, checkInvariants } from '../helpers/battleHarness.js';
 import { DataSource, getDefaultSource } from '../../server/sim/simdata.js';
 import { KITS, skillSpecSource } from '../../server/sim/content/index.js';
+import { bodyKeys } from '../../server/sim/body.js';
 import { attackRangeGrid } from '../../shared/loadoutRecord.js';
 
 const FREE = JSON.parse(readFileSync(new URL('../../data/freePicks.json', import.meta.url), 'utf8'));
@@ -30,6 +31,8 @@ const modRec = (id, uniEquipId) => (FREE[id].modules || []).find((m) => m.uniEqu
 const TULIP = 'chess_free_char_608_acpion', SHARP = 'chess_free_char_609_acguad', MECH = 'chess_free_char_610_acfend';
 const STORM = 'chess_free_char_611_acnipe', PITH = 'chess_free_char_612_accast', TOUCH = 'chess_free_char_613_acmedc';
 const RAIDIAN = 'chess_free_char_614_acsupo', MISERY = 'chess_free_char_615_acspec', LORD = 'chess_free_char_617_sharp2';
+/** 赤刃明霄陈 火陈 (S3 剑气长龙 only — her S1/S2 and both talents are still the generic / no-talent path). */
+const CHEN = 'chess_free_char_1050_chen3';
 /** The nine operators of this batch (the six 4★ 预备干员 stay on the generic `skcom_…` skills). */
 const BATCH = [TULIP, SHARP, MECH, STORM, PITH, TOUCH, RAIDIAN, MISERY, LORD];
 
@@ -988,4 +991,102 @@ test('模组 LOR-X 领主·Sharp: 攻击附带10%攻击力的法术伤害 (+ 无
   for (const c of rider) { approx(c.amount, uOn.s.atk * 0.1, '10 % of her ATK'); assert.equal(c.target.side, 'enemy'); }
   assert.equal(dealt(off, uOff, (c) => c.dmg.type === 'arts').length, 0, '不装备: no arts rider');
   done(on); done(off);
+});
+
+// =================================================================================================================
+// 1050_chen3 赤刃明霄陈 火陈 — S3 赤霄·天喟's 剑气长龙 ("火龙", user report 2026-10-03: "火陈的火龙现在也没有实现")
+
+test('火陈 S3 剑气长龙: 沿朝向贯穿一条直线 —— max(当前生命6%, 攻击力530%) 法术,可对空,每个敌人只判定一次', () => {
+  const id = CHEN, b = bbOf(id, 2);
+  assert.equal(KITS[id] !== undefined, true, 'the kit is registered (it was the GENERIC kit before this fix)');
+  assert.equal(skillSpecSource(D(id, 2)), 'skills', 'S3 comes from the kit');
+  assert.equal(FREE[id].tokens.length, 0, 'fixture: 火陈 has NO summon token — her "火龙" is this skill, not a token');
+  const FAT = 1e6, THIN = 20000;
+  const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: 2, carryState: READY }], {
+    recs: {
+      e_fat: enemyRec({ key: 'e_fat', hp: FAT, speed: 0, atk: 0 }),
+      e_thin: enemyRec({ key: 'e_thin', hp: THIN, speed: 0, atk: 0 }),
+      e_fly: enemyRec({ key: 'e_fly', hp: FAT, speed: 0, atk: 0, motion: 'FLY' }),   // 剑气可对空
+      e_back: enemyRec({ key: 'e_back', hp: FAT, speed: 0, atk: 0 }),
+    },
+    // all four out of her attack range (S3 covers cols 4–7): only the 剑气 can reach them
+    spawns: [{ key: 'e_fat', pos: [10, 8] }, { key: 'e_thin', pos: [10, 9] }, { key: 'e_fly', pos: [10, 10] }, { key: 'e_back', pos: [10, 2] }],
+  });
+  const u = h.unit(id);
+  h.step();
+  assert.deepEqual(u.fwd, [0, 1], 'fixture: she faces right (the 剑气 flies along +col)');
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  h.run(2.0);
+  assert.equal(dealt(h, u, tagged('swordQi')).length, 0, 'nothing yet: the 剑气 travels at 1.5 tiles/s (4 tiles = 2.67 s)');
+  // the 1.3 碰撞半径 (备注) puts the leading sample within reach of the first enemy one tile earlier than a tile sweep
+  // would — at t ≈ 2.03 s — while the next one (col 9) is reached at t ≈ 2.70 s: 0.6 s isolates the first hit
+  h.run(0.6);
+  const early = dealt(h, u, tagged('swordQi'));
+  assert.equal(early.length, 1, 'the first enemy on the line is hit as the 剑气 reaches it');
+  h.run(2.0);
+  const qi = dealt(h, u, tagged('swordQi'));
+  const byTarget = (key) => qi.filter((c) => c.target.defId === `enemy_${key}`);
+  assert.equal(qi.length, 3, 'exactly the three enemies of the line, once each (每个敌人仅判定一次)');
+  for (const c of qi) { assert.equal(c.type, 'arts', '法术伤害'); assert.ok(!c.dmg.isAttack, 'not one of her attacks'); }
+  approx(byTarget('e_fat')[0].amount, Math.max(FAT * b.hp_ratio, u.s.atk * b.projectile_min_atk_scale), '6 % of the CURRENT hp');
+  approx(byTarget('e_thin')[0].amount, u.s.atk * b.projectile_min_atk_scale, 'below the floor ⇒ 530 % ATK instead');
+  assert.equal(qi.indexOf(byTarget('e_fat')[0]) < qi.indexOf(byTarget('e_thin')[0]), true, 'nearer enemy first');
+  assert.equal(qi.indexOf(byTarget('e_thin')[0]) < qi.indexOf(byTarget('e_fly')[0]), true, 'then farther');
+  assert.ok(byTarget('e_fly').length === 1, '可对空: the flying enemy is pierced too');
+  assert.equal(byTarget('e_back').length, 0, 'the enemy BEHIND her is not touched (向前)');
+  done(h);
+});
+
+test('火陈 S3 剑气长龙: 横跨两格的巨型敌人只判定一次 (每次转向前对每个敌人仅判定一次伤害)', () => {
+  const id = CHEN;
+  // A 巨型单位 (body.js `hitArea`, w 2.5 ⇒ its body covers cols 7–9 of her row) sitting on the line she pierces. Per-tile
+  // hit collection with no cross-tile memory hit it once per occupied tile the 剑气 swept — 3 instances — while PRTS 备注
+  // of 赤霄·天喟 ("每次转向前对每个敌人仅判定一次伤害") says ONE per segment, and the 剑气 never turns here.
+  const huge = enemyRec({ key: 'e_huge', hp: 1e6, speed: 0, atk: 0, bat: 2 });
+  huge.hitArea = { w: 2.5, h: 1 };
+  const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: 2, carryState: READY }], {
+    recs: { e_huge: huge },
+    spawns: [{ key: 'e_huge', pos: [10, 8] }],
+  });
+  const u = h.unit(id);
+  h.step();
+  const e = h.enemy('enemy_e_huge');
+  assert.ok(bodyKeys(e).length >= 2, `fixture: the body covers ${bodyKeys(e).length} tiles of her row`);
+  assert.equal(Math.round(e.y), u.tileR, 'fixture: the 巨型敌人 stands on the 剑气\'s line');
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  h.run(20);
+  const qi = dealt(h, u, tagged('swordQi'));
+  assert.equal(qi.length, 1, 'exactly ONE instance for a body the qi meets several steps in a row (once per segment)');
+  assert.equal(qi[0].target, e, 'and it is the 巨型敌人');
+  done(h);
+});
+
+test('火陈 S3 天喟: 每次攻击对最多3名地面敌人 3 次 165% 法术 (generic kit could only do 1 次)', () => {
+  const id = CHEN, b = bbOf(id, 2);
+  const h = battle([{ chessId: id, row: 10, col: 4, skillIndex: 2, carryState: READY }], {
+    recs: { e_fly: enemyRec({ key: 'e_fly', hp: 1e6, speed: 0, atk: 0, motion: 'FLY' }) },
+    spawns: [
+      { key: 'e_still', pos: [10, 6] },   // in range [0,2]
+      { key: 'e_still', pos: [10, 7] },   // [0,3]
+      { key: 'e_still', pos: [9, 5] },    // [-1,1]
+      { key: 'e_fly', pos: [10, 5] },     // 地面敌人 only: the flyer is in range but never attacked
+    ],
+  });
+  const u = h.unit(id);
+  h.step();
+  assert.ok(u.skill.activate('test', { free: true }), 'S3 opens');
+  assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length >= 1, 20), 'she attacks');
+  // one attack = one `attackId`: count its instances, not the total over several attacks (a 1-instance-per-attack
+  // generic spec would still reach 3 per target after three attacks)
+  const all = dealt(h, u, (c) => c.dmg.isAttack);
+  const attackId = all[0].dmg.attackId;
+  const atk = all.filter((c) => c.dmg.attackId === attackId);
+  const per = new Map();
+  for (const c of atk) per.set(c.target.id, (per.get(c.target.id) || 0) + 1);
+  assert.equal(per.size, Math.floor(b['attack@max_target']), '最多3名地面敌人');
+  for (const [, n] of per) assert.equal(n, 3, '3 次 per attack');
+  assert.equal(atk.length, 3 * 3, '3 enemies × 3 instances in ONE attack');
+  for (const c of atk) { approx(c.amount, u.s.atk * b['attack@atk_scale'], '165 % ATK per instance'); assert.equal(c.type, 'arts', '法术伤害'); }
+  assert.equal(all.some((c) => c.target.isFlying), false, '地面敌人: the flyer takes no attack (the 剑气 is what hits flyers)');
+  done(h);
 });
