@@ -282,6 +282,29 @@ test('自选干员: 份数预算 = 该阶级池上限 − 已拥有(精锐算 go
   h.m.dispose();
 });
 
+test('自选干员: 突变细胞的「高一阶」按本局等阶 —— 4★ 预备干员在 5 阶槽 ⇒ 抽 6 阶(记录 tier 4 只会抽 5 阶)', () => {
+  // 突变细胞 (char_chess_transformation_equip): "获得一名高一阶的随机初始干员（最高六阶）". One tier ABOVE the carrier's 等阶
+  // for the match — which for a 自选干员 is its 自由位置 slot (DESIGN §23.6), not its record rarity: the 4★ 预备干员's
+  // record is tier 4 but it is a 等阶-5 operator here, so the cell must draw 等阶 6.
+  const FOUR = freeIds.find((id) => free[id].rarity === 4);
+  const T5 = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 5).chessId;
+  const T6 = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 6).chessId;
+  const h = start({ 5: [FOUR] });
+  const m = h.m, ps = h.ps('p_0');
+  h.toPrep(1);
+  // pin the cell's roll per tier, so the test reads WHICH tier it asked for (everything else stays the real path)
+  const roll = m.pool.roll.bind(m.pool);
+  m.pool.roll = (rng, o = {}) => (o.tier === 5 ? T5 : o.tier === 6 ? T6 : roll(rng, o));
+  const carrier = give(m, ps, FOUR, 'hand');
+  const cell = giveItem(m, ps, 'chess_item_5_08_e_a');
+  assert.equal(m.handle('p_0', { t: 'g.equip', itemUid: cell.uid, targetUid: carrier.uid }).ok, true, 'the cell equips');
+  m.dispatch(ps, 'onBattleResult', { result: {}, lpLoss: 0, perfect: true });
+  assert.ok(!ps.find(carrier.uid), 'the carrier is destroyed');
+  const gained = ps.allChess().find((p) => p.uid !== carrier.uid);
+  assert.equal(gained?.id, T6, 'a 等阶-5 carrier gets a 等阶-6 operator (the record tier 4 would have drawn 等阶 5)');
+  m.dispose();
+});
+
 test('自选干员: 信标不能把它送走 —— 拒绝装备,且干员不被销毁', () => {
   const h = start({ 5: [proto6[0]] });
   const m = h.m, ps = h.ps('p_0');

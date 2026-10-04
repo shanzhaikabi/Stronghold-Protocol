@@ -200,7 +200,10 @@ const ITEM_HANDLERS = {
     onBattleResult(ctx) {
       const { piece, holder } = ctx.source;
       if (!piece || !holder || !ctx.piece(holder.uid)) return;
-      const tier = Math.min(6, ctx.gd.tierOf(holder.id) + 1);
+      // "高一阶" is measured from the carrier's 等阶 **in this match** (DESIGN §23.6: a 自选干员's 自由位置 slot — the
+      // piece carries it, matchTierOf), not from its record rarity: a 4★ 预备干员 filed at the 5 阶 slot is 等阶 5, so
+      // the cell gives a 等阶-6 operator (the record tier 4 would have given a 等阶-5 one)
+      const tier = Math.min(6, (Number.isInteger(holder.tier) ? holder.tier : ctx.gd.tierOf(holder.id)) + 1);
       const id = ctx.rollChess({ tier });
       if (!id) return;
       ctx.transform(holder.uid, ctx.gd.baseIdOf(id));
