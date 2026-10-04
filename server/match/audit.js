@@ -130,7 +130,7 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
           const base = gd.baseIdOf(s.id);
           if (t > ps.shop.level) fail(`${ps.playerId}: rolled tier ${t} at shop level ${ps.shop.level}`);
           if (!m.pool.has(base)) fail(`${ps.playerId}: rolled ${s.id} outside the match pool (banned/hidden)`);
-          if (s.basePrice !== gd.chessPrice(s.id)) fail(`${ps.playerId}: ${s.id} basePrice ${s.basePrice} != ${gd.chessPrice(s.id)}`);
+          if (s.basePrice !== gd.chessPrice(s.id, t)) fail(`${ps.playerId}: ${s.id} basePrice ${s.basePrice} != ${gd.chessPrice(s.id, t)}`);
         });
       }
       return s;
@@ -192,7 +192,7 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
     });
     wrap(ps, 'sell', function (orig, uid) {
       const loc = ps.find(uid);
-      const gain = loc && loc.piece.kind === 'chess' ? gd.sellPrice(loc.piece.id) : null;
+      const gain = loc && loc.piece.kind === 'chess' ? gd.sellPrice(loc.piece.id, ps.matchTierOf(loc.piece.id)) : null;
       const f0 = ps.funds;
       const fx = hasSpendEffects(m, ps);
       const res = orig(uid);

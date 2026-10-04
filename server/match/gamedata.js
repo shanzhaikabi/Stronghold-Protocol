@@ -210,21 +210,34 @@ export class GameData {
     return Math.max(0, Math.min(cap, 3 + round));
   }
 
-  chessPrice(id) {
+  /**
+   * The price row of `id`: the record's own `price` when it has one, else `tier`'s row. `tier` (optional) is the row to
+   * read instead of the record's — the 等阶 a 自选干员 has for THIS match, i.e. the 自由位置 slot it was filed at
+   * (PlayerState.matchTierOf, DESIGN §23.6): its record carries `price: null`, so the row is exactly what moves. Every
+   * other caller passes no tier and reads the record's, which a season chess states itself.
+   * @param {string} id chess id
+   * @param {number|null} [tier] the row to use when the record names no price (1…6), null/absent ⇒ the record's tier
+   */
+  chessPrice(id, tier = null) {
     const c = this.chess(id);
     if (c && Number.isFinite(c.price) && c.price >= 0) return c.price;
-    const tier = this.tierOf(id);
-    const row = this.economy.chessPrice && this.economy.chessPrice[tier];
+    const t = Number.isInteger(tier) ? tier : this.tierOf(id);
+    const row = this.economy.chessPrice && this.economy.chessPrice[t];
     const golden = c && c.isGolden;
-    if (row && typeof row === 'object') return numOr(golden ? row.golden : row.normal, DEFAULTS.chessPrice[tier] ?? 3);
-    return DEFAULTS.chessPrice[tier] ?? 3;
+    if (row && typeof row === 'object') return numOr(golden ? row.golden : row.normal, DEFAULTS.chessPrice[t] ?? 3);
+    return DEFAULTS.chessPrice[t] ?? 3;
   }
 
-  sellPrice(id) {
+  /**
+   * The 出售 price of `id`, resolved exactly like chessPrice (the record's `sellPrice` first, then `tier`'s row).
+   * @param {string} id chess id
+   * @param {number|null} [tier] the row to use when the record names no price (a 自选干员's match 等阶)
+   */
+  sellPrice(id, tier = null) {
     const c = this.chess(id);
     if (c && Number.isFinite(c.sellPrice) && c.sellPrice >= 0) return c.sellPrice;
-    const tier = this.tierOf(id);
-    const row = this.economy.chessSell && this.economy.chessSell[tier];
+    const t = Number.isInteger(tier) ? tier : this.tierOf(id);
+    const row = this.economy.chessSell && this.economy.chessSell[t];
     if (row && typeof row === 'object') return numOr(c && c.isGolden ? row.golden : row.normal, DEFAULTS.sellPrice);
     return DEFAULTS.sellPrice;
   }
@@ -256,14 +269,21 @@ export class GameData {
     };
   }
 
-  /** Copies of a base chess in the shared pool. */
-  poolCopies(baseId) {
+  /**
+   * Copies of a base chess in the shared pool: a per-record override first (缪尔赛思 4 — an operator's own scarcity,
+   * independent of any 等阶), else `tier`'s row. `tier` (optional) is what a 自选干员's per-player copy budget passes —
+   * its 自由位置 slot (PlayerState.freePickEntries, DESIGN §23.6); the shared pool itself never passes one, so the
+   * season's caps stay the record's.
+   * @param {string} baseId base chess id
+   * @param {number|null} [tier] the row to read instead of the record's (1…6)
+   */
+  poolCopies(baseId, tier = null) {
     const ov = this.economy.poolCopiesOverrides;
     if (ov && typeof ov === 'object' && Number.isInteger(ov[baseId]) && ov[baseId] >= 0) return ov[baseId];
-    const tier = this.tierOf(baseId);
+    const t = Number.isInteger(tier) ? tier : this.tierOf(baseId);
     const pc = this.economy.poolCopies;
-    const v = pc && typeof pc === 'object' ? pc[tier] : undefined;
-    return Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[tier] ?? 10);
+    const v = pc && typeof pc === 'object' ? pc[t] : undefined;
+    return Number.isInteger(v) && v >= 0 ? v : (DEFAULTS.poolCopies[t] ?? 10);
   }
 
   /** Copies needed to merge (0 = never merges: golden chess). */

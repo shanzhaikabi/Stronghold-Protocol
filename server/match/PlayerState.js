@@ -337,8 +337,9 @@ export class PlayerState {
    * record's rarity (87 of the 93 candidates are 6★, so a pick filed at 5 阶 read as VI everywhere).
    *
    * The same operator may be filed at 5 阶 by one player and at 6 阶 by another, so this is per player — never a
-   * function of the chess id alone. The price / sell rows and the copy budget stay keyed by the RECORD tier on purpose
-   * (they are balance numbers, and the 5 / 6 price rows are identical): see freePickEntries().
+   * function of the chess id alone. Everything keyed by an operator's 等阶 follows it, the economy included: the price
+   * the shop charges, the 出售 price and the copy budget are all read with this tier (`gd.chessPrice(id, tier)` etc.), so
+   * a pick filed at 5 阶 costs / is capped by the 5 阶 row (user 2026-10-04「都跟槽位走」— see freePickEntries()).
    * @param {string} id chess id (a pick's "elite" is the same record — see §23.2)
    * @returns {number} 1…6
    */
@@ -365,17 +366,19 @@ export class PlayerState {
    * never appeared before 调度中心 6 级 and the level-5 row did nothing at all.
    *
    * A 自选干员 is NOT part of the shared copy economy — its pieces hold `poolCopies: 0` like any effect-granted chess —
-   * so its budget is "how many more copies of this base the player may own": the base's ordinary pool cap minus what is
-   * already owned (an elite counts as `goldenCopies`). The cap still follows the RECORD's tier (the price table gives
-   * tier 5 and 6 the same 4 资金, and an operator's copy cap is a balance number the user has not asked to move); only
-   * the shop gate reads the slot. Buying, merging and selling therefore behave exactly as for any operator, a pick
-   * already owned in full simply stops appearing, and selling copies back frees the budget again.
+   * so its budget is "how many more copies of this base the player may own": the base's pool cap **of the slot's 等阶**
+   * minus what is already owned (an elite counts as `goldenCopies`). The cap follows the slot like everything else the
+   * user can see (2026-10-04「都跟槽位走」): a 6★ filed at 5 阶 may hold **8** copies (the 5 阶 row) where its record's
+   * 6 阶 row allows 5, and a 4★ 预备干员 filed at 5 阶 holds 8 rather than its record row's 16. Buying, merging and
+   * selling therefore behave exactly as for any operator, a pick already owned in full simply stops appearing, and
+   * selling copies back frees the budget again. A per-record override (`economy.poolCopiesOverrides`, 缪尔赛思 4) still
+   * wins: it is the operator's own scarcity, not a 等阶 row — and no 自选候选 carries one.
    * @returns {Array<{ id: string, tier: number, left: number }>}
    */
   freePickEntries() {
     const out = [];
     for (const { id, level } of this.freePickJoined()) {
-      const cap = this.gd.poolCopies(id);
+      const cap = this.gd.poolCopies(id, level);
       if (!(cap > 0)) continue;
       let owned = 0;
       for (const p of this.allChess()) {
@@ -988,7 +991,9 @@ export class PlayerState {
 
   _rollChessSlot() {
     const id = this.m.pool.roll(this.m.rngShop, { maxTier: this.shop.level, extra: this.freePickEntries() });
-    return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id), frozen: false, sold: false } : null;
+    // the price is the operator's own 等阶 in the match (a 自选干员's 自由位置 slot, DESIGN §23.6), so the two players
+    // of a match can be charged different rows for the same pick
+    return id ? { kind: 'chess', id, basePrice: this.gd.chessPrice(id, this.matchTierOf(id)), frozen: false, sold: false } : null;
   }
 
   _rollItemSlot() {
@@ -1126,7 +1131,7 @@ export class PlayerState {
     }
     piece.items = [];
     this.returnCopies(piece);
-    const ev = { piece, gain: this.gd.sellPrice(piece.id) };
+    const ev = { piece, gain: this.gd.sellPrice(piece.id, this.matchTierOf(piece.id)) };
     this.m.dispatch(this, 'onSold', ev);
     const gain = Number.isFinite(ev.gain) ? Math.max(0, Math.trunc(ev.gain)) : 1;
     this.addFunds(gain, { reason: 'sell' });
@@ -1728,14 +1733,19 @@ export class PlayerState {
 
   pieceView(p, rc = null) {
     const rec = p.kind === 'item' ? this.gd.item(p.id) : p.kind === 'token' ? this.gd.token(p.id) : this.gd.chess(p.id);
+    // the 等阶 this piece has for THIS match (newPiece → matchTierOf); the fallback covers a piece built by hand
+    const tier = Number.isInteger(p.tier) ? p.tier : rec && Number.isInteger(rec.tier) ? rec.tier : null;
     const v = {
       uid: p.uid,
       kind: p.kind,
       id: p.id,
       golden: !!(rec && rec.isGolden),
-      // DESIGN §23.6: the piece carries its 等阶 for this match (newPiece → matchTierOf), so a 自选干员 filed at the 5 阶
-      // slot shows V although its record is a 6★ — the fallback covers a piece built by hand (tests / fixtures)
-      tier: Number.isInteger(p.tier) ? p.tier : rec && Number.isInteger(rec.tier) ? rec.tier : null,
+      // DESIGN §23.6: the piece carries its 等阶 for this match, so a 自选干员 filed at the 5 阶 slot shows V although
+      // its record is a 6★
+      tier,
+      // …and the same 等阶 decides its 出售 price (user 2026-10-04「都跟槽位走」): the client's 出售 +N hint reads this
+      // number instead of the record's, which is null for a 自选候选 (ui/facing.js underframeActions, ui/detailPanel.js)
+      sellPrice: p.kind === 'chess' ? this.gd.sellPrice(p.id, tier) : null,
       items: p.kind === 'chess' ? (p.items || []).map((it) => ({ uid: it.uid, id: it.id })) : [],
       count: p.kind === 'token' ? (p.count || 1) : 1,
       ownerUid: p.kind === 'token' ? p.ownerUid ?? null : null,

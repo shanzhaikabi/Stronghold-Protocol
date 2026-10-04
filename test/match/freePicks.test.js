@@ -221,12 +221,14 @@ test('自选干员: 本局等阶按槽位走 —— 商店卡/手牌/侦查/结�
   assert.equal(ps.matchTierOf(FOUR), 5, 'a 4★ 预备干员 in the 5 阶 slot is 等阶 5 for this match');
   assert.equal(ps.matchTierOf(SZN), 6, 'a season operator keeps its record tier');
 
-  // the 4★ 预备干员: 5 阶 like its slot, while its price and copy budget stay the RECORD's (DESIGN §23.6 — a deliberate
-  // split: the 5 / 6 price rows are identical, the cap is a balance number the user has not asked to move)
+  // the 4★ 预备干员: 5 阶 like its slot, and its price / copy budget follow the SAME number (user 2026-10-04「都跟槽位走」
+  // — the record row would give it 3 资金 / 16 份). A caller that passes no tier still reads the record's row, which is
+  // what the season pool does.
   const four = give(m, ps, FOUR, 'hand');
   assert.equal(ps.pieceView(four).tier, 5, 'the 4★ shows its slot 等阶 (5), not its rarity (4)');
-  assert.equal(m.gd.chessPrice(FOUR), m.gd.config.economy.chessPrice[4].normal, 'its price stays the record tier\'s row');
-  assert.equal(m.gd.poolCopies(FOUR), m.gd.config.economy.poolCopies[4], 'and so does its copy cap');
+  assert.equal(m.gd.chessPrice(FOUR, ps.matchTierOf(FOUR)), m.gd.config.economy.chessPrice[5].normal, 'its price is the 5 阶 row');
+  assert.equal(m.gd.poolCopies(FOUR, ps.matchTierOf(FOUR)), m.gd.config.economy.poolCopies[5], 'and so is its copy cap');
+  assert.equal(m.gd.chessPrice(FOUR), m.gd.config.economy.chessPrice[4].normal, 'no tier ⇒ the record row (what a season caller reads)');
   m.dispose();
 
   // the 等阶 is PER PLAYER (the same operator may be filed at 5 阶 by one and 6 阶 by another), like the private pool
@@ -241,6 +243,95 @@ test('自选干员: 本局等阶按槽位走 —— 商店卡/手牌/侦查/结�
   assert.equal(h2.ps('p_1').matchTierOf(EARLY), 6, 'and at 6 阶 by P1 — never a function of the chess id alone');
   assert.deepEqual(h2.ps('p_0').freePickEntries().map((e) => [e.id, e.tier]), [[EARLY, 5]]);
   assert.deepEqual(h2.ps('p_1').freePickEntries().map((e) => [e.id, e.tier]), [[EARLY, 6]]);
+  h2.m.dispose();
+});
+
+test('自选干员: 价格 / 售价 / 份数预算也按槽位走 —— 同一位干员分属两名玩家的 5 阶 / 6 阶各按自己的行(用户 2026-10-04「都跟槽位走」)', () => {
+  // §23.6 gave the slot the 等阶 the player is shown; the user then closed the last seam: the price, the 出售 price and
+  // the copy budget follow the SAME number. Every 自选候选 carries `price: null` / `sellPrice: null` (§23.2), so the row
+  // is decided by the tier the accessor is handed — the slot for a pick, the record for a season operator. The shipped
+  // 5 / 6 资金 rows are BOTH 4 (which is why leaving this on the record looked harmless), so the per-player price
+  // difference is pinned on rows moved apart; the budget (8 vs 5) and the 4★ 预备干员 (3 → 4 资金, 16 → 8 份) differ
+  // with the real data.
+  const EARLY = proto6[0];   // 协防干员 — filed at the 5 阶 slot
+  const LATE = proto6[1];    // 炎 — filed at the 6 阶 slot
+  const FOUR = freeIds.find((id) => free[id].rarity === 4);   // 4★ 预备干员: 5 阶 only
+  const SZN = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 6).chessId;
+  const h = start({ 5: [EARLY, FOUR], 6: [LATE] });
+  const m = h.m, ps = h.ps('p_0');
+  const eco = m.gd.config.economy;
+  h.toPrep(1);
+
+  // 6★ filed at the 5 阶 slot: the 5 阶 row (4 资金 / cap 8), not its record's 6 阶 one (4 / 5)
+  assert.equal(m.gd.tierOf(EARLY), 6, 'fixture: the record is a 等阶-6 operator');
+  assert.equal(ps.matchTierOf(EARLY), 5, 'fixture: filed at the 5 阶 slot');
+  assert.equal(m.gd.chessPrice(EARLY, ps.matchTierOf(EARLY)), eco.chessPrice[5].normal, 'the 5 阶 price row');
+  assert.equal(m.gd.poolCopies(EARLY, ps.matchTierOf(EARLY)), eco.poolCopies[5], 'the 5 阶 copy cap');
+  assert.equal(ps.freePickEntries().find((e) => e.id === EARLY).left, eco.poolCopies[5], 'the per-player budget = the slot cap');
+
+  // what the shop charges: the slot the roll lands in writes the price (PlayerState._rollChessSlot)
+  ps.shop.level = 5;
+  const roll = m.pool.roll.bind(m.pool);
+  m.pool.roll = () => FOUR;
+  const fourSlot = ps._rollChessSlot();
+  m.pool.roll = roll;
+  assert.equal(fourSlot.basePrice, eco.chessPrice[5].normal, 'the shop charges the 5 阶 row (the 4★ record row is 3)');
+  // …and what 出售 pays / shows: the piece carries the row's price for the client's +N hint (facing.js, detailPanel.js)
+  const four = give(m, ps, FOUR, 'hand');
+  assert.equal(ps.pieceView(four).sellPrice, eco.chessSell[5].normal, 'the 出售 hint follows the piece\'s 等阶');
+  const before = ps.funds;
+  assert.equal(ps.sell(four.uid).ok, true, 'the piece sells');
+  assert.equal(ps.funds - before, eco.chessSell[5].normal, '…and the server pays the same row');
+
+  // the 4★ 预备干员 at its own 5 阶 slot: the 5 阶 row too (4 资金 / cap 8 — its record row is 3 / 16)
+  assert.equal(m.gd.tierOf(FOUR), 4, 'fixture: its record row differs from its slot row');
+  assert.equal(m.gd.chessPrice(FOUR, ps.matchTierOf(FOUR)), eco.chessPrice[5].normal);
+  assert.equal(m.gd.poolCopies(FOUR, ps.matchTierOf(FOUR)), eco.poolCopies[5]);
+  assert.equal(ps.freePickEntries().find((e) => e.id === FOUR).left, eco.poolCopies[5], '8 份, not the record row\'s 16');
+
+  // a season record: nothing moved for the season pool — no slot exists, so the record's own numbers answer (its
+  // `price` / `sellPrice` fields are the first thing gd reads, and the shared pool still uses its record tier)
+  assert.equal(m.gd.tierOf(SZN), 6);
+  assert.equal(ps.matchTierOf(SZN), m.gd.tierOf(SZN), 'a season operator has no slot: its match 等阶 is its record tier');
+  assert.equal(m.gd.chessPrice(SZN, ps.matchTierOf(SZN)), DATA.chess[SZN].price, 'its own price field still wins');
+  assert.equal(m.gd.sellPrice(SZN, ps.matchTierOf(SZN)), DATA.chess[SZN].sellPrice);
+  assert.equal(m.gd.poolCopies(SZN, ps.matchTierOf(SZN)), eco.poolCopies[6], 'the shared pool keeps its own cap');
+  assert.equal(m.pool.cap(SZN), eco.poolCopies[6], 'SharedPool.entries are built from the record, never a slot');
+  m.dispose();
+
+  // One operator, two players, one match: P0 files it at 5 阶, P1 at 6 阶 — each pays / is budgeted its own row.
+  const data = { ...DATA, config: { ...DATA.config, economy: { ...DATA.config.economy,
+    chessPrice: { ...DATA.config.economy.chessPrice, 6: { normal: 9, golden: 9 } },
+    chessSell: { ...DATA.config.economy.chessSell, 6: { normal: 7, golden: 7 } },
+    poolCopies: { ...DATA.config.economy.poolCopies, 6: 3 } } } };
+  const h2 = makeMatch({
+    mode: 'coop', difficulty: 'NORMAL', seed: SEED, fake: true, data,
+    seats: [
+      { seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, picks: { 5: [EARLY] } },
+      { seat: 1, playerId: 'p_1', name: 'P1', isBot: false, connected: true, picks: { 6: [EARLY] } },
+    ],
+  }).start();
+  const m2 = h2.m, a = h2.ps('p_0'), b = h2.ps('p_1');
+  h2.toPrep(1);
+  assert.equal(a.matchTierOf(EARLY), 5, 'P0 filed it at 5 阶');
+  assert.equal(b.matchTierOf(EARLY), 6, 'P1 filed it at 6 阶');
+  assert.equal(m2.gd.chessPrice(EARLY, a.matchTierOf(EARLY)), 4, 'the 5 阶 row');
+  assert.equal(m2.gd.chessPrice(EARLY, b.matchTierOf(EARLY)), 9, '…and the 6 阶 row: the same operator costs each player their own');
+  assert.equal(m2.gd.sellPrice(EARLY, a.matchTierOf(EARLY)), 1, 'P0 sells on the untouched 5 阶 row');
+  assert.equal(m2.gd.sellPrice(EARLY, b.matchTierOf(EARLY)), 7, 'P1 sells on the 6 阶 row: the 出售 price follows the same number');
+  assert.equal(a.freePickEntries().find((e) => e.id === EARLY).left, 8, 'P0\'s budget: the 5 阶 cap');
+  assert.equal(b.freePickEntries().find((e) => e.id === EARLY).left, 3, 'P1\'s budget: the 6 阶 cap');
+  for (const [who, level, want] of [[a, 5, 4], [b, 6, 9]]) {
+    who.shop.level = level;
+    const r2 = m2.pool.roll.bind(m2.pool);
+    m2.pool.roll = () => EARLY;
+    const s2 = who._rollChessSlot();
+    m2.pool.roll = r2;
+    assert.equal(s2.basePrice, want, `the shop charges ${who.playerId} their own row`);
+  }
+  // the season pool of the SAME match still reads the (patched) record rows — no player's slot leaked into it
+  assert.equal(m2.gd.poolCopies(SZN), 3, 'a season 6★ keeps cap 3 after the patch');
+  assert.equal(m2.pool.cap(SZN), 3, '…and so does the shared pool');
   h2.m.dispose();
 });
 
@@ -272,7 +363,8 @@ test('自选干员: 三合一晋升奖励 —— 5 级合出的 6★ 抽取里�
 test('自选干员: 份数预算 = 该阶级池上限 − 已拥有(精锐算 goldenCopies),买满即不再出现', () => {
   const h = start({ 5: [proto6[0]] });
   const ps = h.ps('p_0');
-  const cap = h.m.gd.poolCopies(proto6[0]);
+  // the cap of the 等阶 it has in this match (its 自由位置 slot — DESIGN §23.6), not of its record rarity
+  const cap = h.m.gd.poolCopies(proto6[0], ps.matchTierOf(proto6[0]));
   assert.ok(cap > 0, 'fixture: the base has a pool cap');
   assert.equal(ps.freePickEntries()[0].left, cap, 'nothing owned yet ⇒ the full cap');
   give(h.m, ps, proto6[0], 'hand');

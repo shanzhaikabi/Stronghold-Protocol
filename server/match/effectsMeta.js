@@ -562,7 +562,8 @@ export function makeCtx(m, ps, source, hook, ev = null) {
       if (slot == null) { ps.shop.slots[i] = null; ps.dirty(); return true; }
       const kind = slot.kind === 'item' ? 'item' : 'chess';
       if (kind === 'chess' ? !gd.chess(slot.id) : !gd.item(slot.id)) return false;
-      const basePrice = Number.isFinite(slot.price) ? Math.max(0, Math.trunc(slot.price)) : kind === 'chess' ? gd.chessPrice(slot.id) : gd.itemPrice(slot.id);
+      // its 等阶 for this match (a 自选干员's 自由位置 slot, DESIGN §23.6) — the same price the shop roll writes
+      const basePrice = Number.isFinite(slot.price) ? Math.max(0, Math.trunc(slot.price)) : kind === 'chess' ? gd.chessPrice(slot.id, ps.matchTierOf(slot.id)) : gd.itemPrice(slot.id);
       ps.shop.slots[i] = { kind, id: slot.id, basePrice, frozen: !!slot.frozen, sold: false };
       ps.dirty();
       return true;

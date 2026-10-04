@@ -220,7 +220,10 @@ export function underframeActions(ctx, uid) {
   if (p.kind === 'item') return itemDestroyable(ctx, uid) ? { retreat: false, sell: null, destroy: true } : null;
   if (p.kind === 'token') return onBoard ? { retreat: true, sell: null, destroy: false } : null;
   if (p.kind !== 'chess') return null;
-  const price = ctx.getChess?.(p.id)?.sellPrice;
+  // DESIGN §23.6: the piece carries what it sells for in THIS match (m.private Piece.sellPrice — the row of the 等阶 it
+  // has here, i.e. a 自选干员's 自由位置 slot, which its record cannot state); the record is the fallback for a piece a
+  // fixture / test built by hand
+  const price = Number.isFinite(p.sellPrice) ? p.sellPrice : ctx.getChess?.(p.id)?.sellPrice;
   return { retreat: onBoard, sell: Number.isFinite(price) ? price : 1, destroy: false };
 }
 

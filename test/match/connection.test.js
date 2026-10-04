@@ -62,7 +62,10 @@ test('m.private shape in PREP matches DESIGN §8.3 (pieces, slots, bonds, effect
   h.flushAll();
   const p2 = h.lastTo('p_0', 'm.private');
   const piece = p2.hand.find(Boolean);
-  assert.deepEqual(Object.keys(piece).sort(), ['count', 'golden', 'id', 'items', 'kind', 'ownerUid', 'tier', 'uid']);
+  // `sellPrice` = what 出售 pays for THIS match's piece (the row of its 等阶 — a 自选干员's 自由位置 slot, DESIGN §23.6;
+  // the client's 出售 +N hint reads it: ui/facing.js underframeActions, ui/detailPanel.js)
+  assert.deepEqual(Object.keys(piece).sort(), ['count', 'golden', 'id', 'items', 'kind', 'ownerUid', 'sellPrice', 'tier', 'uid']);
+  assert.equal(piece.sellPrice, h.m.gd.sellPrice(piece.id, h.m.gd.tierOf(piece.id)), 'a season chess: the record row');
   assert.equal(p2.funds, ps.funds);
   h.m.dispose();
 });

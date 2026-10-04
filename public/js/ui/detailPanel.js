@@ -378,7 +378,10 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const getItem = (id) => data.lookup('items', id);
   const bondIds = pieceBondIds(c, carried, getItem);
   const grantedIds = bondIds.filter((b) => !(Array.isArray(c.bonds) && c.bonds.includes(b)));
-  const sell = c.sellPrice ?? 1;
+  // DESIGN §23.6: what THIS match's piece sells for (m.private Piece.sellPrice — the row of the 等阶 it has here, which
+  // for a 自选干员 is its 自由位置 slot and its record cannot state). The record's own sellPrice is the fallback for a
+  // card with no own piece (a shop card, a teammate's unit — neither shows a 出售 button).
+  const sell = [piece?.sellPrice, c.sellPrice].find((v) => Number.isFinite(v)) ?? 1;
   const blocks = {};
   blocks.head = html`
     <div key="head" class="dhead">
@@ -664,7 +667,8 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
   const sellIt = async (piece, chess) => {
     const golden = piece.golden || chess?.isGolden;
     if (golden) {
-      const ok = await confirmDialog({ title: '出售精锐干员', text: `确定要出售精锐干员「${chess?.name || ''}」吗？出售后获得 ${chess?.sellPrice ?? 1} 资金。`, okText: '出售', danger: true });
+      const gain = [piece?.sellPrice, chess?.sellPrice].find((v) => Number.isFinite(v)) ?? 1;
+      const ok = await confirmDialog({ title: '出售精锐干员', text: `确定要出售精锐干员「${chess?.name || ''}」吗？出售后获得 ${gain} 资金。`, okText: '出售', danger: true });
       if (!ok) return;
     }
     onSell(piece);
