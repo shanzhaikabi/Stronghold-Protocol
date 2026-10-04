@@ -132,6 +132,22 @@ button.lo-free__slot:disabled { opacity: .5; cursor: default; }
 .lo-free__pick .lo-free__art { width: .56rem; height: .56rem; }
 .lo-free__meta { color: var(--text-lo); font-size: max(.13rem, 9px); }
 
+/* Short viewports (phone landscape, 844×390 and the like): the strip must not eat the detail panel's scroll port.
+   `.lo` is a fixed column flex, so every pixel the strip takes comes off `.lo-detail__body`; with the full strip that
+   port (151 px at 844×390) is shorter than one skill card (155–166 px) and the last option can no longer be brought
+   fully into view — what test/ui/loadout.e2e.test.js pins at 844×390 (the assertion is master's, the strip is ours).
+   The head collapses to one ellipsised line and the rows tighten: ~97 px → ~63 px, leaving the port ~185 px. */
+@media (max-height: 460px) {
+  .lo-free { padding: .04rem .36rem .05rem; gap: .03rem; }
+  .lo-free__head { gap: .1rem; }
+  .lo-free__hint { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: max(.13rem, 9px); }
+  .lo-free__count { font-size: max(.13rem, 9px); }
+  .lo-free__row { gap: .1rem; }
+  .lo-free__lvl { width: .38rem; font-size: max(.13rem, 9px); }
+  .lo-free__slot { min-width: 1.3rem; padding: .03rem .06rem .03rem .03rem; }
+  .lo-free__art { width: .34rem; height: .34rem; }
+}
+
 .lo-loading { flex: 1; display: flex; align-items: center; justify-content: center; gap: .14rem; color: var(--text-lo); font-size: max(.18rem, 12px); }
 
 /* ---- body layout -------------------------------------------------------------------------------------------------- */
