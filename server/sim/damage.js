@@ -176,13 +176,22 @@ export function leaderHitCancelled(battle, target, amount) {
   return true;
 }
 
-/** Absorb damage with shields on `target`. Returns the remaining amount. */
-export function absorbShields(battle, target, amount) {
+/**
+ * Absorb damage with shields on `target`. Returns the remaining amount.
+ *
+ * [port] PR #71 (SrC2O4, head c76a81f) — `damageType` + the typed shield tags: a buff tagged `physShield` only absorbs
+ * physics, one tagged `artsShield` only arts (夜莺 S3 / 傀影幻影 S1 of the 自选干员 kits). `damageType === null` (every
+ * pre-existing caller) keeps the old untyped behaviour. Our modification: the parenthesised conditions only — their
+ * `a && x || b && y` relied on `&&` binding tighter than `||`; same semantics, spelled out.
+ */
+export function absorbShields(battle, target, amount, damageType = null) {
   if (amount <= 0) return 0;
+  const blocked = (b) => (b.tags?.includes('physShield') && damageType !== 'phys') || (b.tags?.includes('artsShield') && damageType !== 'arts');
   let changed = false;
   let rest = amount;
   for (let i = 0; i < target.buffs.length && rest > 0; i++) {
     const b = target.buffs[i];
+    if (blocked(b)) continue;
     if (b.shieldHits > 0) {
       b.shieldHits--;
       rest = 0;
@@ -193,6 +202,7 @@ export function absorbShields(battle, target, amount) {
   }
   for (let i = 0; i < target.buffs.length && rest > 0; i++) {
     const b = target.buffs[i];
+    if (blocked(b)) continue;
     if (b.shield > 0) {
       const take = Math.min(b.shield, rest);
       b.shield -= take;
@@ -243,7 +253,7 @@ export function dealDamage(battle, source, target, dmgIn) {
   // recognise their own (tagged) damage — never re-create such a loss with a fresh loseHp.
   if (ts.flags.hitCount || ts.flags.hitCountArts) {
     const counts = !(ts.flags.hitCountArts && !ts.flags.hitCount && type === 'phys');
-    return applyHpLoss(battle, source, target, absorbShields(battle, target, counts ? 1 : 0), dmg);
+    return applyHpLoss(battle, source, target, absorbShields(battle, target, counts ? 1 : 0, dmg.type), dmg);
   }
   // 无来源 damage (element bursts) takes nothing from its source's stats; the source still gets the credit below
   const ss = source && source.s && !dmg.sourceless ? source.s : null;
@@ -263,7 +273,7 @@ export function dealDamage(battle, source, target, dmgIn) {
   // 限伤: a leader's hit of ≥ BOSS_HIT_LIMIT in a boss / hidden battle is cancelled before it reaches shields / HP — what
   // ran before it (the attack, its SP, `hit` hook effects, separate element 损伤) stays; nothing after it happens
   if (final > 0 && leaderHitCancelled(battle, target, final)) return 0;
-  final = absorbShields(battle, target, final);
+  final = absorbShields(battle, target, final, dmg.type);
   return applyHpLoss(battle, source, target, final, dmg);
 }
 

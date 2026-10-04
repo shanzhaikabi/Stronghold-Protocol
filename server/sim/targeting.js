@@ -112,6 +112,8 @@ const PRIORITY_FNS = {
   ranged: (e) => (e.base.rangeRadius > 0 && e.def?.applyWay !== 'MELEE' ? 0 : 1),
   lowestHp: (e) => e.hp,
   highestHp: (e) => -e.hp,
+  // [port] PR #71 (SrC2O4, head c76a81f) — 攻城手 siegesniper's "优先攻击重量最重的敌人"
+  heaviest: (e) => -(e.s.massLevel ?? 0),
   lowestHpRatio: (e) => e.hpRatio,
   highestAtk: (e) => -e.s.atk,
   boss: (e) => (e.isBoss ? 0 : 1),

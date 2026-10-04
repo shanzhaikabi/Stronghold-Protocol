@@ -30,10 +30,10 @@ test('every subProfessionId in the visible pool has a dedicated profile entry', 
   assert.ok(seen.size >= 50, `${seen.size} subprofessions`);
 });
 
-test('自选干员 (DESIGN §22) fight with their profession profile; the subprofessions that still lack one are listed', () => {
+test('自选干员 (DESIGN §22) fight with their profession profile; no pick is left on the generic profession profile', () => {
   // A 自选候选 resolves through the sim's DataSource like any chess. The authored SUB entries cover all 112 visible
-  // chess and 86 of the 93 free picks; the 5 subprofessions below have no dedicated entry yet, so those operators fall
-  // back to their profession's default profile (a fidelity gap, not a crash — stated here so it cannot grow silently).
+  // chess and every 自选候选: the five subprofessions this test used to pin (siegesniper / soulcaster / watchman /
+  // blessing / artsprotector, 7 picks) were ported from PR #71 (SrC2O4, head c76a81f) — see server/sim/professions.js.
   const ds = getDefaultSource();
   const freeIds = ds.chessIds().filter((id) => ds.rawChess(id)?.freePick === true);
   assert.ok(freeIds.length >= 90, `${freeIds.length} 自选候选 in the sim data`);
@@ -45,8 +45,8 @@ test('自选干员 (DESIGN §22) fight with their profession profile; the subpro
     if (!c.subProf) continue;
     if (!SUB[c.subProf]) { missing.add(c.subProf); withoutProfile.push(id); }
   }
-  assert.deepEqual([...missing].sort(), ['artsprotector', 'blessing', 'siegesniper', 'soulcaster', 'watchman']);
-  assert.ok(withoutProfile.length <= 8, `${withoutProfile.length} picks on the generic profession profile`);
+  assert.deepEqual([...missing].sort(), []);
+  assert.equal(withoutProfile.length, 0, `${withoutProfile.length} picks on the generic profession profile`);
 });
 
 test('every visible chess (normal & elite) fights in a real battle without errors', () => {
