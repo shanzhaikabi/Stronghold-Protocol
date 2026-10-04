@@ -1521,6 +1521,18 @@ export function spawnMapChar(battle, playerId, tokenId, { alias = null } = {}) {
 // registry
 
 const RAW_KITS = {
+  // [port] PR #71 (SrC2O4, head c76a81f): the summon pieces the 78 自选干员 kits drive themselves — the owner's kit
+  // applies the selected skill / stats on every deployment, so the piece carries no skill of its own. Every token here
+  // belongs to an operator of the 自选干员 roster (never to a season record), so nothing else changes.
+  token_10002_kalts_mon3tr: () => ({ skill: null }),
+  token_10005_mgllan_drone1: () => ({ skill: null, trait: { noAttack: true } }),
+  token_10005_mgllan_drone2: () => ({ skill: null, trait: { dmgType: 'arts' } }),
+  token_10005_mgllan_drone3: () => ({ skill: null, trait: { dmgType: 'phys', splashRadius: 1.1 } }),
+  token_10007_phatom_twin: () => ({ skill: null }), // owner applies its selected skill on each deployment
+  token_10003_cgbird_bird: () => ({ skill: null, trait: { noAttack: true }, install(b, u) {
+    onDeploy(b, u, () => b.addBuff(u, { key: 'nightingale:phantom', mods: { dodgePhys: 0.3, taunt: 1 } }));
+    b.every(1, () => { if (u.alive && u.deployed) b.loseHp(u, u.s.maxHp * 0.03, { source: u }); }, { owner: u });
+  } }),
   [TOKEN_IDS.healDrone]: healDrone,
   [TOKEN_IDS.curseDoll]: curseDoll,
   [TOKEN_IDS.obelisk]: obelisk,

@@ -1169,8 +1169,44 @@ test('火陈 S3 天喟: 每次攻击对最多3名地面敌人 3 次 165% 法术 
   assert.equal(per.size, Math.floor(b['attack@max_target']), '最多3名地面敌人');
   for (const [, n] of per) assert.equal(n, 3, '3 次 per attack');
   assert.equal(atk.length, 3 * 3, '3 enemies × 3 instances in ONE attack');
-  for (const c of atk) { approx(c.amount, u.s.atk * b['attack@atk_scale'], '165 % ATK per instance'); assert.equal(c.type, 'arts', '法术伤害'); }
+  for (const c of atk) { approx(c.amount, u.s.atk * b['attack@atk_scale'], '165 % ATK per instance'); assert.equal(c.type, 'phys', '弱点伤害 vs a 0-DEF / 0-RES dummy (see the 形意洞照 test below)'); }
   assert.equal(all.some((c) => c.target.isFlying), false, '地面敌人: the flyer takes no attack (the 剑气 is what hits flyers)');
+  done(h);
+});
+
+// 火陈's two talents, ported from PR #71 (SrC2O4, head c76a81f — kits/recruitsSpecial.js `chen3`): 形意洞照
+// `{atk:0.13, attack_speed:13}` + 攻击变为弱点伤害, 寒暑觉知 `{stack_time:6, heal_atk_scale_min:50,
+// heal_atk_scale_max:201}`. Our own kit keeps its S3 剑气长龙 (the ported kit's S3 is one instantaneous AoE) but takes
+// both talents — see the entry in kits/freePicks.js.
+test('火陈 形意洞照: 攻击力+13 % / 攻击速度+13, and 攻击变为弱点伤害 picks the target\'s weaker side', () => {
+  // 弱点伤害 (the ported rule): the hit's damage type is 法术 when the target's DEF exceeds this attack's own ATK × RES %
+  // — i.e. when physics would be mitigated more than arts — and 物理 otherwise
+  for (const [key, def, res, want] of [['e_soft', 0, 0, 'phys'], ['e_hard', 500, 0, 'arts']]) {
+    const h = battle([{ chessId: CHEN, row: 10, col: 4, skillIndex: 2, carryState: READY }], {
+      recs: { [key]: enemyRec({ key, hp: 1e7, speed: 0, def, res }) },
+      spawns: [{ key, pos: [10, 5] }],   // her melee tile: the DEFAULT trigger needs an enemy in her own range
+    });
+    h.step();
+    const u = h.unit(CHEN);
+    assert.equal(u.s.atk, u.base.atk * 1.13, '形意洞照 攻击力+13%');
+    assert.equal(u.s.aspd, u.base.aspd + 13, '形意洞照 攻击速度+13');
+    assert.ok(h.runUntil(() => dealt(h, u, (c) => c.dmg.isAttack).length > 0, 20), 'she attacks');
+    assert.equal(dealt(h, u, (c) => c.dmg.isAttack)[0].type, want, `${key}: def ${def} / res ${res}`);
+    done(h);
+  }
+});
+
+test('火陈 寒暑觉知: after 6 s without damage, heals ATK × 50–201 % and gains one hit-shield', () => {
+  const h = battle([{ chessId: CHEN, row: 10, col: 4, skillIndex: 2, carryState: READY }], { timeLimit: 30 });
+  h.step();
+  const u = h.unit(CHEN);
+  u.hp = u.s.maxHp * 0.5;
+  const t1 = D(CHEN, 2).talents[1].bb;
+  assert.ok(h.runUntil(() => heals(h, u, (c) => c.target === u).length > 0, 12), '未受到伤害时每6秒治疗自身');
+  const heal = heals(h, u, (c) => c.target === u)[0];
+  const lo = (u.s.atk * t1.heal_atk_scale_min) / 100, hi = (u.s.atk * t1.heal_atk_scale_max) / 100;
+  assert.ok(heal.amount >= lo - 1e-6 && heal.amount <= hi + 1e-6, `${heal.amount} ∈ [50 %, 201 %] of ATK`);
+  assert.ok(u.findBuff('chen3:evade')?.shieldHits === 1, '闪避下次物理与法术攻击 (one hit-shield)');
   done(h);
 });
 

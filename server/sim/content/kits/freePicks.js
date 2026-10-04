@@ -1013,15 +1013,28 @@ export default {
   //
   // Only S3 is authored here: it is the skill the user reported ("火陈的火龙现在也没有实现") and the default one, so the
   // 剑气长龙 is what a player sees. S1 / S2 have no special mechanic the generic kit cannot express, so they keep falling
-  // back to it (`selectSkillSpec`: no `skills[skchr_chen3_1|2]` entry ⇒ the generic spec of the selected skill), and the
-  // two TALENTS stay unauthored like those of every other pick the generic kit serves — 78 of the 93 have none (only the
-  // nine 原型干员 and the six 预备干员's `reserveKit` install one; DESIGN §21.11). Both gaps are recorded there rather than
-  // half-modelled here: 形意洞照's 弱点伤害 (the attack deals whichever of physical / arts is higher for the target) has
-  // no engine support anywhere, and modelling it for one operator alone would silently make 火陈 the only pick whose
-  // talent exists.
+  // back to it (`selectSkillSpec`: no `skills[skchr_chen3_1|2]` entry ⇒ the generic spec of the selected skill).
+  //
+  // [port] PR #71 (SrC2O4, head c76a81f) — the two TALENTS are now authored here, from that PR's `chen3` kit
+  // (kits/recruitsSpecial.js), which our own kit fully replaces for this record (its `chess_free_char_1050_chen3` key is
+  // tried before the ported charId key, content/index.js kitFn):
+  //   形意洞照 `{atk:0.13, attack_speed:13}` — a persistent 攻击力+13 % / 攻击速度+13, plus 攻击变为弱点伤害: the hit's
+  //     damage type becomes whichever of 物理 / 法术 the struck target is weaker to, read as `target DEF > ATK × RES%`
+  //     (the ported rule; PRTS: "攻击时，若目标防御力高于自身攻击力×法术抗性%，则造成法术伤害，否则造成物理伤害" — the
+  //     engine's phys/arts split is `mitigate` = `damage × (1 − def/100)` vs `× (1 − res/100)`, so that comparison IS the
+  //     weaker side; our earlier note that 弱点伤害 "has no engine support anywhere" was wrong — a `hit` handler can set
+  //     `dmg.type`, exactly as professions.js `artsprotector` does).
+  //   寒暑觉知 `{stack_time:6, heal_atk_scale_min:50, heal_atk_scale_max:201}` — every 6 s without having taken damage,
+  //     heal self for ATK × a random 50 %–201 % (the record's own numbers; the description says 50 %~200 %) and gain one
+  //     hit-shield as "闪避下次物理与法术攻击" (the engine has no typed dodgeHits: `shieldHits: 1` absorbs one hit of any
+  //     type — the ported kit's reading).
+  // Their S3 is NOT taken: it is one instantaneous AoE over every enemy in range (`max(target.hp × hp_ratio,
+  // ATK × projectile_min_atk_scale)`), while our `swordQi` flies a real 1.5 tile/s line and damages each enemy it passes
+  // once — described in the file header and pinned by test/content/kits_freePicks.test.js.
   chess_free_char_1050_chen3: (bb, chess, def) => {
     const S3 = 'skchr_chen3_3';
     const g = gridOf(def);
+    const t0 = tbb(def, 0), t1 = tbb(def, 1);   // 形意洞照 / 寒暑觉知
     return {
       skills: alt(def, {
         [S3]: () => ({
@@ -1035,6 +1048,39 @@ export default {
           onStart({ battle, unit }) { swordQi(battle, unit, bb); },
         }),
       }),
+      talents: [
+        {
+          talentIndex: 0,
+          talentName: '形意洞照',
+          install(b, u) {
+            statBuff(b, u, 'chen3:t0', { atkPct: num(t0.atk), aspd: num(t0.attack_speed) });
+            b.on('hit', (c) => {
+              if (c.source !== u || !c.dmg?.isAttack || !c.target?.s) return;
+              c.dmg.type = c.target.s.def > (u.s.atk * c.target.s.res) / 100 ? 'arts' : 'phys';
+            }, { owner: u });
+          },
+        },
+        {
+          talentIndex: 1,
+          talentName: '寒暑觉知',
+          install(b, u) {
+            const iv = num(t1.stack_time, 6);
+            let last = 0;
+            b.on('damaged', (c) => { if (c.target === u && c.amount > 0) last = b.time; }, { owner: u });
+            whileDeployed(b, u, iv, () => {
+              if (b.time - last < iv) return;
+              b.heal(u, u, (u.s.atk * (num(t1.heal_atk_scale_min, 50) + b.rng() * (num(t1.heal_atk_scale_max, 200) - num(t1.heal_atk_scale_min, 50)))) / 100, { self: true });
+              b.addBuff(u, { key: 'chen3:evade', shieldHits: 1 });
+            });
+          },
+        },
+      ],
+      // the research note (tools/talent-plan.mjs, docs/research/15-generic-talents.json) reads this plan: both talents
+      // ARE installed here, by the kit — the generic translator has no rule for either blackboard
+      talentPlan: [
+        { index: 0, name: '形意洞照', keys: Object.keys(t0), status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: 'kits/freePicks.js installs it (ported from PR #71 c76a81f)' },
+        { index: 1, name: '寒暑觉知', keys: Object.keys(t1), status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: 'kits/freePicks.js installs it (ported from PR #71 c76a81f)', drops: ['“闪避下次物理与法术攻击” uses the engine\'s untyped `shieldHits` (one hit of any type); the random heal uses the blackboard\'s 201 %, the description says 200 %'] },
+      ],
     };
   },
 

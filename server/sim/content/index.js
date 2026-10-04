@@ -18,8 +18,18 @@
 //   def; summon pieces follow their owner (an inline `def` of a token entry is kept). Summons spawned AFTER the start
 //   are resolved by Battle (getToken(id, owner.defId, owner.def.loadout)), not here.
 // registerAllMeta(registry) — calls each domain module's registerMeta(registry) (prep side, server boot).
+//
+// [port] PR #71 by SrC2O4 — 增加六星自选功能 <https://github.com/sganggs/Stronghold-Protocol/pull/71>, head c76a81f:
+//   the 78 per-operator 自选干员 kits (kits/recruits{Classic,Tactics,Combat,Summons,Special}.js) are registered under
+//   the operator's charId, so `kitFn` gained upstream's `raw.kitBaseId` and `def.charId` fallbacks, and a kit of that
+//   registry that authors no `talents` receives the installs of our own talent translator (content/genericTalents.js):
+//   their kit object has no `talents` key, and `selectSkillSpec` returning it early would otherwise stop the translator
+//   from running for the records it covers today. Our modification: those two lookups + the wrapper; the kits
+//   themselves and their spec seeding live in kits/recruitSupport.js (see its header).
 
 import { genericKit } from './generic.js';
+import { translateTalents } from './genericTalents.js';
+import { KIT_TALENTS, KIT_TALENT_NOTE } from './kits/recruitTalents.js';
 import { withUnitLoadouts } from '../simdata.js';
 
 // Content files are loaded with guarded dynamic imports: a module that fails to load (syntax error, throwing
@@ -37,14 +47,79 @@ const TIERS = await Promise.all([1, 2, 3, 4, 5, 6].map((t) => safeImport(`./kits
 // 自选干员 of 自由位置 (DESIGN §22): the hand-authored kits of the 6★ 原型干员 batch (data/freePicks.json records are
 // keyed by their own chess id, so they never collide with a tier module's `chess_char_N_NN_a` keys)
 const FREE_PICKS = await safeImport('./kits/freePicks.js');
+// [port] PR #71 (SrC2O4, head c76a81f): the 78 per-operator kits of the roster, keyed by the operator's charId. Our own
+// kits/freePicks.js wins for 火陈 / 望 (its `chess_free_<charId>` key is tried first) — see those entries.
+const RECRUIT_MODULES = ['Classic', 'Tactics', 'Combat', 'Summons', 'Special'];
+const RECRUITS = await Promise.all(RECRUIT_MODULES.map((n) => safeImport(`./kits/recruits${n}.js`)));
+const RECRUIT_KITS = withGenericTalents(Object.assign({}, ...RECRUITS.map((m) => (m && m.default && typeof m.default === 'object' ? m.default : {}))));
+/**
+ * [port] PR #71's 78 kits (`charId` → kit function, the `withGenericTalents` wrappers): exported so a tool can tell a
+ * ported kit from a hand-authored one of this project (tools/talent-plan.mjs labels the rows of the talent audit).
+ */
+export const PORTED_KITS = Object.freeze(RECRUIT_KITS);
 const DOMAIN_NAMES = ['tokens', 'devices', 'enemies', 'bosses', 'bonds', 'garrisons', 'items', 'bands', 'choices'];
 const DOMAINS = await Promise.all(DOMAIN_NAMES.map((n) => safeImport(`./${n}.js`)));
 const tokens = DOMAINS[0];
 
-/** Merged kit registry: baseChessId → (bb, chess, def) => Kit */
+/**
+ * [port] PR #71: a kit of the recruit registry authors a skill (and sometimes a trait / an install) but no `talents` —
+ * upstream's data model carried them in the recruit's own record. Ours does not: the generic talent translator has to
+ * keep running for these records (docs/research/15-generic-talents.json, test/content/generic_talents.test.js), else
+ * the records would lose the talent installs they have today. A kit that authors its own `talents` (ours in
+ * kits/freePicks.js, every tier kit) is returned untouched.
+ *
+ * [our modification — GPL §5] The translator's install is dropped for the (charId, talentIndex) pairs of
+ * kits/recruitTalents.js KIT_TALENTS — talents the ported kit implements itself, where merging would install the same
+ * talent twice (measured: 艾雅法拉 炎息 +44 % instead of +22 %, 灰烬 突击手 17 SP twice). Those rows are reported as
+ * `installed-by-kit`, the status genericTalents.js already uses for its thin WRAPPER_KITS.
+ */
+function withGenericTalents(reg) {
+  const out = {};
+  for (const [id, f] of Object.entries(reg)) {
+    if (typeof f !== 'function') { out[id] = f; continue; }
+    out[id] = (bb, raw, def) => {
+      const k = f(bb, raw, def);
+      if (!k || typeof k !== 'object' || Array.isArray(k.talents)) return k;
+      try {
+        const { installs, report } = translateTalents(def ?? raw, raw);
+        const own = new Set(KIT_TALENTS[def?.charId] ?? []);
+        return {
+          ...k,
+          talents: installs.filter((i) => !own.has(i.talentIndex)),
+          talentPlan: report.map((r) => (own.has(r.index)
+            ? { ...r, status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: KIT_TALENT_NOTE, drops: [] }
+            : r)),
+        };
+      } catch {
+        return { ...k, talents: [] };
+      }
+    };
+  }
+  return out;
+}
+
+/** Merged kit registry: baseChessId (or charId, [port] PR #71) → (bb, chess, def) => Kit */
 export const KITS = Object.freeze(Object.assign({},
   ...TIERS.map((m) => (m && m.default && typeof m.default === 'object' ? m.default : {})),
-  FREE_PICKS && FREE_PICKS.default && typeof FREE_PICKS.default === 'object' ? FREE_PICKS.default : {}));
+  FREE_PICKS && FREE_PICKS.default && typeof FREE_PICKS.default === 'object' ? FREE_PICKS.default : {},
+  RECRUIT_KITS));
+
+/**
+ * The kit function of a def: `def.baseId` → `def.id` → the suffix-less id (DESIGN §5.6's `chess_char_1_01` and
+ * data/SIM.md's `…_a` are both accepted) → [port] PR #71's `raw.kitBaseId` (upstream's "the record this recruit was
+ * generated from") → [port] `def.charId`, how the 78 recruit kits are keyed. Null when no key holds a function.
+ * @param {object|null} def normalised def (its `raw` is used for `kitBaseId`)
+ * @param {object} kits registry (defaults to KITS)
+ */
+export function kitFn(def, kits = KITS) {
+  if (!def) return null;
+  const raw = def.raw ?? def;
+  const bare = String(def.baseId ?? def.id ?? '').replace(/_[ab]$/, '');
+  for (const k of [def.baseId, def.id, bare, raw && raw.kitBaseId, def.charId]) {
+    if (k && typeof kits?.[k] === 'function') return kits[k];
+  }
+  return null;
+}
 
 /** Domain modules in install order: tokens, devices, enemies, bosses, bonds, garrisons, items, bands, choices. */
 export const MODULES = Object.freeze(DOMAIN_NAMES.map((n, i) => [n, DOMAINS[i]]));
@@ -66,10 +141,7 @@ export function setupUnitKit(battle, unit, mode = 'full') {
   if (unit.kind !== 'op') return {};
   const injected = battle.opts && battle.opts.kits;
   if (mode === 'full' || injected) {
-    // DESIGN §5.6's example keys kits by the suffix-less id (`chess_char_1_01`), data/SIM.md by baseId (`…_a`): accept both
-    const bare = String(def.baseId ?? def.id ?? '').replace(/_[ab]$/, '');
-    const pick = (reg) => reg?.[def.baseId] ?? reg?.[def.id] ?? reg?.[bare];
-    const f = pick(injected) ?? (mode === 'full' ? pick(KITS) : undefined);
+    const f = kitFn(def, injected) ?? (mode === 'full' ? kitFn(def, KITS) : null);
     if (typeof f === 'function') {
       try {
         const k = f(bb, raw, def);
@@ -177,8 +249,7 @@ export function selectSkillSpec(kit, bb, raw, def) {
  * @returns {'skills'|'kit'|'generic'|'none'} where the spec comes from ('none' = no kit function at all)
  */
 export function skillSpecSource(def, kits = KITS) {
-  const bare = String(def?.baseId ?? def?.id ?? '').replace(/_[ab]$/, '');
-  const f = kits?.[def?.baseId] ?? kits?.[def?.id] ?? kits?.[bare];
+  const f = kitFn(def, kits);
   if (typeof f !== 'function') return 'none';
   let k = null;
   try { k = f(def.skill?.bb ?? {}, def.raw ?? def, def); } catch { return 'generic'; }

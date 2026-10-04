@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { makeBattle, enemyRec, checkInvariants, hashOf } from '../helpers/battleHarness.js';
 import { DataSource, getDefaultSource } from '../../server/sim/simdata.js';
-import { KITS } from '../../server/sim/content/index.js';
+import { KITS, PORTED_KITS, kitFn } from '../../server/sim/content/index.js';
 import { translateTalents, translateTalent, declaredTalents, WRAPPER_KITS } from '../../server/sim/content/genericTalents.js';
 import { buildDoc } from '../../tools/talent-plan.mjs';
 
@@ -37,14 +37,23 @@ function solo(id, o = {}) {
 const done = (h) => { checkInvariants(h.b); assert.equal(h.b.errors.length, 0, JSON.stringify(h.b.errors[0])); };
 const approx = (a, b, msg = '', rel = 1e-6) => assert.ok(Math.abs(a - b) <= rel * Math.max(1, Math.abs(b)), `${msg}: ${a} ≈ ${b}`);
 
-// The 76 records that resolve to the GENERIC kit (no KITS entry) — the class the audit measured as "152 declared
-// talents, 0 installed". Pinned so a change in either direction has to be deliberate.
-const KITLESS = Object.keys(FREE).filter((id) => typeof KITS[id] !== 'function' && !WRAPPER_KITS.has(id));
+// The 76 records a ported PR #71 kit serves — the class this audit measured as "152 declared talents, 0 installed"
+// before the talent half existed. Before the port the class was "no KITS entry for the chess id"; the port registers
+// those kits under the operator's charId (content/index.js kitFn), so the class is now defined through the def.
+// Pinned so a change in either direction has to be deliberate.
+const PORTED = Object.keys(FREE).filter((id) => {
+  const def = D(id);
+  const f = kitFn(def);
+  return typeof f === 'function' && PORTED_KITS[def.charId] === f;
+});
+const KITLESS = PORTED; // the translator's own wording in the assertions and docs below
+/** True when the record is served by a ported PR #71 kit. */
+const isPorted = (id) => PORTED_KITS[D(id).charId] === kitFn(D(id));
 
 // =================================================================================================================
 // the choke point
 
-test('genericTalents: every kit-less 自选干员 talent is either installed or explicitly reported (never dropped)', () => {
+test('genericTalents: every talent of the 76 records the ported kits serve is installed or explicitly reported (never dropped)', () => {
   let declared = 0, installed = 0, records = 0;
   for (const id of KITLESS) {
     const def = D(id);
@@ -59,14 +68,14 @@ test('genericTalents: every kit-less 自选干员 talent is either installed or 
     installed += installs.length;
     if (installs.length) records++;
   }
-  assert.equal(KITLESS.length, 76, 'the kit-less class of the audit');
+  assert.equal(KITLESS.length, 76, 'the class of the audit (a ported PR #71 kit serves these records)');
   assert.equal(declared, 152, 'the 152 talents the audit measured as lost');
-  assert.equal(installed, 27, 'installed by the translator (the rest is in docs/research/15-generic-talents.json)');
-  assert.equal(records, 21, 'records that now fight with at least one declared talent (was 0)');
+  assert.equal(installed, 27, 'expressed by the translator in isolation (merged in only where the kit does not do it)');
+  assert.equal(records, 21, 'records whose translator expresses at least one declared talent (was 0)');
 });
 
-test('genericTalents: a real battle installs them (the audit baseline was 24 talents on 15/93 picks)', () => {
-  let pickInstalled = 0, pickRecords = 0, zero = 0;
+test('genericTalents: a real battle merges only the hooks the serving kit does not implement itself', () => {
+  let pickInstalled = 0, pickRecords = 0, zero = 0, portedHooks = 0, portedRecords = 0;
   for (const [id, rec] of Object.entries(FREE)) {
     const h = solo(id, { timeLimit: 1, enemies: [] });
     h.step();
@@ -77,11 +86,25 @@ test('genericTalents: a real battle installs them (the audit baseline was 24 tal
     if (n) pickRecords++;
     const declared = (rec.talents ?? []).filter((t) => t && !t.hidden && t.index !== -1).length;
     if (declared && !n) zero++;
+    // A record served by a ported PR #71 kit implements every talent this translator can express itself (measured per
+    // talent, server/sim/content/kits/recruitTalents.js), so the translator merges no hook into it and reports those
+    // talents as `installed-by-kit` instead of installing them a second time.
+    if (isPorted(id)) {
+      portedRecords++;
+      portedHooks += n;
+      // no double install: every talent row of a ported record is either reported as the kit's own work or reported as
+      // unexpressed by this rules-based audit — never as a translator hook merged on top of the kit
+      for (const t of u.kit.talentPlan || []) {
+        assert.ok(['installed-by-kit', 'unexpressed'].includes(t.status), `${id}/${t.name}: ${t.status}`);
+      }
+    }
     done(h);
   }
-  assert.equal(pickInstalled, 51, 'picks: installed talents (24 before the change, 180 declared)');
-  assert.equal(pickRecords, 36, 'picks with ≥1 installed talent (15 before the change)');
-  assert.equal(zero, 57, 'picks that declare talents and still install none (78 before the change)');
+  assert.equal(pickInstalled, 26, 'picks: merged translator hooks (51 before the port; 180 talents are declared)');
+  assert.equal(pickRecords, 16, 'picks with ≥1 merged hook (36 before the port)');
+  assert.equal(zero, 77, 'picks that declare talents and merge none — the 76 ported ones, plus 望 (talents: [])');
+  assert.equal(portedRecords, 76);
+  assert.equal(portedHooks, 0, 'a ported kit keeps its own talent implementations; the translator only reports them');
 });
 
 test('genericTalents: the six 4★ 预备干员 keep exactly their one wrapper talent (no double install)', () => {
@@ -108,12 +131,16 @@ test('灰烬: 辅助装备 `stun` and 突击手 `sp`/`runtime_cost` — the numb
   assert.deepEqual(assault.bb, { runtime_cost: -5, sp: 17 });
 
   // 辅助装备: "部署后立即对攻击范围内一个敌人投掷闪光弹，使其和周围敌人晕眩 N 秒"
+  // Since the PR #71 kits serve this record (kits/recruitTalents.js maps 灰烬 onto the ported kit), the flash is the
+  // KIT's deploy handler; like the ported kits' own `enemies()` helper it reads the battle's enemy tile index, so the
+  // probe enemy needs one tick on the field before the redeployment (a real battle indexes every tick).
   const still = () => enemyRec({ key: 'e_still', hp: 1e7, speed: 0, atk: 0 });
   const h = solo(ASH, { defs: { chess: { [ASH]: FREE[ASH] }, enemies: { e_still: still() } }, hooks: ['deploy', 'statusApplied'] });
   h.step();
   const u = h.unit(ASH);
   const e = h.spawn('e_still', { pos: [10, 6] });          // inside the sniper's range, in front of her
   assert.ok(e, 'the enemy spawned');
+  h.step();
   h.b.retreat(u);
   assert.ok(h.b.redeploy(u, { free: true }), 'the unit is redeployed (a `deploy` event)');
   const stuns = h.hooksOf('statusApplied').filter((c) => c.status === 'stun' && c.target === e);
@@ -142,7 +169,14 @@ test('黑: 破甲箭头 `atk_scale` / `def` / `prob` / `defdown_duration` — th
       hooks: ['hit', 'damaged'], captureNoisy: true,
     });
     h.step();
-    h.b.rng.chance = (p) => { assert.ok(p > 0 && p <= 1, 'a probability roll'); return hit; };
+    // the ported kit (kits/recruitsCombat.js `shwaz`) rolls its 破甲箭头 proc with `battle.rng()` itself instead of
+    // `rng.chance(p)`: stub the callable rng so the decision is deterministic (0 ⇒ proc, 0.99 ⇒ none) while the rest of
+    // the engine keeps a working rng
+    const orig = h.b.rng;
+    h.b.rng = Object.assign(() => (hit ? 0 : 0.99), {
+      chance: (p) => { assert.ok(p > 0 && p <= 1, 'a probability roll'); return hit; },
+      int: orig.int, range: orig.range, pick: orig.pick, shuffle: orig.shuffle,
+    });
     const u = h.unit(SHAW);
     const e = h.spawn('e_still', { pos: [10, 6] });
     h.runUntil(() => h.hooksOf('damaged').some((c) => c.source === u && c.dmg?.isAttack), 10);
@@ -151,16 +185,18 @@ test('黑: 破甲箭头 `atk_scale` / `def` / `prob` / `defdown_duration` — th
   const on = build(true);
   const hit = on.h.hooksOf('hit').filter((c) => c.source === on.u && c.dmg?.isAttack).pop();
   assert.ok(hit, 'the attack landed');
-  approx(hit.dmg.mul, t.bb.atk_scale, '攻击力提升至160%');
+  const off = build(false);
+  const miss = off.h.hooksOf('hit').filter((c) => c.source === off.u && c.dmg?.isAttack).pop();
+  assert.ok(miss, 'the attack landed');
+  // the ported kit multiplies the damage INSTANCE's `amount` (`c.dmg.amount *= atk_scale`, recruitsCombat.js `shwaz`)
+  // where the generic translator used the global `mul`: the pinned contract is the ratio of the two runs
+  approx(hit.dmg.amount / miss.dmg.amount, t.bb.atk_scale, '攻击力提升至160%');
   const down = (on.e.buffs || []).find((b) => b.mods && b.mods.defPct === t.bb.def);
   assert.ok(down, '命中的目标防御力下降20%');
   assert.equal(down.duration, t.bb.defdown_duration, '持续5秒');
   done(on.h);
 
-  const off = build(false);
-  const miss = off.h.hooksOf('hit').filter((c) => c.source === off.u && c.dmg?.isAttack).pop();
-  assert.equal(miss.dmg.mul, 1, '概率未触发时不加成');
-  assert.equal((off.e.buffs || []).some((b) => b.mods && b.mods.defPct === t.bb.def), false, '也不破甲');
+  assert.equal((off.e.buffs || []).some((b) => b.mods && b.mods.defPct === t.bb.def), false, '概率未触发时不破甲');
   done(off.h);
 });
 
@@ -250,7 +286,7 @@ test('docs/research/15-generic-talents.json matches the shipping translator (nod
   assert.deepEqual(committed, live, 'the research note is generated — regenerate it with node tools/talent-plan.mjs');
   assert.equal(committed.records.length, 93, 'one row per 自选干员 record');
   const unexpressed = committed.records.flatMap((r) => r.talents).filter((t) => t.status === 'unexpressed');
-  assert.equal(unexpressed.length, 139, 'each lists its record, name, blackboard and why it is not expressed');
+  assert.equal(unexpressed.length, 138, 'each lists its record, name, blackboard and why it is not expressed');
   for (const t of unexpressed) assert.ok(t.reason && t.desc !== undefined, `${t.name}: reason + description`);
   for (const r of committed.records) {
     for (const t of r.talents) {
@@ -258,4 +294,10 @@ test('docs/research/15-generic-talents.json matches the shipping translator (nod
       assert.equal(t.drops, undefined, `${r.chessId}/${t.name}: a fully installed row drops nothing`);
     }
   }
+  // since the PR #71 kits were ported every record resolves to a hand-authored kit, and the 76 records a ported kit
+  // serves keep every talent that translator can express inside that kit (kits/recruitTalents.js) — no merged hook
+  const picks = committed.summary.picks;
+  assert.deepEqual(picks.byKit, { 'ported(PR #71)': 76, 'hand-authored': 11, 'wrapper(genericKit + the kit installs the talent itself)': 6 });
+  assert.deepEqual(picks.ported_kit_records, { records: 76, declared: 152, translator_installs: 0, installed_by_kit: 27, records_with_translator_installs: 0 });
+  assert.equal(picks.generic_kit_records.records, 0, 'no 自选干员 record is kit-less any more');
 });

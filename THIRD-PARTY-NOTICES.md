@@ -29,6 +29,15 @@ integration is covered by the Spine Editor License Agreement — read it before 
 at all, this project grants an additional permission under GPL-3.0 section 7 for linking with the Spine Runtimes (see
 [NOTICE.md](NOTICE.md)).
 
+## Contributed code
+
+Code contributed to this project by others is **not** a third-party component: it arrives under the project's own
+licence (GPL-3.0-or-later, no CLA ⇒ inbound = outbound) and is credited here for provenance.
+
+| Contribution | Author | Licence | Where it is used | Our modifications |
+|---|---|---|---|---|
+| [PR #71 “增加六星自选功能”](https://github.com/sganggs/Stronghold-Protocol/pull/71), head `c76a81f` (feature commit `e0d1a15`) | **SrC2O4** | GPL-3.0-or-later (same as this project) | `server/sim/content/kits/recruits{Classic,Tactics,Combat,Summons,Special}.js` + `recruitSupport.js` (the 78 自选干员 kits), `server/sim/professions.js` (5 subprofessions), `server/sim/targeting.js` (`heaviest`), `server/sim/damage.js` (typed shields), `server/sim/content/tokens.js` (6 summon kits) | marked in place with `[port] PR #71 … c76a81f` / `[our modification — GPL §5]`: their skill specs are seeded from our decoder (`kits/recruitSupport.js`), the `talents` our translator installs are merged and de-duplicated (`kits/recruitTalents.js`), 火陈 / 望 keep our own kits, 灰烬 突击手 gained the `runtime_cost` line, and their `instant()`/`next()` call sites pass the kit context. See the port's commit message and `docs/research/15-generic-talents.json`. |
+
 ## Fonts
 
 | Font | Licence | How it gets here |

@@ -2,10 +2,10 @@
  "source": "server/sim/content/genericTalents.js (the talent half of the generic kit) — measured by a real makeBattle battle per record, the audit method of D:\\projects\\_scratch\\sp-audit",
  "checkedAt": "2026-10-04",
  "how": {
-  "choke_point": "server/sim/content/generic.js genericKit() used to return talents: [] and Battle.js installs u.kit.talents only, so a kit-less record (76 of the 93 自选干员 records, plus 火陈 / 望 whose kits author a skill but no talent) fought without any declared talent, and the module talentChanges the resolved def already carries were dead with them.",
+  "choke_point": "server/sim/content/generic.js genericKit() used to return talents: [] and Battle.js installs u.kit.talents only, so a kit-less record (76 of the 93 自选干员 records, plus 火陈 / 望 whose kits author a skill but no talent) fought without any declared talent, and the module talentChanges the resolved def already carries were dead with them. Since the 78 自选干员 kits of PR #71 (SrC2O4, head c76a81f) were ported, no record is kit-less any more: those 76 records are served by a ported kit, which authors no `talents` key either, so content/index.js `withGenericTalents` merges this translator's installs into it and drops the ones the kit implements itself (kits/recruitTalents.js).",
   "blackboard": "def.talents[i].bb of the COMPOSED record (def.raw): shared/loadoutRecord.js composeTalents folds a module's talentChanges into the base talents by talentIndex, so the module numbers are already in the bb the translator reads.",
   "install": "each expressed talent becomes a Kit talent hook { install(battle, unit) } (docs/SIM.md §7.2); nothing is guessed — a talent whose blackboard or wording the rules do not cover is reported here and left uninstalled.",
-  "drops": "status: installed (fully) | partial (the listed `drops` are NOT expressed) | unexpressed (nothing is) | installed-by-kit (the record's hand-authored wrapper kit installs it itself)",
+  "drops": "status: installed (fully) | partial (the listed `drops` are NOT expressed) | unexpressed (nothing is) | installed-by-kit (the record's hand-authored kit — our kits/freePicks.js wrapper, or a ported PR #71 kit — installs it itself)",
   "rules": {
    "selfStat": "unconditional self stat keys → a persistent stat buff (atk/def/max_hp/attack_speed/base_attack_time/magic_resistance/block_cnt/taunt_level/damage_resistance/damage_scale/heal_scale/sp_recovery_per_sec/hp_recovery_per_sec(_by_max_hp_ratio)/magic_resist_penetrate_fixed/def_penetrate_fixed/def_penetrate_ratio/magic_resist_penetrate_ratio/move_speed; `prob` when the text says 闪避)",
    "selfStatHpBelow": "\"生命值低于 X% 时…\" + the namespaced `ns[tag].<statKey>` extra → base stats always, the extra while hpRatio < X",
@@ -33,20 +33,31 @@
   "picks": {
    "records": 93,
    "declared": 180,
-   "installed": 51,
+   "installed": 26,
    "byStatus": {
-    "unexpressed": 139,
-    "partial": 12,
-    "installed": 23,
-    "installed-by-kit": 6
+    "unexpressed": 138,
+    "installed-by-kit": 35,
+    "installed": 7
    },
-   "generic_kit_records": {
+   "byKit": {
+    "ported(PR #71)": 76,
+    "hand-authored": 11,
+    "wrapper(genericKit + the kit installs the talent itself)": 6
+   },
+   "ported_kit_records": {
     "records": 76,
     "declared": 152,
-    "installed": 27,
-    "records_with_installs": 21
+    "translator_installs": 0,
+    "installed_by_kit": 27,
+    "records_with_translator_installs": 0
    },
-   "note": "火陈 chess_free_char_1050_chen3 and 望 chess_free_char_2027_wang have hand-authored kits (kits/freePicks.js) that author a skill but no talent: the translator does not run for them (their kit wins), so their 4 declared talents are still uninstalled — that file is owned by another agent."
+   "generic_kit_records": {
+    "records": 0,
+    "declared": 0,
+    "installed": 0,
+    "records_with_installs": 0
+   },
+   "note": "Since the 78 自选干员 kits of PR #71 (SrC2O4, head c76a81f) were ported, every one of the 93 records resolves to a hand-authored kit (76 ported, 11 ours + 6 4★ wrappers): `byKit` counts them. The 27 translator installs those 76 records produced are all implemented by the ported kit itself (kits/recruitTalents.js, measured key by key) and are therefore reported as installed-by-kit instead of being installed a second time — 火陈 chess_free_char_1050_chen3 authors its two talents in kits/freePicks.js (its own S3 剑气长龙 replaces the ported kit's single instantaneous AoE), and 望 chess_free_char_2027_wang keeps `talents: []` because tokens.js installs 料敌机先 for its 棋子. The 125 remaining declared talents of the 76 ported records stay reported as unexpressed BY THIS RULES-BASED AUDIT — the ported kits express a number of them ad hoc (e.g. 凯尔希's Mon3tr, 麦哲伦's drones), which a blackboard-rule translator cannot recognise, so this note is a lower bound."
   },
   "season": {
    "note": "no season record uses the generic kit except the 8 unused DIY templates (no talents, stats null, filtered out of every pool), so the season is untouched by construction."
@@ -59,7 +70,7 @@
   {
    "chessId": "chess_free_char_003_kalts",
    "name": "凯尔希",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -97,13 +108,10 @@
   {
    "chessId": "chess_free_char_010_chen",
    "name": "陈",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "呵斥",
-    "持刀格斗术"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -112,11 +120,9 @@
       "interval",
       "sp"
      ],
-     "status": "partial",
-     "rule": "intervalSp",
-     "drops": [
-      "只回“攻击/受击技力”的类型限制（SkillRuntime.gainSp 不分类型）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -126,15 +132,16 @@
       "def",
       "prob"
      ],
-     "status": "installed",
-     "rule": "selfStat"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_017_huang",
    "name": "煌",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -192,13 +199,10 @@
   {
    "chessId": "chess_free_char_112_siege",
    "name": "推进之王",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "万兽之王",
-    "粉碎"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -207,11 +211,9 @@
       "atk",
       "def"
      ],
-     "status": "partial",
-     "rule": "auraProfession",
-     "drops": [
-      "自身额外 +8%（同一天赋的双档写法，未拆分）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -219,20 +221,19 @@
      "keys": [
       "sp"
      ],
-     "status": "installed",
-     "rule": "nearbyKillSp"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_113_cqbw",
    "name": "W",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "设伏"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -242,8 +243,9 @@
       "prob",
       "taunt_level"
      ],
-     "status": "installed",
-     "rule": "fieldTimer"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -266,12 +268,10 @@
   {
    "chessId": "chess_free_char_134_ifrit",
    "name": "伊芙利特",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "莱茵回路"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -297,26 +297,19 @@
       "ifrit_e_002[dice_sp].interval",
       "ifrit_e_002[dice_sp].sp"
      ],
-     "status": "partial",
-     "rule": "intervalSp",
-     "drops": [
-      "黑板书 `ifrit_e_002[dice_sp].prob`（本规则未表达）",
-      "黑板书 `ifrit_e_002[dice_sp].interval`（本规则未表达）",
-      "黑板书 `ifrit_e_002[dice_sp].sp`（本规则未表达）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_147_shining",
    "name": "闪灵",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "黑恶魔的庇护",
-    "法典"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -325,11 +318,9 @@
       "def",
       "def_lowland"
      ],
-     "status": "partial",
-     "rule": "auraRange",
-     "drops": [
-      "`def_lowland` 40（地面单位额外加成：按地形类型分档，未表达）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -337,20 +328,19 @@
      "keys": [
       "attack_speed"
      ],
-     "status": "installed",
-     "rule": "selfStat"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_179_cgbird",
    "name": "夜莺",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "白恶魔的庇护"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -359,8 +349,9 @@
       "magic_resistance",
       "heal_scale"
      ],
-     "status": "installed",
-     "rule": "auraRange"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -381,13 +372,10 @@
   {
    "chessId": "chess_free_char_180_amgoat",
    "name": "艾雅法拉",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "炎息",
-    "乱火"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -395,11 +383,9 @@
      "keys": [
       "atk"
      ],
-     "status": "partial",
-     "rule": "auraProfession",
-     "drops": [
-      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -408,20 +394,19 @@
       "sp_min",
       "sp_max"
      ],
-     "status": "installed",
-     "rule": "deploySpRandom"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_188_helage",
    "name": "赫拉格",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "运筹帷幄"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -449,15 +434,16 @@
      "keys": [
       "hp_recovery_per_sec"
      ],
-     "status": "installed",
-     "rule": "selfStatUnblocked"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_197_poca",
    "name": "早露",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -501,12 +487,10 @@
   {
    "chessId": "chess_free_char_225_haak",
    "name": "阿",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "药剂扩散"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -536,15 +520,16 @@
      "keys": [
       "heal_scale"
      ],
-     "status": "installed",
-     "rule": "selfStat"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_248_mgllan",
    "name": "麦哲伦",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -578,7 +563,7 @@
   {
    "chessId": "chess_free_char_250_phatom",
    "name": "傀影",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -612,12 +597,10 @@
   {
    "chessId": "chess_free_char_293_thorns",
    "name": "棘刺",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "故土潮声"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -646,15 +629,16 @@
       "delay",
       "hp_recovery_per_sec_by_max_hp_ratio"
      ],
-     "status": "installed",
-     "rule": "selfStatIdle"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_300_phenxi",
    "name": "菲亚梅塔",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -704,7 +688,7 @@
   {
    "chessId": "chess_free_char_322_lmlee",
    "name": "老鲤",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -748,13 +732,10 @@
   {
    "chessId": "chess_free_char_340_shwaz",
    "name": "黑",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "破甲箭头",
-    "交叉火力"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -765,8 +746,9 @@
       "prob",
       "defdown_duration"
      ],
-     "status": "installed",
-     "rule": "attackProcRider"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -774,19 +756,16 @@
      "keys": [
       "atk"
      ],
-     "status": "partial",
-     "rule": "auraProfession",
-     "drops": [
-      "“另外至少一名狙击干员”的编队条件按场上同类干员 ≥1 评估（携带 ≠ 部署）",
-      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_362_saga",
    "name": "嵯峨",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -834,12 +813,10 @@
   {
    "chessId": "chess_free_char_377_gdglow",
    "name": "澄闪",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "精准导流"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -865,18 +842,16 @@
      "keys": [
       "magic_resist_penetrate_fixed"
      ],
-     "status": "partial",
-     "rule": "selfStat",
-     "drops": [
-      "“与浮游单元”的共享部分（召唤物自身的属性/穿透不由此处授予）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_400_weedy",
    "name": "温蒂",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -910,12 +885,10 @@
   {
    "chessId": "chess_free_char_416_zumama",
    "name": "森蚺",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "愈战愈勇"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -941,20 +914,19 @@
      "keys": [
       "sp_recovery_per_sec"
      ],
-     "status": "installed",
-     "rule": "selfStatBlocking"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_450_necras",
    "name": "死芒",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "回光黯淡"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -987,24 +959,19 @@
       "hp_ratio",
       "damage_scale"
      ],
-     "status": "partial",
-     "rule": "attackVsLowHp",
-     "drops": [
-      "“自身和召唤物…”的召唤物一半（召唤物的伤害不由主人的 kit 挂钩）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_456_ash",
    "name": "灰烬",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 2,
-   "installedBy": [
-    "辅助装备",
-    "突击手"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -1012,8 +979,9 @@
      "keys": [
       "stun"
      ],
-     "status": "installed",
-     "rule": "deployStun"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -1022,18 +990,16 @@
       "runtime_cost",
       "sp"
      ],
-     "status": "partial",
-     "rule": "hand:ash:assault",
-     "drops": [
-      "部署费用是备战/重新部署侧的量：sim 的初始部署不付 DP，这里只降低 `base.cost`（= 以后重新部署时少付 DP；先例 kits/tier6.js 开源节流）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_479_sleach",
    "name": "琴柳",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1073,7 +1039,7 @@
   {
    "chessId": "chess_free_char_485_pallas",
    "name": "帕拉斯",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1472,7 +1438,7 @@
   {
    "chessId": "chess_free_char_1013_chen2",
    "name": "假日威龙陈",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1520,7 +1486,7 @@
   {
    "chessId": "chess_free_char_1015_aglna2",
    "name": "予愿安洁莉娜",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1564,12 +1530,10 @@
   {
    "chessId": "chess_free_char_1029_yato2",
    "name": "麒麟R夜刀",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "双雷剑麒麟"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -1577,8 +1541,9 @@
      "keys": [
       "attack@atk_scale_1"
      ],
-     "status": "installed",
-     "rule": "attackAddHit"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -1603,7 +1568,7 @@
   {
    "chessId": "chess_free_char_1031_slent2",
    "name": "淬羽赫默",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1649,7 +1614,7 @@
   {
    "chessId": "chess_free_char_1034_jesca2",
    "name": "涤火杰西卡",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1691,7 +1656,7 @@
   {
    "chessId": "chess_free_char_1035_wisdel",
    "name": "维什戴尔",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1733,7 +1698,7 @@
   {
    "chessId": "chess_free_char_1042_phatm2",
    "name": "酒神",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1777,7 +1742,7 @@
   {
    "chessId": "chess_free_char_1043_leizi2",
    "name": "司霆惊蛰",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1823,7 +1788,7 @@
   {
    "chessId": "chess_free_char_1044_hsgma2",
    "name": "斩业星熊",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1879,7 +1844,7 @@
   {
    "chessId": "chess_free_char_1048_orchd2",
    "name": "焰狐龙梓兰",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -1929,8 +1894,11 @@
    "name": "赤刃明霄陈",
    "kit": "hand-authored",
    "declared": 2,
-   "installed": 0,
-   "installedBy": [],
+   "installed": 2,
+   "installedBy": [
+    "形意洞照",
+    "寒暑觉知"
+   ],
    "talents": [
     {
      "index": 0,
@@ -1939,8 +1907,9 @@
       "atk",
       "attack_speed"
      ],
-     "status": "installed",
-     "rule": "selfStat"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "kits/freePicks.js installs it (ported from PR #71 c76a81f)"
     },
     {
      "index": 1,
@@ -1950,22 +1919,19 @@
       "heal_atk_scale_min",
       "heal_atk_scale_max"
      ],
-     "status": "unexpressed",
-     "rule": null,
-     "bb": {
-      "stack_time": 6,
-      "heal_atk_scale_min": 50,
-      "heal_atk_scale_max": 201
-     },
-     "desc": "未受到伤害时，每6秒随机治疗自身一定（攻击力的50%~200%）生命值，并闪避下次物理与法术攻击",
-     "reason": "no faithful kit-DSL form for this key set / wording"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "drops": [
+      "“闪避下次物理与法术攻击” uses the engine's untyped `shieldHits` (one hit of any type); the random heal uses the blackboard's 201 %, the description says 200 %"
+     ],
+     "note": "kits/freePicks.js installs it (ported from PR #71 c76a81f)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_1051_headb2",
    "name": "怒潮凛冬",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2011,7 +1977,7 @@
   {
    "chessId": "chess_free_char_1052_kalts2",
    "name": "凯尔希·思衡托",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2065,7 +2031,7 @@
   {
    "chessId": "chess_free_char_1502_crosly",
    "name": "弑君者",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2105,7 +2071,7 @@
   {
    "chessId": "chess_free_char_2012_typhon",
    "name": "提丰",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2153,7 +2119,7 @@
   {
    "chessId": "chess_free_char_2013_cerber",
    "name": "刻俄柏",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2201,12 +2167,10 @@
   {
    "chessId": "chess_free_char_2014_nian",
    "name": "年",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "积甲成山"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -2214,11 +2178,9 @@
      "keys": [
       "max_hp"
      ],
-     "status": "partial",
-     "rule": "auraProfession",
-     "drops": [
-      "“携带 / 编入队伍”是编队条件（不要求上场），sim 里光环只在该干员在场时生效"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -2247,7 +2209,7 @@
   {
    "chessId": "chess_free_char_2023_ling",
    "name": "令",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2289,7 +2251,7 @@
   {
    "chessId": "chess_free_char_2024_chyue",
    "name": "重岳",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2331,7 +2293,7 @@
   {
    "chessId": "chess_free_char_2025_shu",
    "name": "黍",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2427,7 +2389,7 @@
   {
    "chessId": "chess_free_char_4009_irene",
    "name": "艾丽妮",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2469,12 +2431,10 @@
   {
    "chessId": "chess_free_char_4011_lessng",
    "name": "止颂",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "苦痛专注"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -2482,11 +2442,9 @@
      "keys": [
       "damage_resistance"
      ],
-     "status": "partial",
-     "rule": "selfStatBlocking",
-     "drops": [
-      "“来自非自身阻挡的敌人”这一来源限制（无按来源区分的减伤通道）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     },
     {
      "index": 1,
@@ -2509,7 +2467,7 @@
   {
    "chessId": "chess_free_char_4027_heyak",
    "name": "霍尔海雅",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2549,7 +2507,7 @@
   {
    "chessId": "chess_free_char_4037_demetr",
    "name": "贝洛内",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2605,7 +2563,7 @@
   {
    "chessId": "chess_free_char_4046_ebnhlz",
    "name": "黑键",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2649,7 +2607,7 @@
   {
    "chessId": "chess_free_char_4048_doroth",
    "name": "多萝西",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2691,7 +2649,7 @@
   {
    "chessId": "chess_free_char_4055_bgsnow",
    "name": "鸿雪",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2727,7 +2685,7 @@
   {
    "chessId": "chess_free_char_4065_judge",
    "name": "斥罪",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2771,7 +2729,7 @@
   {
    "chessId": "chess_free_char_4072_ironmn",
    "name": "白铁",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2811,12 +2769,10 @@
   {
    "chessId": "chess_free_char_4080_lin",
    "name": "林",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "韬光"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -2845,15 +2801,16 @@
       "prob",
       "sp"
      ],
-     "status": "installed",
-     "rule": "onHurtSp"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_4088_hodrer",
    "name": "赫德雷",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2895,7 +2852,7 @@
   {
    "chessId": "chess_free_char_4098_vvana",
    "name": "薇薇安娜",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2939,7 +2896,7 @@
   {
    "chessId": "chess_free_char_4117_ray",
    "name": "莱伊",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -2979,7 +2936,7 @@
   {
    "chessId": "chess_free_char_4121_zuole",
    "name": "左乐",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3031,12 +2988,10 @@
   {
    "chessId": "chess_free_char_4123_ela",
    "name": "艾拉",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "“正中靶心”"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -3059,18 +3014,16 @@
       "atk_scale",
       "prob"
      ],
-     "status": "partial",
-     "rule": "attackProc",
-     "drops": [
-      "“对受到雷鸣地雷影响的目标必定触发”这一追加条件（未接雷鸣地雷状态）"
-     ]
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_4132_ascln",
    "name": "阿斯卡纶",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3120,7 +3073,7 @@
   {
    "chessId": "chess_free_char_4133_logos",
    "name": "逻各斯",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3168,7 +3121,7 @@
   {
    "chessId": "chess_free_char_4138_narant",
    "name": "娜仁图亚",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3216,7 +3169,7 @@
   {
    "chessId": "chess_free_char_4141_marcil",
    "name": "玛露西尔",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3268,7 +3221,7 @@
   {
    "chessId": "chess_free_char_4179_monstr",
    "name": "Mon3tr",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3312,7 +3265,7 @@
   {
    "chessId": "chess_free_char_4182_oblvns",
    "name": "丰川祥子",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3362,7 +3315,7 @@
   {
    "chessId": "chess_free_char_4195_radian",
    "name": "电弧",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3410,7 +3363,7 @@
   {
    "chessId": "chess_free_char_4202_haruka",
    "name": "遥",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3456,7 +3409,7 @@
   {
    "chessId": "chess_free_char_4204_mantra",
    "name": "真言",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3492,7 +3445,7 @@
   {
    "chessId": "chess_free_char_4212_nasti",
    "name": "娜斯提",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3536,7 +3489,7 @@
   {
    "chessId": "chess_free_char_4217_makoto",
    "name": "结城理",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3584,7 +3537,7 @@
   {
    "chessId": "chess_free_char_4226_veen",
    "name": "维伊",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3628,7 +3581,7 @@
   {
    "chessId": "chess_free_char_4228_closur",
    "name": "可露希尔",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3668,12 +3621,10 @@
   {
    "chessId": "chess_free_char_4229_aphris",
    "name": "谬因",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
-   "installed": 1,
-   "installedBy": [
-    "取样优化"
-   ],
+   "installed": 0,
+   "installedBy": [],
    "talents": [
     {
      "index": 0,
@@ -3697,15 +3648,16 @@
      "keys": [
       "magic_resist_penetrate_fixed"
      ],
-     "status": "installed",
-     "rule": "auraRange"
+     "status": "installed-by-kit",
+     "rule": "kit-install:PR#71",
+     "note": "the ported PR #71 kit (kits/recruits*.js) implements this talent inside its own install — the translator reports it instead of installing it a second time (kits/recruitTalents.js)"
     }
    ]
   },
   {
    "chessId": "chess_free_char_4230_mcnist",
    "name": "机械师",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
@@ -3739,7 +3691,7 @@
   {
    "chessId": "chess_free_char_4235_thumpy",
    "name": "珊比",
-   "kit": "generic",
+   "kit": "ported(PR #71)",
    "declared": 2,
    "installed": 0,
    "installedBy": [],
