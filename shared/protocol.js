@@ -86,7 +86,7 @@ function skillIndexesOf(c) {
 
 /**
  * The record that carries a chess's 模组 choices: its own GOLDEN chess when the data has one, else a record that brings
- * its own `modules[]` — a 自选候选 (DESIGN §22) has `goldenId: null` and no `_b` sibling (`gamedata.goldenIdOf` falls
+ * its own `modules[]` — a 自选候选 (DESIGN §23) has `goldenId: null` and no `_b` sibling (`gamedata.goldenIdOf` falls
  * back to the id itself), so the record IS its own elite and offers its modules like a golden chess does.
  * @param {any} rec a chess record @returns {any|null}
  */
@@ -132,7 +132,7 @@ export function loadoutOptions(base, golden = null) {
  * Semantic check + normalisation of a loadout against the game data (DESIGN §16). Strict: any unknown / hidden / elite
  * chess id, illegal skill index or module rejects the whole loadout. Entries equal to the defaults are dropped, the
  * rest are stored complete: `{ skill, module }` (module null for a chess without a module record). A 自选候选 record
- * (`freePick: true`, DESIGN §22) is accepted although it is invisible + hidden — its owner picked it, so it is theirs to
+ * (`freePick: true`, DESIGN §23) is accepted although it is invisible + hidden — its owner picked it, so it is theirs to
  * configure, and it offers its own modules like a golden chess; every other invisible / hidden chess stays rejected.
  * @param {any} entries `room.loadout.entries`
  * @param {(id: string) => any} getChess chess record lookup (normal and golden ids)
@@ -144,7 +144,7 @@ export function checkLoadout(entries, getChess) {
   for (const id of Object.keys(entries)) {
     const e = entries[id];
     const base = typeof getChess === 'function' ? getChess(id) : null;
-    // 自选干员 (DESIGN §22) are deliberately invisible + hidden (they must never join the season pool) yet ARE selectable
+    // 自选干员 (DESIGN §23) are deliberately invisible + hidden (they must never join the season pool) yet ARE selectable
     // by the player who picked them, so the visibility guard below must not reject them.
     const freePick = !!base && base.freePick === true;
     if (!base || base.isGolden || base.isDiy || (base.baseId && base.baseId !== id)
@@ -167,7 +167,7 @@ export function checkLoadout(entries, getChess) {
 /**
  * The skill index / module a board chess fights with under a (checked) loadout (DESIGN §16 PlayerBattleInput units):
  * normal chess → `{ skillIndex, moduleId: null }` (normal chess have no module); elite → `moduleId` = uniEquipId or
- * 'none'. A 自选候选 (DESIGN §22) is its own elite, so its module choice applies to its pieces too. Chess the loadout
+ * 'none'. A 自选候选 (DESIGN §23) is its own elite, so its module choice applies to its pieces too. Chess the loadout
  * does not mention use their defaults.
  * @param {Record<string, { skill: number, module: string|null }> | null | undefined} loadout
  * @param {any} chess the piece's chess record (normal or golden / a 自选候选)
@@ -178,7 +178,7 @@ export function resolveLoadout(loadout, chess, getChess) {
   if (!chess || typeof chess !== 'object') return { skillIndex: null, moduleId: null };
   const baseId = chess.baseId || chess.chessId;
   const base = chess.isGolden ? (getChess(baseId) || chess) : chess;
-  // `elite` = the record the module CHOICE belongs to: the golden piece itself, or a 自选候选 (its own elite, DESIGN §22).
+  // `elite` = the record the module CHOICE belongs to: the golden piece itself, or a 自选候选 (its own elite, DESIGN §23).
   // A season normal chess owns no module choice ⇒ moduleId null, exactly as before (its elite record only feeds the
   // skill / default-module options below).
   const elite = chess.isGolden ? chess : eliteRecord(chess);
@@ -190,7 +190,7 @@ export function resolveLoadout(loadout, chess, getChess) {
   return { skillIndex, moduleId };
 }
 
-// ---- 自选干员 / 自由位置 (DESIGN §22): room.loadout { entries, picks } ---------------------------------------
+// ---- 自选干员 / 自由位置 (DESIGN §23): room.loadout { entries, picks } ---------------------------------------
 
 /**
  * `room.loadout.picks`: `{ [调度中心 level]: chessId[] }` — the 自由位置 selection of the 干员调配 screen. 调度中心
@@ -206,7 +206,7 @@ export const isFreePicks = (v) => isPlain(v)
   && Object.values(v).every((a) => Array.isArray(a) && a.length <= FREE_PICK_LIMITS.perLevel && a.every(isId));
 
 /**
- * 调度中心 levels a chess record may be **picked** at for a 自由位置 (DESIGN §22), `[]` when it is not selectable:
+ * 调度中心 levels a chess record may be **picked** at for a 自由位置 (DESIGN §23), `[]` when it is not selectable:
  *   - a 自选候选 record of data/freePicks.json (`freePick: true`): its own `freePickLevels`
  *   - every season chess: never — a 自选候选 is by construction an operator the season pool does NOT offer, so offering
  *     a season chess here would duplicate one that is already in the pool ("已经在干员池内的干员不应该进入自选池" [user])
@@ -220,7 +220,7 @@ export function freePickLevelsOf(rec) {
 }
 
 /**
- * Semantic check + normalisation of `room.loadout.picks` (DESIGN §22). Strict: every id must be selectable
+ * Semantic check + normalisation of `room.loadout.picks` (DESIGN §23). Strict: every id must be selectable
  * (`freePickLevelsOf`), must be filed under one of ITS OWN levels, and the same operator may not be picked twice —
  * the 自由位置 picker forbids duplicates across both levels [user]. Levels without picks are omitted.
  * @param {any} picks `{ [level]: chessId[] }` (string or numeric level keys)
@@ -325,7 +325,7 @@ export const C2S = {
   'room.addBot': {},
   'room.removeBot': { seat: (v) => isInt(v, 0, MAX_SEATS - 1) },
   'room.start': {},
-  // operator loadout (DESIGN §16) + 自选干员 picks (DESIGN §22): stored per session/seat; accepted until the match
+  // operator loadout (DESIGN §16) + 自选干员 picks (DESIGN §23): stored per session/seat; accepted until the match
   // leaves INFO_CHECK
   'room.loadout': { entries: isLoadoutEntries, picks: isFreePicks, $optional: ['picks'] },
 
@@ -417,8 +417,8 @@ export const EV = Object.freeze({
 
 /**
  * The model form a `b.ev` 'fx' tuple ['fx', kind, x, y, extra] puts its unit in: `extra.form` (sim content/enemies.js
- * setForm — 转译基底·α's forms, a 逐火 余烬 and its revival, a leader's 重生, 守墓石像's modes, 掠海漂移体's crawl; a string is
- * that clip set, null the base one), undefined for any other tuple. A form is state, not decoration: a view that misses
+ * setForm — 转译基底·α's forms, a 逐火 余烬 and its revival, a leader's 重生, 守墓石像's modes, 掠海漂移体's crawl; a 傀儡师's 替身,
+ * sim professions.js; a string is that clip set, null the base one), undefined for any other tuple. A form is state, not decoration: a view that misses
  * the fx keeps drawing the old model (player report #5 after 0.1.0), so the client's catch-up frames, its hidden-tab
  * backlog (battle/runner.js) and the events buffered before a field is entered (screens/game.js) keep these tuples.
  */

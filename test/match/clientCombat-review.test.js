@@ -418,7 +418,7 @@ function consumedDataKeys(DataSource) {
 test('loadBrowserSim: a data file that cannot be fetched fails the loader (no battle on partial data); all files → a working sim', async () => {
   const { loadBrowserSim, SIM_DATA_FILES } = await import('../../public/js/battle/runner.js');
   const { DataSource } = await import('../../server/sim/simdata.js');
-  const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (数据文件 data/freePicks.json, DESIGN §22)
+  const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (数据文件 data/freePicks.json, DESIGN §23)
   const INSIDE = 'chess_char_1_01_a';         // 隐现, a season chess (数据文件 data/chess.json)
   const base = new URL('../../server/sim/', import.meta.url).href;
   const nameOf = (url) => String(url).replace(/^.*\//, '').replace(/\.json$/, '');

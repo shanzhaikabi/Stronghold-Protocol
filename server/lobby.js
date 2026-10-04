@@ -101,7 +101,7 @@ function freezeLoadout(loadout) {
   return Object.freeze(out);
 }
 
-/** Deep-frozen copy of checked 自由位置 picks (DESIGN §22), shared by the session, the seat and the match. */
+/** Deep-frozen copy of checked 自由位置 picks (DESIGN §23), shared by the session, the seat and the match. */
 function freezeFreePicks(picks) {
   const out = {};
   for (const [level, list] of Object.entries(picks || {})) out[level] = Object.freeze([...list]);
@@ -513,7 +513,7 @@ export class Lobby {
   }
 
   /**
-   * room.loadout (DESIGN §16) + the 自由位置 picks it carries (DESIGN §22): check both against the game data, store
+   * room.loadout (DESIGN §16) + the 自由位置 picks it carries (DESIGN §23): check both against the game data, store
    * them on the session and the seat, and — while a match runs — hand them to the match (accepted only during
    * INFO_CHECK, see the header). `picks` absent means "leave the stored picks alone" (older clients).
    */
@@ -578,7 +578,7 @@ export class Lobby {
       seat: s.seat, playerId: s.playerId, name: s.name, isBot: s.isBot, connected: s.connected,
       // DESIGN §16: the human's checked operator loadout (bots fight with the defaults)
       loadout: s.isBot ? null : s.loadout || null,
-      // DESIGN §22: the human's checked 自由位置 picks (bots never pick either)
+      // DESIGN §23: the human's checked 自由位置 picks (bots never pick either)
       picks: s.isBot ? null : s.picks || null,
     }));
     // lastPublic / results: the latest m.public broadcast and the m.result frames (encoded), kept for the replay.
@@ -838,7 +838,7 @@ export class Lobby {
     return {
       seat: idx, playerId: session.playerId, name: session.name, isBot: false, ready: false, connected: session.connected, left: false,
       loadout: session.loadout || null,
-      // DESIGN §22: the 自由位置 picks already stored on the session follow the player into the room, like the loadout
+      // DESIGN §23: the 自由位置 picks already stored on the session follow the player into the room, like the loadout
       picks: session.picks || null,
     };
   }

@@ -439,7 +439,7 @@ export class Match {
   }
 
   /**
-   * 自由位置 picks (DESIGN §22), accepted with room.loadout: only while INFO_CHECK runs, like the loadout itself (the
+   * 自由位置 picks (DESIGN §23), accepted with room.loadout: only while INFO_CHECK runs, like the loadout itself (the
    * briefing's 干员调配 entry). The lobby already checked them structurally/semantically; PlayerState.setFreePicks
    * re-checks against this match's data. Ban filtering is not done here — freePickIds() applies it on demand.
    * @param {string} playerId
@@ -1609,7 +1609,7 @@ export class Match {
         tier: Number.isInteger(p.tier) ? p.tier : null,
         maxTier,
         filter: (cid, e) => e.tier >= minTier && (!bond || (Array.isArray(this.gd.chess(cid)?.bonds) && this.gd.chess(cid).bonds.includes(bond))),
-        // DESIGN §22: the rolling player's 自选干员 join the draw too (they are part of that player's pool)
+        // DESIGN §23: the rolling player's 自选干员 join the draw too (they are part of that player's pool)
         extra,
       });
     }

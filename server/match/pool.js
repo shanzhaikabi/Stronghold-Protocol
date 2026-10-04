@@ -92,7 +92,7 @@ export class SharedPool {
 
   /**
    * Remaining copies of eligible chess (tier ≤ maxTier, or exactly `tier`), PLUS the caller's `extra` entries — the
-   * player's 自选干员 (DESIGN §22, PlayerState.freePickEntries).
+   * player's 自选干员 (DESIGN §23, PlayerState.freePickEntries).
    *
    * `extra` ids obey the **same tier gate as a shared chess**: shop level L offers operators of tier ≤ L (research 01
    * §6; user report 2026-10-03 "自选干员会忽略他的等级出现 … 5 级干员需要到 5 级以后才进入池子"), so a 6★ pick is not

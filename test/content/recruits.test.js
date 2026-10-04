@@ -1,5 +1,5 @@
 // 自选干员 per-operator kits — ported from PR #71 by SrC2O4 (增加六星自选功能, head c76a81f) and adapted to this
-// project's data model (data/freePicks.json, one record per operator: no tier × elite variants, DESIGN §22).
+// project's data model (data/freePicks.json, one record per operator: no tier × elite variants, DESIGN §23).
 //
 // The upstream file's test/content/recruits.test.js drove `recruit_{5,6}_<charId>_{a,b}` records and a 936-combination
 // matrix (78 × 3 skills × 2 tiers × 2 elite). Our roster has a single record per operator, so the same matrix is

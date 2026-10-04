@@ -141,7 +141,7 @@ const ITEM_HANDLERS = {
     onEquip(ctx, ev) {
       const target = ctx.piece(ev.target.uid);
       if (!target) return;
-      // DESIGN §22: a 自选干员 lives in its OWNER's private pool, so 信标 must not hand it to a teammate. The refuse
+      // DESIGN §23: a 自选干员 lives in its OWNER's private pool, so 信标 must not hand it to a teammate. The refuse
       // happens here, before the effect destroys its target — otherwise the operator would be lost for nothing.
       if (ctx.gd.chess(ctx.gd.baseIdOf(target.id))?.freePick === true) {
         ev.error = 'BAD_TARGET';

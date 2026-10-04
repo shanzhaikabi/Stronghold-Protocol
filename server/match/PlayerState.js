@@ -87,7 +87,7 @@ const OK = Object.freeze({ ok: true });
 const fail = (error, detail) => (detail ? { error, detail } : { error });
 
 /**
- * 所属势力 (data `nationId`) → the core bond it grants (DESIGN §22, user playtest): 阿戈尔 / 卡西米尔 / 拉特兰 /
+ * 所属势力 (data `nationId`) → the core bond it grants (DESIGN §23, user playtest): 阿戈尔 / 卡西米尔 / 拉特兰 /
  * 萨尔贡 / 维多利亚 / 谢拉格 / 叙拉古 / 炎 — 龙门 and the other 炎 sub-factions count as 炎. A faction outside this
  * list (罗德岛, 哥伦比亚, 东国, 伊比利亚, 莱塔尼亚, 玻利瓦尔, 萨米, 乌萨斯, 雷姆必拓 …) grants no core bond, so the
  * operator's 主盟约 is 协防干员. Only ever used to break a TIE between several core bonds: a record's own `bonds`
@@ -126,7 +126,7 @@ export class PlayerState {
     this.loadout = Object.freeze({});
     if (!this.isBot && seat.loadout) this.setLoadout(seat.loadout);
     /**
-     * 自选干员 (DESIGN §22): frozen `{ [调度中心 level]: chessId[] }` — the 自由位置 picks, which join THIS player's
+     * 自选干员 (DESIGN §23): frozen `{ [调度中心 level]: chessId[] }` — the 自由位置 picks, which join THIS player's
      * shop pool. Stored as picked; whether one actually enters the pool also depends on this match's drawn ban set,
      * which is decided after the players are constructed — see freePickIds().
      */
@@ -257,7 +257,7 @@ export class PlayerState {
   }
 
   /**
-   * Replace the 自由位置 picks (DESIGN §22) after re-checking them against this match's data. Returns false (picks
+   * Replace the 自由位置 picks (DESIGN §23) after re-checking them against this match's data. Returns false (picks
    * unchanged) when they do not fit; bots never pick. Ban filtering is NOT done here — it is applied on demand by
    * freePickIds(), because the match draws its disabled bonds after the players exist.
    * @param {any} picks `{ [level]: chessId[] }`
@@ -277,7 +277,7 @@ export class PlayerState {
   }
 
   /**
-   * The 主盟约 of a 自选干员 (DESIGN §22): the core bond of its record, else 协防干员 (`emptyShip`).
+   * The 主盟约 of a 自选干员 (DESIGN §23): the core bond of its record, else 协防干员 (`emptyShip`).
    *
    * The record's `bonds` are authoritative, NOT `nationId`: the official autochess data already merges 所属势力 with
    * the 隐藏势力 the PRTS tables record, and the two disagree for a third of the 6★ pool (能天使 is 龙门 but carries
@@ -328,7 +328,7 @@ export class PlayerState {
   }
 
   /**
-   * This player's 自选干员 as pool-roll entries (DESIGN §22, `SharedPool._eligible` `extra`): `{ id, tier, left }` per
+   * This player's 自选干员 as pool-roll entries (DESIGN §23, `SharedPool._eligible` `extra`): `{ id, tier, left }` per
    * pick that joins the pool and can still yield copies.
    *
    * **`tier` is the 自由位置 slot the pick was filed at, not the record's rarity** (user report 2026-10-03: "自选干员都
@@ -1771,7 +1771,7 @@ export class PlayerState {
       nextEnemies: this.m.nextEnemiesFor(this),
       // DESIGN §16: the effective operator loadout ({ [baseChessId]: { skill, module } }; chess not listed use defaults)
       loadout: this.loadout,
-      // DESIGN §22: the 自由位置 picks that actually join this player's pool (a pick whose 主盟约 is banned is absent)
+      // DESIGN §23: the 自由位置 picks that actually join this player's pool (a pick whose 主盟约 is banned is absent)
       freePicks: this.freePickIds(),
       stats: {
         dmgDealt: Math.round(this.stats.dmgDealt), kills: this.stats.kills, leaks: this.stats.leaks, gold: this.stats.gold,

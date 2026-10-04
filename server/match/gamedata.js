@@ -70,7 +70,7 @@ export class GameData {
     this.economy = this.config.economy && typeof this.config.economy === 'object' ? this.config.economy : {};
     const chess = this.raw.chess && typeof this.raw.chess === 'object' ? this.raw.chess : {};
     this._chess = chess;
-    // 自选干员 (DESIGN §22): chess-shaped records of data/freePicks.json. Resolvable exactly like a chess (so a picked
+    // 自选干员 (DESIGN §23): chess-shaped records of data/freePicks.json. Resolvable exactly like a chess (so a picked
     // unit can be built, shown and fought) but deliberately outside the season pool — `visibleChess` below is built
     // from `chess` alone, which is what keeps them out of the shop pool, the loadout slots and the season's counts.
     this._freePicks = this.raw.freePicks && typeof this.raw.freePicks === 'object' ? this.raw.freePicks : {};

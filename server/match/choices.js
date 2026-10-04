@@ -482,7 +482,7 @@ function applyDefault(m, ps, card) {
         handled = true;
         break;
       case 'single_special_choice_gain_bond_chess': {
-        // DESIGN §22: the player's 自选干员 are part of their pool, so a bond draw may hand one out too
+        // DESIGN §23: the player's 自选干员 are part of their pool, so a bond draw may hand one out too
         const extra = typeof ps.freePickEntries === 'function' ? ps.freePickEntries() : null;
         for (let i = 0; i < count; i++) {
           const id = m.pool.roll(m.rngMeta, { maxTier: Math.max(1, ps.shop.level), filter: (cid) => { const c = gd.chess(cid); return !!(c && Array.isArray(c.bonds) && c.bonds.includes(bs.bond)); }, extra })

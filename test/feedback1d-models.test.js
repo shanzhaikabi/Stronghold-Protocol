@@ -118,6 +118,36 @@ describe('D3: the official slug models are an optional overlay of the web alias'
     for (const id of SLUGS) assert.deepEqual(meta[id], COMMITTED[id], `${id}: re-run node tools/fetch-assets.mjs --local-spines`);
   });
 
+  test('the shipped extraction is the model the manifest describes — field by field — and it is not the alias\'s', {
+    skip: !existsSync(path.join(ROOT, 'data/local-assets.json')) && 'no data/local-assets.json (tools/local-extract)',
+  }, () => {
+    // Upstream PR #74's two test ideas on this branch's route. Its per-entry `pma` consistency assertion lives in
+    // test/assets.test.js; this is the "the same official model" one — the model the client actually loads
+    // (assets.js spineEntry, with the data/local-assets.json this tree ships) against the committed metadata, field by
+    // field, plus the one thing the old alias route could not give: it is NOT the plain 源石虫's skeleton. (PR #74
+    // compared a second, PRTS-downloaded copy of the model; this branch takes the model from the local client only —
+    // never a third-party source — so the comparison is extraction vs the manifest that describes it.)
+    const LOCAL = readJson('data/local-assets.json');
+    for (const id of SLUGS) {
+      const group = (LOCAL.groups || {})[localEnemySpineGroup(id)];
+      assert.ok(group, `${id}: data/local-assets.json lists its extraction (the real models are in place)`);
+      const sl = MANIFEST.enemies[id].spineLocal;
+      for (const f of [sl.skel, sl.atlas, ...sl.textures]) assert.ok(group[f], `${id}: ${f} listed`);
+      const e = spineEntry(MANIFEST, id, { local: LOCAL });
+      assert.ok(e.local, `${id}: the client draws its own model, not the alias`);
+      for (const k of ['anims', 'animations', 'events', 'hits', 'bounds']) assert.deepEqual(e[k], COMMITTED[id][k], `${id}: ${k}`);
+      assert.equal(e.pma, true, 'the extraction premultiplies its pages (extract.py merge_alpha)');
+      const alias = MANIFEST.enemies[MANIFEST.enemies[id].spineAliasOf].spine;
+      assert.notEqual(e.skel, alias.skel, `${id}: its own skeleton, not enemy_1007_slime's`);
+      assert.notDeepEqual(COMMITTED[id].animations, alias.animations, `${id}: its own clip set`);
+      assert.notDeepEqual(COMMITTED[id].bounds, alias.bounds, `${id}: its own setup-pose bounds`);
+      const abs = (url) => path.join(ROOT, 'public', url.replace(/^\//, ''));
+      if (existsSync(abs(alias.skel))) {
+        assert.ok(!readFileSync(abs(e.skel)).equals(readFileSync(abs(alias.skel))), `${id}: different skeletons on disk`);
+      }
+    }
+  });
+
   test('localEnemySpineMeta parses an extracted model like the pipeline and writes nothing', { skip: !existsSync(path.join(ASSETS, 'spine/enemy/enemy_1007_slime')) && 'public/assets not downloaded' }, async () => {
     // the plain slug's fetched files stand in for an extraction (same layout: <id>.skel / .atlas / page PNGs)
     const dir = mkdtempSync(path.join(tmpdir(), 'sp-meta-'));

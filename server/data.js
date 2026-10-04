@@ -27,7 +27,7 @@ export const DATA_DIR = path.join(ROOT, 'data');
 export const DATA_FILES = Object.freeze([
   'config', 'chess', 'bonds', 'garrisons', 'items', 'bands', 'effects', 'choices',
   'enemies', 'factions', 'waves', 'stages', 'bosses', 'tokens', 'assets',
-  // 自选干员 (DESIGN §22): chess-shaped records that are NOT season chess, kept in their own file so nothing that
+  // 自选干员 (DESIGN §23): chess-shaped records that are NOT season chess, kept in their own file so nothing that
   // walks `chess` (the shared pool, visibleChess, the loadout slots) picks them up by accident.
   'freePicks',
 ]);
@@ -130,7 +130,7 @@ export function lookup(file, id, data = getData()) {
 }
 
 /**
- * Chess record by id: the season chess (`data.chess`), else a 自选候选 (`data/freePicks`, DESIGN §22) — the two are
+ * Chess record by id: the season chess (`data.chess`), else a 自选候选 (`data/freePicks`, DESIGN §23) — the two are
  * separate maps so that everything walking `chess` stays about the season, while an id lookup still resolves both
  * (mirrors the client's `data.lookup('chess', …)`).
  * @param {unknown} id chess id (normal `_a`, elite `_b` or a 自选候选)

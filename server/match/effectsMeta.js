@@ -498,7 +498,7 @@ export function makeCtx(m, ps, source, hook, ev = null) {
         if (opts.bond) { const c = gd.chess(id); if (!c || !Array.isArray(c.bonds) || !c.bonds.includes(opts.bond)) return false; }
         return typeof opts.filter === 'function' ? !!opts.filter(id) : true;
       };
-      // DESIGN §22: this player's 自选干员 join every roll their filter admits (寻呼模块, 团伙行动, the reward offers …) —
+      // DESIGN §23: this player's 自选干员 join every roll their filter admits (寻呼模块, 团伙行动, the reward offers …) —
       // a pick behaves like any other operator of this player's pool, only its pool is private.
       const extra = typeof ps.freePickEntries === 'function' ? ps.freePickEntries() : null;
       return m.pool.roll(m.rngMeta, { maxTier: Number.isInteger(opts.maxTier) ? opts.maxTier : 6, tier: Number.isInteger(opts.tier) ? opts.tier : null, filter: f, extra });

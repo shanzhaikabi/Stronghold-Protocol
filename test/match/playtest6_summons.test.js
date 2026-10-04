@@ -38,7 +38,7 @@ const stackOf = (ps, id) => ps.hand.find((p) => p && p.kind === 'token' && p.id 
 const move = (m, uid, to, dir) => m.handle('p_0', { t: 'g.move', uid, to, ...(dir ? { dir } : {}) });
 
 test('tokens.json: the manually deployable summons are hand pieces — 医疗探机, 诅咒娃娃, 爬行号·防护单元 with the talent ones', () => {
-  // a token of the 自选干员 roster (DESIGN §22) is owned by `chess_free_*` chess only; the season's own hand summons
+  // a token of the 自选干员 roster (DESIGN §23) is owned by `chess_free_*` chess only; the season's own hand summons
   // are the six below (the free-pick roster brings ~30 more of its own, checked separately).
   const isFreePick = (t) => (t.owners || []).length > 0 && t.owners.every((o) => String(o).startsWith('chess_free_'));
   const placeable = Object.values(DATA.tokens).filter((t) => t.placeable && !isFreePick(t)).map((t) => t.tokenId).sort();

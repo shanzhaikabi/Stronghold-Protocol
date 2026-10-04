@@ -485,7 +485,7 @@ test('entry badge (review fix): counts like the screen once chess.json is loaded
   assert.equal(badgeCount({}, get), 0);
 });
 
-// ---- 自由位置 picks (DESIGN §22) ------------------------------------------------------------------------------------
+// ---- 自由位置 picks (DESIGN §23) ------------------------------------------------------------------------------------
 
 const FREE = JSON.parse(readFileSync(path.join(ROOT, 'data/freePicks.json'), 'utf8'));
 /** Chess lookup that also resolves 自选候选 — what the app's `data.lookup('chess', …)` does (data.js fallback). */

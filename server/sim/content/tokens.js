@@ -909,7 +909,7 @@ function champagne(bb) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// 棋子 (望 铸子 — the first hand-authored free-pick summon, DESIGN §22.11; the pattern for the rest of the batch)
+// 棋子 (望 铸子 — the first hand-authored free-pick summon, DESIGN §23.11; the pattern for the rest of the batch)
 
 /** Skills of 望's 棋子 (data/tokens.json `variants[chess_free_char_2027_wang].bySkill`, picked by 望's skill slot). */
 export const WANG_STONE_SKILLS = Object.freeze({
@@ -1022,7 +1022,7 @@ function fireWangStone(battle, unit, here, o) {
 }
 
 /**
- * 棋子 (望's 铸子 summon, `token_10064_wang_stone1`; the first hand-authored free-pick summon — DESIGN §22.11).
+ * 棋子 (望's 铸子 summon, `token_10064_wang_stone1`; the first hand-authored free-pick summon — DESIGN §23.11).
  *
  * The stone is a HAND PIECE (data `placeable`, count 6 / max 7, deployLimit 7): the player places the pieces of a 望's
  * stack during prep, and each one sits on its tile. PRTS 铸子: "棋子相连时相互激活，敌人进入激活的棋子所在地块时触发其

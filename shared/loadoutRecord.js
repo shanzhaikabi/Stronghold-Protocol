@@ -112,7 +112,7 @@ export function loadoutRecord(rec, lo) {
  * permanent 攻击距离 (traitRangeExtend: 信仰搅拌机 SPT-Y "攻击距离+1"). A running skill's range is the live entry's.
  *
  * [port] The `rec.isGolden &&` guard upstream puts on the module branch is dropped: the module is read from
- * `rec.modules`, and a 自选候选 (its own elite — its record has no `_b`, so `isGolden` is never true for it, DESIGN §22)
+ * `rec.modules`, and a 自选候选 (its own elite — its record has no `_b`, so `isGolden` is never true for it, DESIGN §23)
  * must be covered like a golden chess. A normal season chess carries no `modules`, so nothing else changes.
  * @param {object|null} rec loadoutRecord(…) output (or a data/chess.json record: its default module)
  * @returns {number[][]|null}

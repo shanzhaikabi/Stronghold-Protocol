@@ -3,7 +3,7 @@
 Written 2026-10-04 while rebuilding the integration branch on top of upstream **`v0.1.1`** (`8cd6491e`,
 released 2026-10-03 21:22 +08). The branch `fix/all-v011` **is** upstream v0.1.1 plus:
 
-- the **自由位置 / 自选干员** feature (its spec is **DESIGN §22**; the roster is `data/freePicks.json`), and
+- the **自由位置 / 自选干员** feature (its spec is **DESIGN §23**; the roster is `data/freePicks.json`), and
 - the pieces only we have: the stale-page build guard, the loadout export/import, the TOKEN_ABNORMAL
   research, the generic-talent translator, the IL2CPP tooling and the debug room.
 
@@ -47,13 +47,15 @@ duplicate or contradict them. Kept on `archive/fix-all-v010` only.
 
 `goldenIdOf`'s free-pick self-merge behaviour is upstream's code untouched: a 自选候选 has no `_b` sibling,
 `goldenIdOf` falls back to the record's own id, and three copies "merge into themselves" — that is correct
-and intended (DESIGN §22.2).
+and intended (DESIGN §23.2).
 
 ## 3. Documentation numbering
 
-Upstream v0.1.1 owns **DESIGN §21** ("Player feedback after 0.1.0", its 29 subsections). Our 自由位置 /
-自选干员 spec therefore lives at **DESIGN §22** (`§22.1`–`§22.11`), and every reference in our code and
-tests points at §22. A reference to `§21.<n>` anywhere in this tree means **upstream's** section.
+Upstream owns **DESIGN §21** ("Player feedback after 0.1.0", v0.1.1, its 29 subsections) and **DESIGN §22**
+("GitHub issues after 0.1.1", v0.1.2, its 16 subsections). Our 自由位置 / 自选干员 spec therefore lives at
+**DESIGN §23** (`§23.1`–`§23.11`), and every reference in our code and tests points at §23. A reference to
+`§21.<n>` or `§22.<n>` anywhere in this tree means **upstream's** section (the first port put ours at §22;
+the v0.1.2 port moved it to §23 when upstream took that number).
 
 ## 4. Files that are ours alone (upstream has no counterpart, so no divergence)
 

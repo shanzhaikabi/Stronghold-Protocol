@@ -203,7 +203,7 @@ export function normalizeChess(rec) {
 // A loadout `{ skillIndex, moduleId }` (also accepted: `{ skill, module }`, the client's per-browser shape) is resolved
 // against a data/chess.json record: `skillIndex` must be the index of one of `rec.skills` (the skills unlocked at the
 // record's status), `moduleId` 'none' or the uniEquipId of one of `rec.modules` (a golden chess, or a 自选候选 — its
-// record is its own elite, DESIGN §22). Anything else — missing, unknown, not unlocked at this record (a tier-1/2 normal
+// record is its own elite, DESIGN §23). Anything else — missing, unknown, not unlocked at this record (a tier-1/2 normal
 // chess has no S3) — falls back to the default. Research-shaped records (no `skills` list) resolve to their single skill.
 
 /** Resolve a loadout against a chess record (shared/loadoutRecord.js resolveRecordLoadout). */
@@ -223,6 +223,14 @@ export function immuneSet(v, extra = null) {
   else if (v && typeof v === 'object') for (const k of Object.keys(v)) if (v[k]) add(k);
   if (Array.isArray(extra)) extra.forEach(add);
   return out;
+}
+
+/** data/enemies.json `attackAnim` → { dur, hit } (hit null = none: half the clip), or null when malformed / absent. */
+function normAttackAnim(a) {
+  const dur = Number(a?.dur);
+  if (!(Number.isFinite(dur) && dur > 0)) return null;
+  const hit = Number(a.hit);
+  return { dur, hit: a.hit != null && Number.isFinite(hit) ? Math.min(dur, Math.max(0, hit)) : null };
 }
 
 /** Normalise an enemy record (research 05 shape or data/enemies.json shape) into an EnemyDef. */
@@ -262,6 +270,8 @@ export function normalizeEnemy(key, e) {
     notCountInTotal: !!(e.notCountInTotal),
     hitArea: normHitArea(e.hitArea),   // huge units only (body.js); null = a point
     staticBody: !!e.staticBody,        // 静态刚体: pushes / pulls never move it (Battle._displaceable)
+    attackAnim: normAttackAnim(e.attackAnim),   // its attack clip { dur, hit } (ai.js attackStand); null = none known
+    attackMoves: !!e.attackMoves,      // 「不停止移动」: never stops to attack (ai.js attackStand)
     tags: e.tags ?? [],
     abilities: e.abilities ?? [],
     skills: e.skills ?? [],
@@ -501,7 +511,7 @@ export function freezeDef(d) {
 /**
  * A DataSource resolves ids to normalised defs. `raw` is `{ chess, enemies, tokens, stages, waves }`.
  *
- * `raw.freePicks` (data/freePicks.json, DESIGN §22) is merged into the chess map: a 自选候选 is a chess-shaped record
+ * `raw.freePicks` (data/freePicks.json, DESIGN §23) is merged into the chess map: a 自选候选 is a chess-shaped record
  * of that separate file, and the sim has to resolve it like any chess — otherwise `getChess(id)` is null and
  * `Battle._addAllyFromInput` drops the unit ("unknown chess") the moment a battle starts. A season chess always wins
  * the (impossible) id collision; the browser runner fetches the file through `SIM_DATA_FILES` (runner.js).

@@ -21,7 +21,7 @@ const freshDs = () => new DataSource(ds.raw, null);
 const INSIDE = 'chess_char_1_01_a';     // 隐现 (T1, E1: S1–S2, default S2)
 const MLYSS = 'chess_char_6_11_b';      // 缪尔赛思 精锐 (S1–S3, default S3; modules 002 default / 003)
 const WTRMAN = 'token_10030_mlyss_wtrman';
-const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (data/freePicks.json, DESIGN §22) — never in data/chess.json
+const WANG = 'chess_free_char_2027_wang';   // 望, a 自选候选 (data/freePicks.json, DESIGN §23) — never in data/chess.json
 
 test('resolveLoadout: legal choices resolve, anything else falls back to the default', { skip }, () => {
   const n = C[INSIDE];
@@ -221,7 +221,7 @@ test('BattleSpec: units carry skillIndex / moduleId (sanitised); a battle uses t
 
 test('自选干员 resolve in the sim: the free-pick file is part of the sim data (server source and the browser shape)', { skip }, () => {
   // user report 2026-10-03: a deployed 自选干员 vanished when the battle started. data/freePicks.json is a separate file
-  // (DESIGN §22), and the sim's own DataSource read `raw.chess` only — so every free-pick unit resolved to null and
+  // (DESIGN §23), and the sim's own DataSource read `raw.chess` only — so every free-pick unit resolved to null and
   // Battle._addAllyFromInput dropped it ("unknown chess"). The server source loads data/*.json wholesale; the browser
   // runner fetches SIM_DATA_FILES.
   for (const src of [ds, freshDs()]) {
