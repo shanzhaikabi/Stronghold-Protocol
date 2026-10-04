@@ -96,7 +96,8 @@ export function buildResult(m, outcome) {
   const rows = players.map((ps) => {
     const roundsPassed = !ps.alive && ps.eliminatedRound != null ? Math.max(0, ps.eliminatedRound - 1) : teamRounds;
     const lineup = boardOrder(ps.board).filter((x) => x.piece.kind === 'chess').map(({ r, c, piece }) => ({
-      id: piece.id, golden: gd.isGolden(piece.id), tier: gd.tierOf(piece.id), row: r, col: c, items: (piece.items || []).map((i) => i.id),
+      // DESIGN §23.6: the 等阶 shown for the piece is the match's (a 自选干员's 自由位置 slot), never its record rarity
+      id: piece.id, golden: gd.isGolden(piece.id), tier: ps.matchTierOf(piece.id), row: r, col: c, items: (piece.items || []).map((i) => i.id),
     }));
     // the team's clear counts for the players still in; an eliminated / departed teammate did not pass the boss round
     const cleared = victory && ps.alive;

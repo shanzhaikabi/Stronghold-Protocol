@@ -272,6 +272,11 @@ export class Battle {
     const def = this.data.getChess(inp.chessId, { skillIndex: inp.skillIndex ?? null, moduleId: inp.moduleId ?? null });
     if (!def) { this.log(`unknown chess ${inp.chessId}`); return null; }
     const u = this._makeAlly(ps, def, 'op', r, c, { uid: inp.uid, dir });
+    // DESIGN §23.6: the operator's 等阶 for THIS match, straight from the match (PlayerBattleInput `tier` — a 自选干员's
+    // 自由位置 slot). It has to travel with the unit: the record says 6 for 87 of the 93 candidates, and the same
+    // operator can be 5 阶 for one player and 6 阶 for another. Everything that reads an operator's 等阶 (support.tierOf:
+    // 据点 by_charlevel, 克莱门莎 band13, the 阿戈尔 devour layers, 突变细胞) and the UnitInfo chip use it.
+    if (Number.isInteger(inp.tier) && inp.tier >= 1 && inp.tier <= 6) u.tier = inp.tier;
     u.items = [...(inp.items ?? [])];
     u.carry = inp.carryState ?? null;
     return u;

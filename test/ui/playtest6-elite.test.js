@@ -116,9 +116,11 @@ describe('shop bar: the merge tag and the armed card', () => {
     assert.equal(mergeHint(hand, A), '精锐干员将进入整备区');
     assert.equal(mergeHint({ board: [], hand: [inHand(A, 1)] }, A), null, 'no merge yet');
     assert.equal(mergeHint(board, golden(A)), null, 'an elite card never merges');
-    // the first tap: ShopBar tapCard → onDetail(id, 'chess', mergeHint) → game.js setDetail({ …, hint }) → resolveDetail
-    assert.match(read('public/js/ui/shopBar.js'), /setArmed\(key\); onDetail\(slot\.id, detailKind, detailKind === 'chess' \? mergeHint\(priv, slot\.id\) : null\)/);
-    assert.match(read('public/js/screens/game.js'), /onDetail=\$\{\(id, kind, hint\) => setDetail\(\{ kind: kind === 'item' \? 'item' : 'chess', id, hint: hint \|\| null \}\)\}/);
+    // the first tap: ShopBar tapCard → onDetail(id, 'chess', mergeHint, tier) → game.js setDetail({ …, hint, tier }) →
+    // resolveDetail; `tier` is the slot's 等阶 for this match (a 自选干员's 自由位置 slot, DESIGN §23.6) — the detail panel
+    // shows that instead of the record's rarity
+    assert.match(read('public/js/ui/shopBar.js'), /setArmed\(key\); onDetail\(slot\.id, detailKind, detailKind === 'chess' \? mergeHint\(priv, slot\.id\) : null, Number\.isInteger\(slot\.tier\) \? slot\.tier : null\)/);
+    assert.match(read('public/js/screens/game.js'), /onDetail=\$\{\(id, kind, hint, tier\) => setDetail\(\{ kind: kind === 'item' \? 'item' : 'chess', id, hint: hint \|\| null, tier: Number\.isInteger\(tier\) \? tier : null \}\)\}/);
     const r = resolveDetail({ kind: 'chess', id: A, hint: mergeHint(board, A) }, new Map());
     assert.equal(r.hint, '精锐干员将出现在作战区原位置');
     const blocks = ChessDetail({ chess: r.chess, piece: null, editable: false, bonds: [], loadout: null, hint: r.hint });

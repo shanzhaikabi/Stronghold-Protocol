@@ -144,10 +144,12 @@ export const isOp = (u) => !!u && u.kind === 'op';
 export const onField = (u) => !!u && u.alive && u.deployed;
 /** Elite (精锐) chess. */
 export const isElite = (u) => !!(u && u.def && (u.def.golden || isGoldenId(u.def.id)));
-/** Shop tier (阶) of an operator (tokens: their summoner's tier, else 1). */
+/** Shop tier (阶) of an operator (tokens: their summoner's tier, else 1). `u.tier` = the 等阶 the MATCH assigned it
+ * (PlayerBattleInput `tier`: a 自选干员's 自由位置 slot, DESIGN §23.6) and wins over the record's — the record's rarity is
+ * a shop number, not the operator's 等阶 in this match. */
 export function tierOf(u) {
   if (!u) return 1;
-  if (u.kind === 'op') return Math.max(1, Math.floor(num(u.def?.tier ?? u.def?.raw?.tier, 1)));
+  if (u.kind === 'op') return Math.max(1, Math.floor(num(u.tier ?? u.def?.tier ?? u.def?.raw?.tier, 1)));
   if (u.ownerUnit) return tierOf(u.ownerUnit);
   return 1;
 }

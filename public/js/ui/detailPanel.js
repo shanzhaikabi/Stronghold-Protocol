@@ -353,11 +353,16 @@ export function chessStatsBlock({ rec, chess, live = null }) {
     </div>`;
 }
 
-export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null }) {
+export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bonds, offBonds = null, loadout, onBond, live = null, hint = null, unitItems = null, matchTier = null }) {
   const m = data.get('assets');
   const hp = hpOf(live, snapHp);
   const lo = chessLoadout(chess, loadout, (id) => data.lookup('chess', id));
   const c = chess;
+  // DESIGN §23.6: the 等阶 shown is the operator's for THIS match — the piece's own (m.private hand / 整备区 / 作战区,
+  // the server's matchTierOf), a battle unit's (UnitInfo `tier`), or the shop slot's (matchTier) — never the record's
+  // rarity, which is 6 for 87 of the 自选候选 however the player filed the pick. The record is the last resort (a
+  // season chess carries the same number anyway).
+  const tier = [matchTier, piece?.tier, unit?.tier].find((t) => Number.isInteger(t) && t >= 1 && t <= 6) ?? c.tier;
   // stats / talents the unit fights with: the chosen module's (or none — statsBase) for an elite (DESIGN §16)
   const fr = lo?.record || c;
   const golden = !!(c.isGolden || piece?.golden);
@@ -377,12 +382,12 @@ export function ChessDetail({ chess, piece, unit, snapHp, editable, onSell, bond
   const blocks = {};
   blocks.head = html`
     <div key="head" class="dhead">
-      <div class=${cx('dhead__art', golden && 'is-golden', `dhead__art--t${c.tier}`)}>
-        <${Img} src=${chessPortraitUrl(m, c)} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} size="lg" />`} />
+      <div class=${cx('dhead__art', golden && 'is-golden', `dhead__art--t${tier}`)}>
+        <${Img} src=${chessPortraitUrl(m, c)} fallback=${html`<${UnitThumb} kind="chess" id=${c.chessId} tier=${tier} size="lg" />`} />
       </div>
       <div class="dhead__info">
         <div class="dhead__chips">
-          <${TierChip} tier=${c.tier} golden=${golden} size="lg" />
+          <${TierChip} tier=${tier} golden=${golden} size="lg" />
           ${golden ? html`<span class="dtag-elite">精锐</span>` : null}
           ${piece?.kind === 'token' ? html`<span class="dtag-token">召唤物</span>` : null}
         </div>
@@ -619,7 +624,8 @@ export function resolveDetail(target, pieces) {
     // a bond popup's 变形同构体 row hands the wearer's item ids on (bondStrip onMember): the card shows the pair and the chip
     const c = data.lookup('chess', target.id);
     const items = Array.isArray(target.items) ? target.items.filter((x) => typeof x === 'string') : [];
-    return c ? { type: 'chess', chess: c, hint: target.hint || null, ...(items.length ? { unitItems: items } : {}) } : null;
+    // `tier` = the slot's 等阶 for this match (a shop card hands it on, DESIGN §23.6): a 自选干员 shows its 自由位置 slot
+    return c ? { type: 'chess', chess: c, hint: target.hint || null, ...(Number.isInteger(target.tier) ? { tier: target.tier } : {}), ...(items.length ? { unitItems: items } : {}) } : null;
   }
   if (target.kind === 'item') { const it = data.lookup('items', target.id); return it ? { type: 'item', item: it } : null; }
   if (target.kind === 'enemy') { const en = data.lookup('enemies', target.id); return en ? { type: 'enemy', enemy: en, count: target.count } : null; }
@@ -672,7 +678,8 @@ export function DetailPanel({ detail, editable, snapHp, onClose, onSell, onDestr
     <button type="button" class="dpanel__close" aria-label="关闭" onClick=${onClose}><${Icon} name="close" /></button>
     <div class="dpanel__scroll">
       ${detail.type === 'chess' ? html`<${ChessDetail} chess=${detail.chess} piece=${detail.piece} snapHp=${snapHp} editable=${editable} onSell=${sellIt}
-        bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null} />` : null}
+        bonds=${bonds} offBonds=${offBonds} loadout=${loadout} onBond=${onBond} live=${liveNow} hint=${detail.hint || null} unitItems=${detail.unitItems || null}
+        matchTier=${Number.isInteger(detail.tier) ? detail.tier : null} />` : null}
       ${detail.type === 'item' ? html`<${ItemDetail} item=${detail.item} piece=${detail.piece} editable=${editable} onDestroy=${destroyIt} offBonds=${offBonds} />` : null}
       ${detail.type === 'enemy' ? html`<${EnemyDetail} enemy=${detail.enemy} snapHp=${snapHp} count=${detail.count} live=${liveNow} />` : null}
       ${detail.type === 'token' ? html`<${TokenDetail} token=${detail.token} piece=${detail.piece} ownerId=${detail.ownerId ?? null} snapHp=${snapHp} live=${liveNow} />` : null}

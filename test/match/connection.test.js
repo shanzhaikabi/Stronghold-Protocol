@@ -46,9 +46,11 @@ test('m.private shape in PREP matches DESIGN §8.3 (pieces, slots, bonds, effect
   assert.equal(priv.funds, 4);
   assert.equal(priv.shop.slots.length, 4);
   for (const s of priv.shop.slots) {
-    assert.deepEqual(Object.keys(s).sort(), ['basePrice', 'frozen', 'id', 'kind', 'price', 'sold']);
+    // `tier` = the slot's 等阶 for this match (a 自选干员's 自由位置 slot — DESIGN §23.6; the shop card reads it)
+    assert.deepEqual(Object.keys(s).sort(), ['basePrice', 'frozen', 'id', 'kind', 'price', 'sold', 'tier']);
     assert.equal(s.frozen, false);
     assert.ok(s.kind === 'chess' || s.kind === 'item');
+    assert.equal(s.tier, s.kind === 'chess' ? h.m.gd.tierOf(s.id) : null, 'a season chess: the record tier; an item slot: null');
   }
   assert.equal(priv.shop.rewardOffer, null);
   assert.equal(priv.deployCap, 8);

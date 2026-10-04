@@ -328,6 +328,31 @@ export class PlayerState {
   }
 
   /**
+   * A chess's 等阶 **in this match** (DESIGN §23.6): a 自由位置 pick is the 等阶 of the slot it was filed at (the
+   * official 甄选干员 rows of the 物资调配处), every other operator its record's own tier. This is *the* number the
+   * player is shown — the shop card, the hand / 整备区 chip, the detail panel and the result lineup — and the one the
+   * battle reads (UnitInfo `tier`, `content/support.js tierOf`, 据点 `by_charlevel`, the 阿戈尔 devour layers,
+   * 突变细胞's "高一阶"), so no site may re-derive it from the record: a user report (2026-10-04 "现在自选会变成 6 阶,
+   * 即使我把它放在 5 阶的位置") was exactly that — the pool gate had learned the slot while every chip still showed the
+   * record's rarity (87 of the 93 candidates are 6★, so a pick filed at 5 阶 read as VI everywhere).
+   *
+   * The same operator may be filed at 5 阶 by one player and at 6 阶 by another, so this is per player — never a
+   * function of the chess id alone. The price / sell rows and the copy budget stay keyed by the RECORD tier on purpose
+   * (they are balance numbers, and the 5 / 6 price rows are identical): see freePickEntries().
+   * @param {string} id chess id (a pick's "elite" is the same record — see §23.2)
+   * @returns {number} 1…6
+   */
+  matchTierOf(id) {
+    const base = this.gd.baseIdOf(id);
+    for (const [level, list] of Object.entries(this.freePicks)) {
+      const lv = Number(level);
+      if (!Number.isInteger(lv)) continue;   // freePicks is validated (checkFreePicks): 5 / 6 only
+      for (const pick of list) if (this.gd.baseIdOf(pick) === base) return lv;
+    }
+    return this.gd.tierOf(id);
+  }
+
+  /**
    * This player's 自选干员 as pool-roll entries (DESIGN §23, `SharedPool._eligible` `extra`): `{ id, tier, left }` per
    * pick that joins the pool and can still yield copies.
    *
@@ -421,7 +446,12 @@ export class PlayerState {
   // piece bookkeeping
 
   newPiece(kind, id, extra = {}) {
-    return { uid: this.m.nextUid(), kind, id, items: kind === 'chess' ? [] : undefined, count: kind === 'token' ? 1 : undefined, ownerUid: undefined, poolCopies: 0, boughtRound: this.m.round, meta: {}, ...extra };
+    const p = { uid: this.m.nextUid(), kind, id, items: kind === 'chess' ? [] : undefined, count: kind === 'token' ? 1 : undefined, ownerUid: undefined, poolCopies: 0, boughtRound: this.m.round, meta: {}, ...extra };
+    // DESIGN §23.6: a chess carries its 等阶 for THIS match (a 自选干员's 自由位置 slot — matchTierOf), so every match-side
+    // reader of a piece's tier (the views, the bands / 据点 hooks over ctx.board()) gets the match's number, never the
+    // record's rarity. Items and summons keep the record's tier, which their views look up themselves.
+    if (kind === 'chess') p.tier = this.matchTierOf(id);
+    return p;
   }
 
   /**
@@ -1664,7 +1694,10 @@ export class PlayerState {
     const units = [];
     for (const { r, c, piece } of boardOrder(this.board)) {
       if (piece.kind === 'chess') {
-        const u = { uid: piece.uid, kind: 'chess', chessId: piece.id, row: r, col: c, dir: pieceDir(piece), items: (piece.items || []).map((i) => i.id) };
+        const u = { uid: piece.uid, kind: 'chess', chessId: piece.id, row: r, col: c, dir: pieceDir(piece), items: (piece.items || []).map((i) => i.id),
+          // DESIGN §23.6: the 等阶 the battle shows / reads (UnitInfo tier, content/support tierOf, 据点 by_charlevel,
+          // 阿戈尔 devour layers, 突变细胞) — a 自选干员's 自由位置 slot, carried per unit because the record cannot say it
+          tier: this.matchTierOf(piece.id) };
         // DESIGN §16: the equipped skill / module (elite only) from the loadout (defaults when absent)
         const lo = this.loadoutFor(this.gd.chess(piece.id));
         u.skillIndex = lo.skillIndex;
@@ -1700,7 +1733,9 @@ export class PlayerState {
       kind: p.kind,
       id: p.id,
       golden: !!(rec && rec.isGolden),
-      tier: rec && Number.isInteger(rec.tier) ? rec.tier : null,
+      // DESIGN §23.6: the piece carries its 等阶 for this match (newPiece → matchTierOf), so a 自选干员 filed at the 5 阶
+      // slot shows V although its record is a 6★ — the fallback covers a piece built by hand (tests / fixtures)
+      tier: Number.isInteger(p.tier) ? p.tier : rec && Number.isInteger(rec.tier) ? rec.tier : null,
       items: p.kind === 'chess' ? (p.items || []).map((it) => ({ uid: it.uid, id: it.id })) : [],
       count: p.kind === 'token' ? (p.count || 1) : 1,
       ownerUid: p.kind === 'token' ? p.ownerUid ?? null : null,
@@ -1734,7 +1769,9 @@ export class PlayerState {
   }
 
   privateView() {
-    const slots = this.shop.slots.map((s) => (s ? { kind: s.kind, id: s.id, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen } : null));
+    // `tier` on a chess slot = its 等阶 for this match (matchTierOf: a 自选干员 shows its 自由位置 slot, DESIGN §23.6) —
+    // the shop card cannot derive it from the record, which is a 6★ for 87 of the 93 candidates
+    const slots = this.shop.slots.map((s) => (s ? { kind: s.kind, id: s.id, tier: s.kind === 'chess' ? this.matchTierOf(s.id) : null, price: this.priceOf(s), basePrice: s.basePrice, sold: !!s.sold, frozen: !!s.frozen } : null));
     const offer = this.offers[0] || null;
     const free = this.shop.freeRefreshes > 0;
     const board = [];
@@ -1759,7 +1796,7 @@ export class PlayerState {
         slots,
         // `source` 'merge' = the promotion reward (晋升奖励); any other offer (a strategy, an item, a 特质) carries the
         // `label` the bar shows instead; `queued` = offers waiting behind it (player report #6 after 0.1.0)
-        rewardOffer: offer ? { tier: offer.tier, source: offer.source === 'merge' ? 'merge' : 'special', label: offer.label || null, queued: this.offers.length - 1, slots: offer.slots.map((s) => ({ kind: s.kind === 'item' ? 'item' : 'chess', id: s.id, price: s.price, sold: !!s.sold })) } : null,
+        rewardOffer: offer ? { tier: offer.tier, source: offer.source === 'merge' ? 'merge' : 'special', label: offer.label || null, queued: this.offers.length - 1, slots: offer.slots.map((s) => ({ kind: s.kind === 'item' ? 'item' : 'chess', id: s.id, tier: s.kind === 'item' ? null : this.matchTierOf(s.id), price: s.price, sold: !!s.sold })) } : null,
       },
       hand: this.hand.map((p) => (p ? this.pieceView(p) : null)),
       temp: this.temp.map((p) => (p ? this.pieceView(p) : null)),

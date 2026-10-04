@@ -8,7 +8,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ERR } from '../../shared/constants.js';
 import { createRng } from '../../server/sim/rng.js';
-import { DATA, makeMatch, give, giveItem } from './harness.js';
+import { unitInfo } from '../../server/sim/snapshot.js';
+import { tierOf as simTierOf } from '../../server/sim/content/support/index.js';
+import { makeBattle } from '../helpers/battleHarness.js';
+import { DATA, makeMatch, give, giveItem, legalTileFor } from './harness.js';
 
 const free = DATA.freePicks || {};
 const freeIds = Object.keys(free).sort();
@@ -168,6 +171,77 @@ test('自选干员: 4★ 预备干员 填在 5 阶槽 ⇒ 5 级才进池(不是�
   assert.equal(listed(4), false, 'nor at 4 级 — the 5 阶 slot is what admits it');
   assert.equal(listed(5), true, 'from 调度中心 5 级');
   h.m.dispose();
+});
+
+test('自选干员: 本局等阶按槽位走 —— 商店卡/手牌/侦查/结算/战斗单位都显示槽位阶级(用户 2026-10-04 "自选会变成 6 阶,即使我把它放在 5 阶的位置")', async () => {
+  // DESIGN §23.6: the slot IS the operator's 等阶 for the match. `freePickEntries` (the pool gate) had learned that in
+  // 2026-10-03, but every number the player is SHOWN — and every 等阶 the battle reads — still came from the record,
+  // which is 6 for 87 of the 93 candidates: a pick filed at 5 阶 showed VI in the shop, on its card and in the battle.
+  const EARLY = proto6[0];   // 凯尔希, 协防干员 — filed at 5 阶
+  const LATE = proto6[1];    // 陈, 炎 — filed at 6 阶
+  const FOUR = freeIds.find((id) => free[id].rarity === 4);   // a 4★ 预备干员 (5 阶 only)
+  const SZN = Object.values(DATA.chess).find((c) => c.visible && !c.isGolden && c.tier === 6).chessId;
+  const h = start({ 5: [EARLY, FOUR], 6: [LATE] });
+  const m = h.m, ps = h.ps('p_0');
+
+  assert.equal(m.gd.tierOf(EARLY), 6, 'fixture: the record itself is a 等阶-6 operator');
+  assert.equal(m.gd.tierOf(FOUR), 4, 'fixture: the 4★ 预备干员 record itself is 等阶 4');
+
+  h.toPrep(1);
+  // the piece views (hand / 整备区 chip, the detail panel): the chip the player sees on the operator they filed at 5 阶
+  const inHand = give(m, ps, EARLY, 'hand');
+  assert.equal(ps.pieceView(inHand).tier, 5, 'the hand / 整备区 chip (pieceView — UnitThumb / the 3D renderer)');
+  const onBoard = give(m, ps, EARLY, 'board', legalTileFor(m, ps, EARLY));
+  assert.equal(m.prepFieldMeta(ps).units.find((u) => u.uid === onBoard.uid).tier, 5, 'the scouted board (m.field) of a teammate');
+  // the shop card (public/js/ui/shopBar.js reads slot.tier; privateView must carry it — the record says 6)
+  ps.shop.level = 5;
+  ps.shop.slots = [{ kind: 'chess', id: EARLY, basePrice: m.gd.chessPrice(EARLY), sold: false, frozen: false }];
+  assert.equal(ps.privateView().shop.slots[0].tier, 5, 'the shop slot view carries the match 等阶, not the rarity');
+  const input = ps.battleInput({ side: 'L', colOffset: 0 });
+  const unitInput = input.units.find((u) => u.uid === onBoard.uid);
+  assert.equal(unitInput.tier, 5, 'the battle input carries the match 等阶 into the sim');
+
+  // …and the sim reads it everywhere an operator's 等阶 matters (content/support.js tierOf: 据点 by_charlevel,
+  // 克莱门莎's band13 (+its 等阶 layers), the 阿戈尔 devour layers) — and draws it on the battle chip
+  const battle = makeBattle({ data: m.ds, players: [input], spawns: [] }).battle;
+  const u = battle.units.find((x) => x.kind === 'op' && x.defId === EARLY);
+  assert.ok(u, 'fixture: the pick stands on the field');
+  assert.equal(unitInfo(u).tier, 5, 'UnitInfo (the battle chip and a battle unit\'s detail card)');
+  assert.equal(simTierOf(u), 5, 'content tierOf — the 等阶 the content hooks read');
+  assert.equal(simTierOf({ kind: 'token', ownerUnit: u }), 5, 'its summons follow their owner\'s 等阶');
+
+  // the result screen's lineup is the same number
+  const { buildResult } = await import('../../server/match/results.js');
+  const res = buildResult(m, { victory: false, hiddenReached: false, hiddenCleared: false, reason: 'test' });
+  assert.equal(res.players.find((p) => p.playerId === 'p_0').lineup.find((x) => x.id === EARLY).tier, 5, 'the result lineup');
+
+  // the one source of truth behind all of the above (also what a pick's own elite resolves to — same record, §23.2)
+  assert.equal(ps.matchTierOf(EARLY), 5, 'the match 等阶 of a pick filed at the 5 阶 slot');
+  assert.equal(ps.matchTierOf(LATE), 6, '…and of one filed at 6 阶');
+  assert.equal(ps.matchTierOf(FOUR), 5, 'a 4★ 预备干员 in the 5 阶 slot is 等阶 5 for this match');
+  assert.equal(ps.matchTierOf(SZN), 6, 'a season operator keeps its record tier');
+
+  // the 4★ 预备干员: 5 阶 like its slot, while its price and copy budget stay the RECORD's (DESIGN §23.6 — a deliberate
+  // split: the 5 / 6 price rows are identical, the cap is a balance number the user has not asked to move)
+  const four = give(m, ps, FOUR, 'hand');
+  assert.equal(ps.pieceView(four).tier, 5, 'the 4★ shows its slot 等阶 (5), not its rarity (4)');
+  assert.equal(m.gd.chessPrice(FOUR), m.gd.config.economy.chessPrice[4].normal, 'its price stays the record tier\'s row');
+  assert.equal(m.gd.poolCopies(FOUR), m.gd.config.economy.poolCopies[4], 'and so does its copy cap');
+  m.dispose();
+
+  // the 等阶 is PER PLAYER (the same operator may be filed at 5 阶 by one and 6 阶 by another), like the private pool
+  const h2 = makeMatch({
+    mode: 'coop', difficulty: 'NORMAL', seed: SEED, fake: true,
+    seats: [
+      { seat: 0, playerId: 'p_0', name: 'P0', isBot: false, connected: true, picks: { 5: [EARLY] } },
+      { seat: 1, playerId: 'p_1', name: 'P1', isBot: false, connected: true, picks: { 6: [EARLY] } },
+    ],
+  }).start();
+  assert.equal(h2.ps('p_0').matchTierOf(EARLY), 5, 'filed at 5 阶 by P0');
+  assert.equal(h2.ps('p_1').matchTierOf(EARLY), 6, 'and at 6 阶 by P1 — never a function of the chess id alone');
+  assert.deepEqual(h2.ps('p_0').freePickEntries().map((e) => [e.id, e.tier]), [[EARLY, 5]]);
+  assert.deepEqual(h2.ps('p_1').freePickEntries().map((e) => [e.id, e.tier]), [[EARLY, 6]]);
+  h2.m.dispose();
 });
 
 test('自选干员: 三合一晋升奖励 —— 5 级合出的 6★ 抽取里能有 6 阶槽的选取,4 级合出的 5★ 抽取里能有 5 阶槽的选取', () => {

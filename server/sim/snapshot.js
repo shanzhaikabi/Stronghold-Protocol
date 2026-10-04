@@ -28,7 +28,9 @@ export function unitInfo(u) {
     ownerId: u.ownerId ?? null,
     defId: u.defId,
     name: u.name,
-    tier: d.tier ?? (d.rank === 'BOSS' ? 3 : d.rank === 'ELITE' ? 2 : 1),
+    // DESIGN §23.6: an ally operator's 等阶 for this match (a 自选干员's 自由位置 slot) wins over the record's rarity —
+    // u.tier is set from the PlayerBattleInput; enemies / tokens / devices keep the def's number
+    tier: Number.isInteger(u.tier) ? u.tier : d.tier ?? (d.rank === 'BOSS' ? 3 : d.rank === 'ELITE' ? 2 : 1),
     golden: !!d.golden,
     spine: d.spine ?? d.charId ?? u.defId,
     avatar: d.avatar ?? d.charId ?? u.defId,

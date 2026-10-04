@@ -121,7 +121,9 @@ export function attachAudit(m, { invariants = true, limit = 200 } = {}) {
     wrap(ps, '_rollChessSlot', function (orig) {
       const s = orig();
       if (s) {
-        const t = gd.tierOf(s.id);
+        // the row the roll landed in is the operator's 等阶 for THIS match (a 自选干员's 自由位置 slot, DESIGN §23.6): the
+        // record's rarity would report a 5 阶 pick rolled at 调度中心 5 级 as "rolled tier 6 at shop level 5"
+        const t = typeof ps.matchTierOf === 'function' ? ps.matchTierOf(s.id) : gd.tierOf(s.id);
         const row = (audit.odds[ps.shop.level] ||= {});
         row[t] = (row[t] || 0) + 1;
         check('shop roll', () => {

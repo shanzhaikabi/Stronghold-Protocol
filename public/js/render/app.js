@@ -860,7 +860,9 @@ export async function createFieldView(host, options = {}) {
     return {
       kind: 'op', side: 'ally', defId: piece.id,
       spine: rec?.assets?.spine || rec?.charId || null, avatar: rec?.assets?.avatar || rec?.charId || null,
-      tier: rec?.tier || piece.tier || 1, golden: !!(piece.golden || rec?.isGolden), dir,
+      // DESIGN §23.6: the piece's 等阶 for this match (m.private pieceView: a 自选干员's 自由位置 slot) wins over the
+      // record's rarity — a 6★ pick filed at the 5 阶 slot draws the V chip, like the shop card and the detail panel
+      tier: piece.tier || rec?.tier || 1, golden: !!(piece.golden || rec?.isGolden), dir,
     };
   }
 
