@@ -31,7 +31,7 @@ const modRec = (id, uniEquipId) => (FREE[id].modules || []).find((m) => m.uniEqu
 const TULIP = 'chess_free_char_608_acpion', SHARP = 'chess_free_char_609_acguad', MECH = 'chess_free_char_610_acfend';
 const STORM = 'chess_free_char_611_acnipe', PITH = 'chess_free_char_612_accast', TOUCH = 'chess_free_char_613_acmedc';
 const RAIDIAN = 'chess_free_char_614_acsupo', MISERY = 'chess_free_char_615_acspec', LORD = 'chess_free_char_617_sharp2';
-/** 赤刃明霄陈 火陈 (S3 剑气长龙 only — her S1/S2 and both talents are still the generic / no-talent path). */
+/** 赤刃明霄陈 火陈 (S3 剑气长龙 authored; S1/S2 fall back to the generic spec, both talents are authored here). */
 const CHEN = 'chess_free_char_1050_chen3';
 /** 望 (SPECIAL 陷阱师, the 棋子 summoner — `tokens.js wangStone`): S3 天下劫 only. */
 const WANG = 'chess_free_char_2027_wang';
@@ -1176,8 +1176,9 @@ test('火陈 S3 天喟: 每次攻击对最多3名地面敌人 3 次 165% 法术 
 
 // 火陈's two talents, ported from PR #71 (SrC2O4, head c76a81f — kits/recruitsSpecial.js `chen3`): 形意洞照
 // `{atk:0.13, attack_speed:13}` + 攻击变为弱点伤害, 寒暑觉知 `{stack_time:6, heal_atk_scale_min:50,
-// heal_atk_scale_max:201}`. Our own kit keeps its S3 剑气长龙 (the ported kit's S3 is one instantaneous AoE) but takes
-// both talents — see the entry in kits/freePicks.js.
+// heal_atk_scale_max:201}`. Our own kit keeps its S3 剑气长龙 (the ported kit's S3 is one instantaneous AoE) and takes
+// both talents, with the two readings the port's audit flagged fixed: the heal follows the description's 200 % (the
+// blackboard's 201 is the data's own bound) and the 闪避 is a phys+arts typed hit — see the entry in kits/freePicks.js.
 test('火陈 形意洞照: 攻击力+13 % / 攻击速度+13, and 攻击变为弱点伤害 picks the target\'s weaker side', () => {
   // 弱点伤害 (the ported rule): the hit's damage type is 法术 when the target's DEF exceeds this attack's own ATK × RES %
   // — i.e. when physics would be mitigated more than arts — and 物理 otherwise
@@ -1196,17 +1197,42 @@ test('火陈 形意洞照: 攻击力+13 % / 攻击速度+13, and 攻击变为弱
   }
 });
 
-test('火陈 寒暑觉知: after 6 s without damage, heals ATK × 50–201 % and gains one hit-shield', () => {
+test('火陈 寒暑觉知: after 6 s without damage, heals ATK × 50–200 % and dodges the next phys or arts hit', () => {
   const h = battle([{ chessId: CHEN, row: 10, col: 4, skillIndex: 2, carryState: READY }], { timeLimit: 30 });
   h.step();
   const u = h.unit(CHEN);
   u.hp = u.s.maxHp * 0.5;
   const t1 = D(CHEN, 2).talents[1].bb;
+  // fixture: the record's own description is 「攻击力的50%~200%」 while its blackboard's max is 201 — the kit follows the
+  // text the player reads, which is what this test pins (pre-fix it rolled up to 201 %)
+  assert.equal(FREE[CHEN].talents[1].desc, '未受到伤害时，每6秒随机治疗自身一定（攻击力的50%~200%）生命值，并闪避下次物理与法术攻击');
+  assert.equal(t1.heal_atk_scale_max, 201, "the record's blackboard says 201");
   assert.ok(h.runUntil(() => heals(h, u, (c) => c.target === u).length > 0, 12), '未受到伤害时每6秒治疗自身');
   const heal = heals(h, u, (c) => c.target === u)[0];
-  const lo = (u.s.atk * t1.heal_atk_scale_min) / 100, hi = (u.s.atk * t1.heal_atk_scale_max) / 100;
-  assert.ok(heal.amount >= lo - 1e-6 && heal.amount <= hi + 1e-6, `${heal.amount} ∈ [50 %, 201 %] of ATK`);
-  assert.ok(u.findBuff('chen3:evade')?.shieldHits === 1, '闪避下次物理与法术攻击 (one hit-shield)');
+  const lo = (u.s.atk * t1.heal_atk_scale_min) / 100, hi = (u.s.atk * 200) / 100;
+  assert.ok(heal.amount >= lo - 1e-6 && heal.amount <= hi + 1e-6, `${heal.amount} ∈ [50 %, 200 %] of ATK`);
+  // 闪避下次物理与法术攻击 = ONE consumed hit, covering phys AND arts and nothing else (damage.js absorbShields' typed tags)
+  const evade = u.findBuff('chen3:evade');
+  assert.equal(evade?.shieldHits, 1, 'one hit-shield');
+  assert.deepEqual(evade.tags, ['physShield', 'artsShield'], 'typed: 物理与法术, so 真实 / 元素 damage is not dodged');
+  const hit = (type, amount) => { h.b.dealDamage(null, u, { amount, type, canDodge: false }); };
+  let hp = u.hp;
+  hit('true', 100);   // 真实伤害 is not mitigated, so a small number is enough to be observable
+  approx(u.hp, hp - 100, '真实伤害 passes the dodge');
+  assert.equal(u.findBuff('chen3:evade')?.shieldHits, 1, 'and does not consume it');
+  hp = u.hp;
+  hit('phys', 5000);  // large, so the post-mitigation amount is > 0 whatever her DEF is
+  assert.equal(u.hp, hp, 'a physical hit is dodged entirely');
+  assert.equal(u.findBuff('chen3:evade'), null, 'the dodge is consumed');
+  // the next proc dodges an ARTS hit too — the union of the two tags, not "phys only"
+  u.hp = u.s.maxHp * 0.5;
+  const first = heals(h, u, (c) => c.target === u).length;
+  assert.ok(h.runUntil(() => heals(h, u, (c) => c.target === u).length > first, 20), 'it procs again after another 6 s');
+  assert.deepEqual(u.findBuff('chen3:evade')?.tags, ['physShield', 'artsShield']);
+  hp = u.hp;
+  hit('arts', 5000);
+  assert.equal(u.hp, hp, 'an arts hit is dodged entirely');
+  assert.equal(u.findBuff('chen3:evade'), null);
   done(h);
 });
 

@@ -147,23 +147,19 @@ describe('干员调配 overlay (real server, headless Chrome)', { skip: !ENABLED
     const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')));
     assert.deepEqual(stored.entries, { [INSIDE]: { skill: 0 } });
 
-    // 导出: a centred dialog (a full-viewport overlay, not a flex item of the screen) with the payload in the textarea
+    // 导出: a centred dialog — its own full-viewport overlay, rendered NEXT TO the .lo screen rather than inside it
     await clickSel(page, '[data-testid="loadout-export"]');
     await page.waitForSelector('.modal [data-testid="loadout-io-text"]', { visible: true, timeout: 5000 });
-    // The box plays its 250 ms `modal-in` entrance animation (translateY(.14rem) scale(.985), components.css), and it is
-    // still visible — `waitForSelector` returns on the first frame — so read the SETTLED geometry: measuring mid-animation
-    // reports the dialog ~14 px off centre and fails the assertion below for a dialog that is centred.
-    await page.waitForFunction(() => {
-      const box = document.querySelector('.modal__box');
-      return !box || (box.getAnimations?.() || []).every((a) => a.playState !== 'running');
-    }, { timeout: 3000 });
+    // the box slides in (`modal-in`, 250 ms): measure the settled geometry, not a frame of the entry animation
+    await page.waitForFunction(() => document.querySelector('.modal__box')?.getAnimations().every((a) => a.playState === 'finished'), { timeout: 5000 });
     const box = await page.evaluate(() => {
       const m = document.querySelector('.modal');
       const b = document.querySelector('.modal__box').getBoundingClientRect();
-      return { position: getComputedStyle(m).position, y: b.y, h: b.height, vh: innerHeight };
+      return { position: getComputedStyle(m).position, y: b.y, h: b.height, vh: innerHeight, inside: !!m.closest('.lo') };
     });
-    assert.equal(box.position, 'fixed', 'the screen\'s `.lo > *` rule must not clobber the modal');
-    assert.ok(Math.abs(box.y + box.h / 2 - box.vh / 2) < 2, 'centred vertically');
+    assert.equal(box.position, 'fixed', 'the modal keeps components.css `position: fixed`');
+    assert.equal(box.inside, false, 'a sibling of .lo, so `.lo > *` needs no exception for it');
+    assert.ok(Math.abs(box.y + box.h / 2 - box.vh / 2) < 2, `centred vertically (${JSON.stringify(box)})`);
     const payload = JSON.parse(await page.$eval('[data-testid="loadout-io-text"]', (t) => t.value));
     assert.equal(payload.kind, 'stronghold.loadout');
     assert.equal(payload.v, 1);
@@ -193,6 +189,13 @@ describe('干员调配 overlay (real server, headless Chrome)', { skip: !ENABLED
     await page.click('[data-testid="loadout-io-apply"]');
     await page.waitForFunction(() => /导入失败/.test(document.body.textContent || ''), { timeout: 5000 });
     assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')).entries), stored.entries, 'a refused import changes nothing');
+
+    // a payload this build cannot use at all (every chess unknown) must leave the loadout alone too (review fix)
+    await page.$eval('[data-testid="loadout-io-text"]', (t) => { t.value = '{"v":1,"entries":{"chess_not_here":{"skill":0}}}'; t.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.click('[data-testid="loadout-io-apply"]');
+    await page.waitForFunction(() => /没有可用的调配/.test(document.body.textContent || ''), { timeout: 5000 });
+    assert.ok(await page.$('.modal'), 'the dialog stays open for the player to fix the payload');
+    assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('sp.pref.loadout')).entries), stored.entries, 'an import that keeps nothing changes nothing');
     assert.deepEqual(problems, []);
     await ctx.close();
   });
@@ -239,6 +242,21 @@ describe('干员调配 overlay (real server, headless Chrome)', { skip: !ENABLED
     // the briefing (and its countdown) is hidden under the overlay: the overlay carries the time left
     await page.waitForSelector('.lo-top .lo-deadline', { visible: true, timeout: 3000 });
     assert.match(await page.$eval('.lo-top .lo-deadline', (el) => el.getAttribute('aria-label')), /剩余\d+秒/);
+    // review: the two new 导出 / 导入 buttons must fit next to the countdown on a narrow phone in landscape (667×375).
+    // Only the size changes (toggling isMobile / hasTouch would make puppeteer reload the page).
+    await page.setViewport({ width: 667, height: 375 });
+    const bar = await page.evaluate(() => {
+      const top = document.querySelector('.lo-top');
+      const right = document.querySelector('.lo-top__right').getBoundingClientRect();
+      const center = document.querySelector('.lo-top__center').getBoundingClientRect();
+      const buttons = [...document.querySelectorAll('.lo-top__right .btn')].map((b) => Math.round(b.getBoundingClientRect().right));
+      return { overflow: top.scrollWidth - top.clientWidth, overlap: right.left < center.right, offscreen: right.right > innerWidth, buttons };
+    });
+    assert.ok(bar.overflow <= 0, `the top bar does not scroll sideways (${JSON.stringify(bar)})`);
+    assert.equal(bar.overlap, false, `the right column does not run into the title (${JSON.stringify(bar)})`);
+    assert.equal(bar.offscreen, false, `every button ends inside the viewport (${JSON.stringify(bar)})`);
+    await page.screenshot({ path: path.join(OUT, 'loadout-narrow-toolbar.png') });
+    await page.setViewport({ width: 1920, height: 1080 });
     await page.type('.lo-search input', '隐现');
     await page.waitForFunction(() => document.querySelectorAll('.lo-card').length === 1, { timeout: 5000 });
     await page.click('.lo-card');

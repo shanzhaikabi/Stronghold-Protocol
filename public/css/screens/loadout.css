@@ -28,12 +28,8 @@
 }
 /* every layer but the background stacks above it. :where() keeps this at the specificity of the old `.lo > *` (one
    class), so the rules after it still win where they did, and it never matches .lo__bg: as `.lo > *` (same specificity,
-   later rule) it beat the layer's `position: absolute`, which left a 0-px tall flex item that never drew (PR #14).
-   [port] it must not match .modal either: a modal opened from the screen is a full-viewport overlay of its own and keeps
-   `position: fixed` from components.css — this rule would otherwise win the cascade (same specificity, loadout.css loads
-   later) and turn it into a flex item pushed to the bottom. Both exclusions sit inside :where() so the specificity stays
-   at (0,1,0). */
-.lo > :where(:not(.lo__bg, .modal)) { position: relative; }
+   later rule) it beat the layer's `position: absolute`, which left a 0-px tall flex item that never drew (PR #14). */
+.lo > :where(:not(.lo__bg)) { position: relative; }
 
 /* ---- top bar ---------------------------------------------------------------------------------------------------- */
 .lo-top {
@@ -446,7 +442,9 @@ button.lo-free__slot:disabled { opacity: .5; cursor: default; }
 .sp-coarse .lo-seg button { min-height: 28px; }
 @media (prefers-reduced-motion: reduce) { .lo, .lo-card { animation: none; transition: none; } }
 
-/* 导出 / 导入 (干员调配 presets): a JSON textarea inside the shared Modal, plus the hidden input behind 选择文件 */
+/* 导出 / 导入 (干员调配 presets): the dialog is the shared Modal, rendered NEXT TO `.lo` (a sibling) rather than inside
+   it — so components.css `.modal { position: fixed }` and its z-index above the overlay apply as they do everywhere
+   else, and `.lo > *` needs no exception for it. Below: the payload textarea + the hidden input behind 选择文件. */
 .lo-io__hint { margin: 0 0 max(.1rem, 8px); font-size: max(.18rem, 12px); line-height: 1.55; color: var(--text-md); }
 .lo-io__hint b { color: var(--mint-400); font-size: max(.22rem, 13px); margin: 0 .02rem; }
 .lo-io__hint strong { color: var(--gold); }

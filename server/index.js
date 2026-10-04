@@ -126,17 +126,22 @@ const MAX_URL_LENGTH = 4096;
 // ---------------------------------------------------------------------------------------------------
 
 /**
- * Files that make up the runtime the browser loads. A change in ANY of them is a new build: an already-open page
+ * The files that make up the runtime the BROWSER loads. A change in any of them is a new build: an already-open page
  * keeps the modules it imported at load time (ES modules live in the page's module map for its whole lifetime), so
- * without this signal a deployed fix could never reach a player who does not reload — which is exactly how the
- * 自选干员 battle fix (2026-10-03) stayed invisible on an iOS page that had been opened before the deploy.
+ * without this signal a deployed fix could never reach a player who does not reload — a client-only battle fix
+ * shipped exactly that way and stayed invisible on a page that had been opened before the deploy.
+ *
+ * `server/`, `data/` and `shared/` are deliberately NOT in here: this process read them once at startup, so when they
+ * change without a restart the server still runs the old simulation and data — a page that reloaded into the new files
+ * would be out of step with the server that validates its battles (and DEPLOY.md restarts the server for every update).
  */
-export const BUILD_INPUTS = Object.freeze(['public/index.html', 'public/js', 'public/css', 'shared', 'server', 'data']);
-/** How long a computed tag is reused — a client-only deploy does not restart the process, so this is re-read. */
-export const BUILD_TAG_TTL_MS = 30_000;
+export const BUILD_INPUTS = Object.freeze(['public/index.html', 'public/js', 'public/css']);
 
-/** @type {{ at: number, tag: string|null }} */
-let buildCache = { at: 0, tag: null };
+/** Names the static server never serves: dot files (`.DS_Store`, `.main.js.swp`) and editor backups (`main.js~`). */
+const isIgnoredBuildName = (name) => name.startsWith('.') || name.endsWith('~');
+
+/** @type {{ tag: string|null }|null} */
+let buildCache = null;
 
 /** Every file under `abs` (or `abs` itself), as `[relative path, size, mtimeMs]`, sorted by path. Missing → []. */
 function buildEntries(abs, rel, out) {
@@ -147,6 +152,7 @@ function buildEntries(abs, rel, out) {
   let names;
   try { names = fs.readdirSync(abs, { withFileTypes: true }); } catch { return; }
   for (const d of names.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    if (isIgnoredBuildName(d.name)) continue;
     const child = path.join(abs, d.name);
     const childRel = rel ? `${rel}/${d.name}` : d.name;
     if (d.isDirectory()) buildEntries(child, childRel, out);
@@ -154,7 +160,7 @@ function buildEntries(abs, rel, out) {
   }
 }
 
-/** Short hash of the served runtime (size + mtime of every BUILD_INPUTS file); null when nothing is readable. */
+/** Short hash of the served browser runtime (size + mtime of every BUILD_INPUTS file); null when nothing is readable. */
 export function computeBuildTag(root = ROOT) {
   const out = [];
   for (const rel of BUILD_INPUTS) buildEntries(path.join(root, rel), rel, out);
@@ -165,16 +171,19 @@ export function computeBuildTag(root = ROOT) {
   return h.digest('hex').slice(0, 12);
 }
 
-/** The current build tag (cached for BUILD_TAG_TTL_MS). */
-export function buildTag(now = Date.now()) {
-  if (buildCache.tag && now - buildCache.at < BUILD_TAG_TTL_MS) return buildCache.tag;
-  const tag = computeBuildTag();
-  buildCache = { at: now, tag };
-  return tag;
+/**
+ * The build tag of THIS process. Computed once (`startServer` warms it at startup): the tag describes the files the
+ * process is actually serving, every update restarts the server (DEPLOY.md), and re-reading the tree on a timer would
+ * let a half-finished deploy — or a file that changed while the process kept running — move the tag under a page.
+ * @param {string} [root] used by the first call only (tests)
+ */
+export function buildTag(root = ROOT) {
+  if (buildCache === null) buildCache = { tag: computeBuildTag(root) };
+  return buildCache.tag;
 }
 
-/** Drop the cache (tests). */
-export function resetBuildTag() { buildCache = { at: 0, tag: null }; }
+/** Drop the cache: the next `buildTag()` re-reads the tree (tests, and `startServer`). */
+export function resetBuildTag() { buildCache = null; }
 
 const gzipAsync = promisify(zlib.gzip);
 const noopLog = { info() {}, warn() {}, error() {}, debug() {} };
@@ -630,6 +639,9 @@ export async function startServer(opts = {}) {
   const network = new Network({ registry, handler: lobby, log, options: netOptions });
   const serveStatic = createStaticHandler({ publicDir, dataDir, sharedDir, log });
   const startedAt = Date.now();
+  // The tag is per process (see buildTag): read the browser runtime once, here, not on every /healthz.
+  resetBuildTag();
+  buildTag();
 
   const server = http.createServer((req, res) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

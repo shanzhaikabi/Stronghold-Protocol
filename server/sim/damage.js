@@ -183,10 +183,24 @@ export function leaderHitCancelled(battle, target, amount) {
  * physics, one tagged `artsShield` only arts (夜莺 S3 / 傀影幻影 S1 of the 自选干员 kits). `damageType === null` (every
  * pre-existing caller) keeps the old untyped behaviour. Our modification: the parenthesised conditions only — their
  * `a && x || b && y` relied on `&&` binding tighter than `||`; same semantics, spelled out.
+ *
+ * [our modification — GPL §5] a buff carrying BOTH tags covers the UNION of them instead of "phys ⇒ only phys /
+ * arts ⇒ only arts": 火陈 寒暑觉知's 「闪避下次物理与法术攻击」 is one consumed hit of either type, and its record's own
+ * text says neither of them is a 真实 / 元素伤害 hit (which must pass through: element damage never reaches shields —
+ * `dealDamage` returns through `applyElement` first). Single-tag and untagged buffs keep 1:1 the ported behaviour.
  */
 export function absorbShields(battle, target, amount, damageType = null) {
   if (amount <= 0) return 0;
-  const blocked = (b) => (b.tags?.includes('physShield') && damageType !== 'phys') || (b.tags?.includes('artsShield') && damageType !== 'arts');
+  /** The damage types a buff declares; `null` = untyped (absorbs every type, the pre-port behaviour). */
+  const covered = (b) => {
+    const t = b.tags;
+    if (!t || !t.length) return null;
+    const s = [];
+    if (t.includes('physShield')) s.push('phys');
+    if (t.includes('artsShield')) s.push('arts');
+    return s.length ? s : null;
+  };
+  const blocked = (b) => { const s = covered(b); return s ? !s.includes(damageType) : false; };
   let changed = false;
   let rest = amount;
   for (let i = 0; i < target.buffs.length && rest > 0; i++) {

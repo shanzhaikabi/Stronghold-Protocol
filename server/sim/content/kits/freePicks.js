@@ -1025,9 +1025,11 @@ export default {
   //     weaker side; our earlier note that 弱点伤害 "has no engine support anywhere" was wrong — a `hit` handler can set
   //     `dmg.type`, exactly as professions.js `artsprotector` does).
   //   寒暑觉知 `{stack_time:6, heal_atk_scale_min:50, heal_atk_scale_max:201}` — every 6 s without having taken damage,
-  //     heal self for ATK × a random 50 %–201 % (the record's own numbers; the description says 50 %~200 %) and gain one
-  //     hit-shield as "闪避下次物理与法术攻击" (the engine has no typed dodgeHits: `shieldHits: 1` absorbs one hit of any
-  //     type — the ported kit's reading).
+  //     heal self for ATK × a random 50 %–200 % and gain 闪避下次物理与法术攻击 as one consumed phys/arts hit-shield.
+  //     Both readings follow the record's own DESCRIPTION: it says 「攻击力的50%~200%」 (the blackboard's 201 is the
+  //     official data's bound) and the dodge is neither 真实 nor 元素 damage — `tags: ['physShield','artsShield']` on
+  //     `shieldHits: 1` (damage.js absorbShields covers the union of the two tags; the ported kit used the untyped
+  //     `shieldHits: 1`, which ate one hit of ANY type).
   // Their S3 is NOT taken: it is one instantaneous AoE over every enemy in range (`max(target.hp × hp_ratio,
   // ATK × projectile_min_atk_scale)`), while our `swordQi` flies a real 1.5 tile/s line and damages each enemy it passes
   // once — described in the file header and pinned by test/content/kits_freePicks.test.js.
@@ -1065,12 +1067,18 @@ export default {
           talentName: '寒暑觉知',
           install(b, u) {
             const iv = num(t1.stack_time, 6);
+            // 「攻击力的50%~200%」 is the record's own description; its blackboard carries `heal_atk_scale_max: 201`
+            // (the official data's bound). The heal follows the text the player reads, so the roll is capped at 200 %.
+            const lo = num(t1.heal_atk_scale_min, 50);
+            const hi = Math.min(num(t1.heal_atk_scale_max, 200), 200);
             let last = 0;
             b.on('damaged', (c) => { if (c.target === u && c.amount > 0) last = b.time; }, { owner: u });
             whileDeployed(b, u, iv, () => {
               if (b.time - last < iv) return;
-              b.heal(u, u, (u.s.atk * (num(t1.heal_atk_scale_min, 50) + b.rng() * (num(t1.heal_atk_scale_max, 200) - num(t1.heal_atk_scale_min, 50)))) / 100, { self: true });
-              b.addBuff(u, { key: 'chen3:evade', shieldHits: 1 });
+              b.heal(u, u, (u.s.atk * (lo + b.rng() * (hi - lo))) / 100, { self: true });
+              // 「闪避下次物理与法术攻击」: one consumed hit covering BOTH physical and arts — the typed tags of
+              // damage.js `absorbShields` (real / element damage is not a 物理与法术攻击 and passes through).
+              b.addBuff(u, { key: 'chen3:evade', shieldHits: 1, tags: ['physShield', 'artsShield'] });
             });
           },
         },
@@ -1079,7 +1087,7 @@ export default {
       // ARE installed here, by the kit — the generic translator has no rule for either blackboard
       talentPlan: [
         { index: 0, name: '形意洞照', keys: Object.keys(t0), status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: 'kits/freePicks.js installs it (ported from PR #71 c76a81f)' },
-        { index: 1, name: '寒暑觉知', keys: Object.keys(t1), status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: 'kits/freePicks.js installs it (ported from PR #71 c76a81f)', drops: ['“闪避下次物理与法术攻击” uses the engine\'s untyped `shieldHits` (one hit of any type); the random heal uses the blackboard\'s 201 %, the description says 200 %'] },
+        { index: 1, name: '寒暑觉知', keys: Object.keys(t1), status: 'installed-by-kit', rule: 'kit-install:PR#71', reason: 'kits/freePicks.js installs it (the 6 s/50–200 % heal and the one-hit phys+arts 闪避 follow the description; its blackboard says 201 %)' },
       ],
     };
   },

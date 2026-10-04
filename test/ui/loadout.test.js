@@ -13,7 +13,7 @@ import { PHASE } from '../../shared/constants.js';
 import {
   parseStored, toStored, chessOptions, effectiveChoice, setChoice, resetChoice, sanitizeEntries, rosterOf, filterRoster,
   changedCount, moduleBadge, attrRows, skillTags, skillLabel, selectedSkill, selectedModule, recordsOf,
-  exportPayload, serializeExport, parseImport, LOADOUT_EXPORT_KIND, LOADOUT_VERSION,
+  exportPayload, serializeExport, parseImport, LOADOUT_EXPORT_KIND, LOADOUT_VERSION, LOADOUT_IMPORT_MAX_BYTES,
   parseStoredPicks, sanitizePicks, pickedIds, setPick, clearPick, freePickSlots, pickedCount,
   FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../../public/js/ui/loadoutModel.js';
@@ -44,41 +44,48 @@ test('parseStored: tolerant of junk, keeps structurally valid entries; toStored 
 
 test('exportPayload / serializeExport: versioned envelope, entries copied; parseImport round trip', () => {
   const entries = { [INSIDE]: { skill: 0 }, [SWIRE]: { module: SWIRE_ALT } };
-  const p = exportPayload(entries, { now: Date.UTC(2026, 9, 3, 4, 5, 6), name: '我的调配' });
+  const p = exportPayload(entries, { now: Date.UTC(2026, 9, 3, 4, 5, 6) });
+  assert.deepEqual(Object.keys(p).sort(), ['count', 'entries', 'exportedAt', 'kind', 'v'], 'exactly the envelope, no unused field');
   assert.equal(p.kind, LOADOUT_EXPORT_KIND);
   assert.equal(p.v, LOADOUT_VERSION);
   assert.equal(p.count, 2);
   assert.equal(p.exportedAt, '2026-10-03T04:05:06.000Z');
-  assert.equal(p.name, '我的调配');
   assert.deepEqual(p.entries, entries);
   assert.notEqual(p.entries, entries, 'a copy — later edits must not mutate an already-built payload');
   assert.notEqual(p.entries[INSIDE], entries[INSIDE]);
-  assert.equal(exportPayload(entries).name, null, 'no name by default');
   assert.equal(exportPayload(null).count, 0);
 
   const back = parseImport(serializeExport(entries, { now: 0 }));
   assert.equal(back.ok, true);
   assert.deepEqual(back.entries, entries);
-  assert.equal(back.meta.kind, LOADOUT_EXPORT_KIND);
-  assert.equal(back.meta.v, LOADOUT_VERSION);
 });
 
-test('parseImport: accepts the envelope, the stored form, a bare map and JSON text; refuses junk and newer data', () => {
+test('parseImport: accepts the envelope, the stored form, a bare map and text; refuses junk, newer data and hostile keys', () => {
   const entries = { [INSIDE]: { skill: 0 } };
   assert.deepEqual(parseImport(exportPayload(entries)).entries, entries, 'envelope');
   assert.deepEqual(parseImport(toStored(entries)).entries, entries, 'stored { v, entries }');
   assert.deepEqual(parseImport(entries).entries, entries, 'bare map (hand-written / older build)');
-  assert.deepEqual(parseImport(JSON.stringify(exportPayload(entries))).entries, entries, 'JSON text');
-  assert.deepEqual(parseImport(`\n  ${JSON.stringify(entries)}  \n`).entries, entries, 'padded JSON text');
+  assert.deepEqual(parseImport(JSON.stringify(exportPayload(entries))).entries, entries, 'serialised text');
+  assert.deepEqual(parseImport(`\n  ${JSON.stringify(entries)}  \n`).entries, entries, 'padded text');
 
-  for (const junk of ['', '   ', 'not json', '{', 42, null, undefined, [], true]) {
+  for (const junk of ['', '   ', 'not a payload', '{', 42, null, undefined, [], true]) {
     assert.equal(parseImport(junk).ok, false, `${JSON.stringify(junk)} is refused`);
   }
-  assert.equal(parseImport({ v: LOADOUT_VERSION + 1, entries }).ok, false, 'a NEWER payload is refused, never mis-read');
-  assert.match(parseImport({ v: LOADOUT_VERSION + 1, entries }).error, new RegExp(`v${LOADOUT_VERSION}`));
+  const newer = parseImport({ v: LOADOUT_VERSION + 1, entries });
+  assert.equal(newer.ok, false, 'a NEWER payload is refused, never mis-read');
+  assert.match(newer.error, /请先更新游戏/, 'the player is told to update the game');
   assert.equal(parseImport({ kind: 'some.other.tool', entries }).ok, false, "another tool's payload");
   assert.equal(parseImport({ v: LOADOUT_VERSION, entries: {} }).ok, false, 'nothing to import');
   assert.equal(parseImport({ v: LOADOUT_VERSION, entries: { 'bad id': { skill: 0 } } }).ok, false, 'no structurally valid entry');
+  assert.equal(parseImport('x'.repeat(LOADOUT_IMPORT_MAX_BYTES + 1)).ok, false, 'an oversized payload is refused before parsing');
+
+  // hostile keys: JSON.parse keeps `__proto__` as an own key, and assigning it would rewrite an object's prototype
+  const hostile = JSON.parse(`{"entries":{"__proto__":{"skill":0},"constructor":{"skill":0},"prototype":{"skill":0},"${INSIDE}":{"skill":0}}}`);
+  assert.deepEqual(Object.keys(hostile.entries), ['__proto__', 'constructor', 'prototype', INSIDE], 'fixture: parsed as own keys');
+  const safe = parseImport(hostile);
+  assert.deepEqual(safe.entries, { [INSIDE]: { skill: 0 } }, 'only the real chess survives');
+  assert.equal(Object.getPrototypeOf(safe.entries), Object.prototype, 'the entry map keeps a clean prototype');
+  assert.equal({}.skill, undefined, 'Object.prototype was not polluted');
 });
 
 test('applyLoadoutEntries: sanitises against the loaded data and reports what was dropped', () => {
@@ -87,6 +94,20 @@ test('applyLoadoutEntries: sanitises against the loaded data and reports what wa
     const res = applyLoadoutEntries({ [INSIDE]: { skill: 0 }, chess_nope_999: { skill: 0 } }, get);
     assert.deepEqual(res, { applied: 1, dropped: 1 }, 'the unknown chess is dropped, the real one applied');
     assert.deepEqual(loadoutStore.get().entries, { [INSIDE]: { skill: 0 } }, 'the store got the sanitised entries');
+  } finally {
+    setEntries(before);
+  }
+});
+
+test('applyLoadoutEntries: an import that keeps nothing changes nothing (review: it used to wipe the loadout)', () => {
+  setEntries({ [INSIDE]: { skill: 0 } });
+  const before = loadoutStore.get().entries;
+  try {
+    assert.deepEqual(applyLoadoutEntries({ chess_nope_999: { skill: 0 } }, get), { applied: 0, dropped: 1 }, 'every chess unknown');
+    assert.equal(loadoutStore.get().entries, before, 'the current loadout is untouched (not even replaced by an equal one)');
+    const def = IB.skills.find((s) => s.isDefault).index;
+    assert.deepEqual(applyLoadoutEntries({ [INSIDE]: { skill: def } }, get), { applied: 0, dropped: 1 }, 'every choice already the default');
+    assert.equal(loadoutStore.get().entries, before, 'still untouched');
   } finally {
     setEntries(before);
   }
@@ -358,13 +379,10 @@ test('the background layer (.lo__bg: mint glow + grid) keeps position: absolute 
   assert.match(css, /\.lo__bg\s*\{[^}]*position:\s*absolute;/);
   // `.lo > *` (one class, after .lo__bg) used to set position: relative on it, a 0-px flex item that never drew
   assert.ok(!/\.lo\s*>\s*\*\s*\{[^}]*position/.test(css), 'no universal child rule setting position');
-  // [port] the child rule carries BOTH exclusions, inside :where() so its specificity stays one class: .lo__bg keeps
-  // position: absolute, and a modal opened from this screen keeps position: fixed from components.css .modal (which a
-  // later rule of the same specificity would otherwise beat).
-  assert.match(css, /\.lo > :where\(:not\(\.lo__bg, \.modal\)\) \{ position: relative; \}/, 'the other layers still stack above it, at one class of specificity');
+  assert.match(css, /\.lo > :where\(:not\(\.lo__bg\)\) \{ position: relative; \}/, 'the other layers still stack above it, at one class of specificity');
   const after = css.slice(css.indexOf('.lo__bg'));
   for (const m of after.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
-    if (!/\.lo__bg\b/.test(m[1]) || /:not\(\.lo__bg/.test(m[1])) continue;
+    if (!/\.lo__bg\b/.test(m[1]) || /:not\(\.lo__bg\)/.test(m[1])) continue;
     for (const v of m[2].matchAll(/position:\s*([a-z-]+)/g)) assert.equal(v[1], 'absolute', `${m[1].trim()} changes the layer's position`);
   }
 });

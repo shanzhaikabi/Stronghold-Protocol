@@ -32,6 +32,8 @@ const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const isInt = (v) => Number.isInteger(v);
 /** Shape of a chess / bond / item id, shared by the stored parsers (mirrors the server's `isId`). */
 const ID_RE = /^[A-Za-z0-9_\-.:]{1,64}$/;
+/** id keys a parsed payload must never inject into an entry map: `{ "__proto__": … }` would rewrite the prototype. */
+const UNSAFE_IDS = new Set(['__proto__', 'constructor', 'prototype']);
 
 // ---- storage -----------------------------------------------------------------------------------------------------
 
@@ -46,7 +48,7 @@ export function parseStored(raw) {
   if (!src) return out;
   for (const [id, e] of Object.entries(src)) {
     if (Object.keys(out).length >= LOADOUT_LIMITS.entries) break;
-    if (!/^[A-Za-z0-9_\-.:]{1,64}$/.test(id) || !isObj(e)) continue;
+    if (UNSAFE_IDS.has(id) || !/^[A-Za-z0-9_\-.:]{1,64}$/.test(id) || !isObj(e)) continue;
     const x = {};
     if (isInt(e.skill) && e.skill >= 0 && e.skill <= LOADOUT_LIMITS.skillIndex) x.skill = e.skill;
     if (typeof e.module === 'string' && /^[A-Za-z0-9_\-.:]{1,64}$/.test(e.module)) x.module = e.module;
@@ -169,24 +171,25 @@ export const pickedCount = (picks) => pickedIds(picks).size;
 // ---- export / import ----------------------------------------------------------------------------------------------
 
 /**
- * `kind` of an exported loadout envelope. A saved-file / clipboard payload and (later) the blob an account endpoint
- * stores are the SAME object, so 导出 / 导入 / 登录后读取 all share one path: `entries` is exactly
+ * `kind` of an exported loadout envelope: what a downloaded file / a copied payload carries. `entries` is exactly
  * `room.loadout.entries`, i.e. what `setEntries` + the sync already accept.
  */
 export const LOADOUT_EXPORT_KIND = 'stronghold.loadout';
 
+/** A picked file / pasted payload longer than this is refused before parsing (a real payload is a few KB). */
+export const LOADOUT_IMPORT_MAX_BYTES = 256 * 1024;
+
 /**
- * Portable payload of a loadout (the shape a future account API PUTs / GETs as-is).
+ * Portable payload of a loadout, as downloaded / copied by 导出.
  * @param {Record<string, any>} entries `room.loadout.entries`
- * @param {{ now?: number, name?: string|null }} [o]
+ * @param {{ now?: number }} [o]
  */
-export function exportPayload(entries, { now = Date.now(), name = null } = {}) {
+export function exportPayload(entries, { now = Date.now() } = {}) {
   const clean = {};
   for (const [id, e] of Object.entries(entries || {})) if (isObj(e)) clean[id] = { ...e };
   return {
     kind: LOADOUT_EXPORT_KIND,
     v: LOADOUT_VERSION,
-    name: name ? String(name).slice(0, 40) : null,
     exportedAt: new Date(Number.isFinite(now) ? now : Date.now()).toISOString(),
     count: Object.keys(clean).length,
     entries: clean,
@@ -199,34 +202,30 @@ export function serializeExport(entries, opts) {
 }
 
 /**
- * Parse an exported, pasted or account-fetched loadout. Tolerant by design: the envelope, the stored `{ v, entries }`
- * form and a bare `{ [chessId]: { skill, module } }` map all work, as does a JSON string of any of them. Parsing is
- * STRUCTURAL only — the caller still runs `sanitizeEntries` against the loaded data, because a preset from another
- * season may name chess / skills / modules this build does not have.
- * @param {any} input payload object or JSON text
- * @returns {{ ok: true, entries: Record<string, any>, meta: { v: number|null, name: string|null, exportedAt: string|null, kind: string|null } }
- *          | { ok: false, error: string }}
+ * Parse an imported loadout. Tolerant by design: the envelope, the stored `{ v, entries }` form and a bare
+ * `{ [chessId]: { skill, module } }` map all work, as does the serialised text of any of them. Parsing is STRUCTURAL
+ * only — the caller still runs `sanitizeEntries` against the loaded data, because a preset from another season may name
+ * chess / skills / modules this build does not have. `__proto__` / `constructor` keys are skipped (see parseStored).
+ * @param {any} input payload object or serialised text
+ * @returns {{ ok: true, entries: Record<string, any> } | { ok: false, error: string }}
  */
 export function parseImport(input) {
   let raw = input;
   if (typeof raw === 'string') {
+    if (raw.length > LOADOUT_IMPORT_MAX_BYTES) return { ok: false, error: '内容过长，无法导入' };
     const text = raw.trim();
     if (!text) return { ok: false, error: '没有可导入的内容' };
-    try { raw = JSON.parse(text); } catch { return { ok: false, error: '不是合法的 JSON' }; }
+    try { raw = JSON.parse(text); } catch { return { ok: false, error: '无法识别的内容' }; }
   }
   if (!isObj(raw)) return { ok: false, error: '无法识别的格式' };
   const v = isInt(raw.v) ? raw.v : null;
   // a newer envelope may reshuffle fields — refuse instead of silently reading it as something else
-  if (v != null && v > LOADOUT_VERSION) return { ok: false, error: `数据版本 v${v} 高于当前支持的 v${LOADOUT_VERSION}` };
+  if (v != null && v > LOADOUT_VERSION) return { ok: false, error: `这份调配来自更新的版本（v${v}），请先更新游戏` };
   const kind = typeof raw.kind === 'string' ? raw.kind : null;
   if (kind && kind !== LOADOUT_EXPORT_KIND) return { ok: false, error: '这不是干员调配的数据' };
   const entries = parseStored(raw);
   if (!Object.keys(entries).length) return { ok: false, error: '里面没有有效的调配条目' };
-  return {
-    ok: true,
-    entries,
-    meta: { v, name: typeof raw.name === 'string' ? raw.name : null, exportedAt: typeof raw.exportedAt === 'string' ? raw.exportedAt : null, kind },
-  };
+  return { ok: true, entries };
 }
 
 // ---- options & choices ---------------------------------------------------------------------------------------------

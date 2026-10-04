@@ -1921,10 +1921,7 @@
      ],
      "status": "installed-by-kit",
      "rule": "kit-install:PR#71",
-     "drops": [
-      "“闪避下次物理与法术攻击” uses the engine's untyped `shieldHits` (one hit of any type); the random heal uses the blackboard's 201 %, the description says 200 %"
-     ],
-     "note": "kits/freePicks.js installs it (ported from PR #71 c76a81f)"
+     "note": "kits/freePicks.js installs it (the 6 s/50–200 % heal and the one-hit phys+arts 闪避 follow the description; its blackboard says 201 %)"
     }
    ]
   },

@@ -15,7 +15,7 @@
 // Keyboard: Esc closes, ←/→ move through the (filtered) roster when focus is not in the search field.
 
 import { useEffect, useMemo, useRef, useState } from '../../vendor/hooks.module.js';
-import { html, Icon, MicroLabel, Button, TierChip, TextField, Countdown, Spinner, confirmDialog, hasDeadline, Modal } from '../ui/components.js';
+import { html, Icon, MicroLabel, Button, TierChip, TextField, Countdown, Spinner, confirmDialog, hasDeadline, Modal, Fragment } from '../ui/components.js';
 import { Img, RichText, UnitThumb } from '../ui/gameComponents.js';
 import { chessAvatarUrl, chessPortraitUrl, subProfIconUrl, bondIconUrl, moduleTypeIconUrl } from '../ui/assetUrls.js';
 import { chessStatsBlock, traitText, chessTalents } from '../ui/detailPanel.js';
@@ -26,7 +26,7 @@ import { PHASE } from '../../../shared/constants.js';
 import { freePickLevelsOf } from '../../../shared/protocol.js';
 import {
   MODULE_NONE, PROF_ORDER, PROF_NAME, rosterOf, freePickRosterOf, filterRoster, recordsOf, chessOptions, effectiveChoice, setChoice, resetChoice,
-  changedCount, skillLabel, moduleBadge, attrRows, skillTags, serializeExport, parseImport,
+  changedCount, skillLabel, moduleBadge, attrRows, skillTags, serializeExport, parseImport, LOADOUT_IMPORT_MAX_BYTES,
   freePickSlots, setPick, clearPick, pickedIds, pickedCount, FREE_PICK_LEVELS, FREE_PICK_PER_LEVEL,
 } from '../ui/loadoutModel.js';
 import { loadoutStore, openLoadout, closeLoadout, setEntries, setPicks, applyLoadoutEntries } from '../ui/loadoutSync.js';
@@ -40,9 +40,9 @@ const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI'];
 
 // ---- export / import (干员调配 presets) -----------------------------------------------------------------------------
 //
-// The payload is the versioned envelope of ui/loadoutModel.js (exportPayload / parseImport): a downloaded file, a
-// pasted string and — later — the blob an account endpoint stores are the SAME object, so 导出 / 导入 and login-time
-// "load my loadout" all funnel through applyLoadoutEntries (sanitise → persist → room.loadout).
+// The payload is the versioned envelope of ui/loadoutModel.js (exportPayload / parseImport): a downloaded file and a
+// pasted string are the SAME object, so 导出 and 导入 both funnel through applyLoadoutEntries
+// (sanitise → persist → room.loadout). The dialog is a shared Modal rendered next to the overlay, not inside it.
 
 /** Save `text` as a download. Silent no-op when the browser refuses downloads — 复制 stays available. */
 function downloadText(filename, text) {
@@ -576,6 +576,8 @@ function LoadoutScreen({ st }) {
     const f = e.currentTarget.files && e.currentTarget.files[0];
     e.currentTarget.value = ''; // picking the same file twice must fire again
     if (!f) return;
+    // refuse a huge pick before reading it into memory (a real payload is a few KB)
+    if (f.size > LOADOUT_IMPORT_MAX_BYTES) { toast('文件过大，请选择「导出」下载的调配文件', 'error'); return; }
     try { setIo({ mode: 'import', text: await readFileText(f) }); } catch { toast('读取文件失败', 'error'); }
   };
   const ioApply = () => {
@@ -584,9 +586,11 @@ function LoadoutScreen({ st }) {
     const res = parseImport(ioText);
     if (!res.ok) { toast(`导入失败：${res.error}`, 'error'); return; }
     const { applied, dropped } = applyLoadoutEntries(res.entries, getChess);
+    // nothing survived sanitising (unknown chess, or every choice already the default): keep the current loadout
+    if (!applied) { toast('导入失败：这份数据在当前版本没有可用的调配，未做任何改动', 'error'); return; }
     setIo(null);
     toast(dropped
-      ? `已导入 ${applied} 名干员（${dropped} 项当前版本没有，已忽略）`
+      ? `已导入 ${applied} 名干员（另有 ${dropped} 项未导入）`
       : `已导入 ${applied} 名干员的调配`, dropped ? 'warn' : 'success');
   };
 
@@ -630,7 +634,8 @@ function LoadoutScreen({ st }) {
       sel=${freeSel} onBack=${() => setFreeFor(null)} onSelect=${setFreeSel} onAdd=${freeAdd} onRemove=${freeRemove} />`;
   }
 
-  return html`<div class="lo" role="dialog" aria-modal="true" aria-label="干员调配">
+  return html`<${Fragment}>
+  <div class="lo" role="dialog" aria-modal="true" aria-label="干员调配">
     <div class="lo__bg" aria-hidden="true"></div>
     <header class="lo-top">
       <div class="lo-top__left">
@@ -644,8 +649,8 @@ function LoadoutScreen({ st }) {
         ${inMatch && hasDeadline(infoDeadline) ? html`<${Countdown} deadline=${infoDeadline} size="sm" gauge=${false} label="调配截止" class="lo-deadline" />` : null}
         ${syncText ? html`<span class=${cx('lo-sync', syncCls)} role="status">${syncText}</span>` : null}
         <span class="lo-count">已调整 <b class="num">${nChanged}</b><span class="num t-dim">/${roster.length}</span></span>
-        <${Button} variant="ghost" size="sm" data-testid="loadout-export" disabled=${!nChanged} onClick=${openExport} title="把当前调配导出为 JSON（可复制或下载）">导出<//>
-        <${Button} variant="ghost" size="sm" data-testid="loadout-import" disabled=${!ready} onClick=${openImport} title="从 JSON 导入调配（粘贴或选择文件）">导入<//>
+        <${Button} variant="ghost" size="sm" data-testid="loadout-export" disabled=${!nChanged} onClick=${openExport} title="导出当前调配（可复制或下载）">导出<//>
+        <${Button} variant="ghost" size="sm" data-testid="loadout-import" disabled=${!ready} onClick=${openImport} title="导入调配（粘贴或选择文件）">导入<//>
         <${Button} variant="secondary" size="sm" icon="refresh" disabled=${!nChanged} onClick=${resetAll}>全部恢复默认<//>
       </div>
     </header>
@@ -665,7 +670,8 @@ function LoadoutScreen({ st }) {
         <${Detail} m=${m} chess=${base} golden=${golden} entries=${st.entries} onChange=${change} onReset=${resetOne} locked=${locked} />
       </div>
     </main>`}
-    ${io ? html`<${Modal} open=${true} onClose=${() => setIo(null)}
+  </div>
+  ${io ? html`<${Modal} open=${true} onClose=${() => setIo(null)}
       title=${io.mode === 'export' ? '导出干员调配' : '导入干员调配'} micro="OPERATOR LOADOUT"
       actions=${io.mode === 'export'
         ? html`<${Button} variant="ghost" onClick=${() => setIo(null)}>关闭<//>
@@ -676,13 +682,13 @@ function LoadoutScreen({ st }) {
             <${Button} variant="primary" icon="check" data-testid="loadout-io-apply" disabled=${!ioText.trim() || !ready} onClick=${ioApply}>导入<//>`}>
       <p class="lo-io__hint">${io.mode === 'export'
         ? html`共 <b class="num">${nChanged}</b> 名干员已调整。复制或下载这份数据，即可在别的设备或浏览器上导入。`
-        : html`把导出的 JSON 粘贴到下方，或点「选择文件」。导入会<strong>覆盖</strong>当前的 ${nChanged} 名干员调配。`}</p>
+        : html`把导出的内容粘贴到下方，或点「选择文件」。${nChanged ? html`导入会<strong>覆盖</strong>当前的 ${nChanged} 名干员调配。` : null}`}</p>
       <textarea class="lo-io__text" data-testid="loadout-io-text" spellcheck=${false} readOnly=${io.mode === 'export'} value=${ioText}
-        placeholder=${io.mode === 'export' ? '' : '在此粘贴干员调配的 JSON…'}
+        placeholder=${io.mode === 'export' ? '' : '在此粘贴导出的调配内容…'}
         onInput=${(e) => setIo({ mode: io.mode, text: e.currentTarget.value })}></textarea>
       <input type="file" accept=".json,application/json,text/plain" class="lo-io__file" ref=${fileRef} onChange=${ioFile} />
     <//>` : null}
-  </div>`;
+<//>`;
 }
 
 /**

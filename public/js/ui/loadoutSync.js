@@ -58,18 +58,19 @@ export function setPicks(picks) {
 }
 
 /**
- * Apply a parsed entry map: an imported preset, or (later) the loadout an account returns after login. Sanitised
- * against the loaded data first, then persisted and synced like any ordinary edit — so a preset from another build
- * never sends the server an entry it would refuse.
- * @param {Record<string, any>} entries `parseImport(...).entries` (or an account payload's `entries`)
+ * Apply a parsed entry map (an imported preset). Sanitised against the loaded data first, then persisted and synced
+ * like any ordinary edit — so a preset from another build never sends the server an entry it would refuse. An import
+ * that keeps nothing (every chess unknown, or every choice already the default) changes NOTHING: wiping the current
+ * loadout over it would be a loss the player never asked for.
+ * @param {Record<string, any>} entries `parseImport(...).entries`
  * @param {(id: string) => any} lookup chess lookup
- * @returns {{ applied: number, dropped: number }} entries kept / entries the loaded data could not accept
+ * @returns {{ applied: number, dropped: number }} entries kept / entries that were not imported
  */
 export function applyLoadoutEntries(entries, lookup) {
   const asked = Object.keys(entries || {}).length;
   const clean = sanitizeEntries(entries, lookup);
-  setEntries(clean);
   const applied = Object.keys(clean).length;
+  if (applied) setEntries(clean);
   return { applied, dropped: Math.max(0, asked - applied) };
 }
 
