@@ -1125,7 +1125,7 @@ table: `hitSleep` (targets and damages sleeping enemies — "可以攻击沉睡�
 | chainhealer | heal bounces 3× (−25 %, bb chain.*) within 2.5 tiles |
 | healer (流明) | heal ×0.8 (bb heal_scale) beyond 2 tiles |
 | wandermedic | heal + reduce element gauges by 50 % ATK (bb ep_heal_ratio); also targets uninjured allies with gauge |
-| incantationmedic | arts attack; heals the lowest ally in range for 50 % (bb scale) of damage dealt |
+| incantationmedic | arts attack; EVERY damage the unit deals heals the lowest ally in range for 50 % (bb scale) of it — the official trait buff (`vendla_tr` / `reed2_tr` / `titi_tr`) is ON_AFTER_OUTPUT_DAMAGE, so skill and DoT damage heals too (缇缇's 凝固的时光 ticks, 焰影苇草's S2 fireballs while she is disarmed); a skill that triggers it for one named ally says so ("仅对该角色触发…特性") and the damage instance carries that ally (`DamageInfo.traitAlly`) |
 | slower | sluggish 0.8 s on hit (bb sluggish) |
 | bard | no attack; every second heals allies in range 10 % ATK (bb atk_to_hp_recovery_ratio) |
 | craftsman | melee phys (support devices via kit) |

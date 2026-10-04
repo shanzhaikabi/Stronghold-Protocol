@@ -232,6 +232,17 @@ test('缇缇 S2 封护: no attacks; she and the lowest-HP op in range sleep (inv
     approx(dream.at(-1).amount, u.s.atk * t0.damage_atk_scale * bb.talent_scale, 'T1 ×talent_scale');
     assert.ok(h.runUntil(() => !u.skill.active, 30));
     assert.equal(during(h, u, attacks(h, u)).length, 0, 'no attacks during the skill');
+    // …and every 凝固的时光 tick healed a 咒愈师 ally: the official trait buff (`titi_tr`) is ON_AFTER_OUTPUT_DAMAGE, so
+    // the heal follows ANY damage she deals. The sim ran the trait from the attack path only and she does not attack at
+    // all while this skill runs, so those ticks healed nothing (the same hook gap that left 隐德来希 S2 without heals).
+    const dreams = during(h, u, dealt(h, u, (c) => (c.dmg?.tags || []).includes('titiDream')));
+    const incHeals = during(h, u, heals(h, u, (c) => (c.opts?.tags || []).includes('incantation')));
+    assert.ok(dreams.length > 0, `${dreams.length} 凝固的时光 ticks`);
+    assert.equal(incHeals.length, dreams.length, 'one trait heal per tick');
+    for (const c of incHeals) {
+      approx(c.amount, dreams[0].amount * u.profile.healRatio, 'heal = 50 % of the tick');
+      assert.ok([hurt, fine, u].includes(c.target), 'on an ally in her range');
+    }
     assert.ok(!u.findBuff('titi:ward') && !hurt.findBuff('titi:ward'), 'both wake at the end');
     done(h);
   }
