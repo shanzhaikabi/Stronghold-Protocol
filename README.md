@@ -6,6 +6,14 @@
 ![license](https://img.shields.io/badge/code%20license-GPL--3.0--or--later-blue)
 ![node](https://img.shields.io/badge/node-22%20%7C%2024-339933)
 
+## ⚠️ 本 fork 的差异：支持「自选干员 / 自由位置」
+
+本 fork（[shanzhaikabi/Stronghold-Protocol](https://github.com/shanzhaikabi/Stronghold-Protocol)）在上游基础上额外实现了「自选干员 / 自由位置」等改动（自选干员名册与技能 kit、天赋、按槽位的等阶与价格语义、望的棋子经济等）。
+
+- **自选干员相关的 bug / 建议 / 疑问，请提到[本 fork 的 issue 区](https://github.com/shanzhaikabi/Stronghold-Protocol/issues)**（本仓库），不要提到上游 —— 上游没有这套功能，在上游无法复现。
+- **与自选无关的通用问题**（上游同样存在的 bug）仍请提到[上游](https://github.com/sganggs/Stronghold-Protocol/issues)，方便原作者统一处理。
+- 本 fork 的线上服务：https://ak.miaogames.cn
+
 ## 声明
 
 > [!IMPORTANT]

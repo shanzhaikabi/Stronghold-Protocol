@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 自选干员 / 本 fork 改动相关 bug
+    url: https://github.com/shanzhaikabi/Stronghold-Protocol/issues/new
+    about: 自选干员、自由位置等本 fork 独有的功能，请提到本仓库（上游没有这套功能）
+  - name: 上游通用问题
+    url: https://github.com/sganggs/Stronghold-Protocol/issues/new
+    about: 与本 fork 改动无关的通用 bug，请提到上游
